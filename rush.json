@@ -409,11 +409,14 @@
     //   // "versionPolicyName": ""
     // },
     // 
-    // {
-    //   "packageName": "my-controls",
-    //   "projectFolder": "libraries/my-controls",
-    //   "reviewCategory": "production"
-    // },
+    {
+      "packageName": "pyright-server",
+      "projectFolder": "server"
+    },
+    {
+      "packageName": "pyright",
+      "projectFolder": "client"
+    }
     // 
     // {
     //   "packageName": "my-toolchain",
