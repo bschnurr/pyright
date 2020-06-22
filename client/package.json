@@ -182,6 +182,7 @@
         "leven": "^3.1.0",
         "vscode-languageclient": "^7.0.0-next.6",
         "vscode-languageserver": "^7.0.0-next.4",
-        "vscode-uri": "^2.1.2"
+        "vscode-uri": "^2.1.2",
+        "vscode-jsonrpc": "^6.0.0-next.3"
     }
 }

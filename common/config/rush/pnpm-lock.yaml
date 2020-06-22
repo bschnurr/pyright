@@ -27,6 +27,7 @@ dependencies:
   typescript-char: 0.0.0
   vsce: 1.77.0
   vscode: 1.1.37
+  vscode-jsonrpc: 6.0.0-next.3
   vscode-languageclient: 7.0.0-next.6
   vscode-languageserver: 7.0.0-next.4
   vscode-uri: 2.1.2
@@ -6810,6 +6811,7 @@ packages:
       ts-loader: 7.0.5_typescript@3.9.5
       typescript: 3.9.5
       typescript-char: 0.0.0
+      vscode-jsonrpc: 6.0.0-next.3
       vscode-languageserver: 7.0.0-next.4
       vscode-uri: 2.1.2
       webpack: 4.43.0_webpack@4.43.0
@@ -6817,7 +6819,7 @@ packages:
     dev: false
     name: '@rush-temp/pyright-server'
     resolution:
-      integrity: sha512-EdM1+laYPENcTqx4Zi1sZEcDvHC90WeOBrMiE0RUgj5XrjGCmAGQ5b/WqWqgcS1/whTSAyAN1d71Jr7qMvVFMw==
+      integrity: sha512-JTeLd8G4jkHDxlwKZM4UM/sHR5afQY7G2hIJzPbuFMnlK5rZElB6tBS82l00uNFYcDeNZKlSdC/OLOHqwhtBAA==
       tarball: 'file:projects/pyright-server.tgz'
     version: 0.0.0
   'file:projects/pyright.tgz':
@@ -6826,13 +6828,14 @@ packages:
       typescript: 3.9.5
       vsce: 1.77.0
       vscode: 1.1.37
+      vscode-jsonrpc: 6.0.0-next.3
       vscode-languageclient: 7.0.0-next.6
       vscode-languageserver: 7.0.0-next.4
       vscode-uri: 2.1.2
     dev: false
     name: '@rush-temp/pyright'
     resolution:
-      integrity: sha512-S4D8xZfBrjUUs9KeLmPg7OTdqYxElr9BMyJER2smwxZgKBSg+cXgj1zrjoO3lX/UWE3E5Of4USC2DlquIBahvg==
+      integrity: sha512-5A+fgx2JLkVhWa2wzK/DuOq9SXdTj6kiwB0lDvgUSeExsrMb/M0zsaOUSPpIrOhXp5hZ0rYkfIGIfNb6jvqY8Q==
       tarball: 'file:projects/pyright.tgz'
     version: 0.0.0
 registry: ''
@@ -6865,6 +6868,7 @@ specifiers:
   typescript-char: ^0.0.0
   vsce: ^1.76.1
   vscode: ^1.1.37
+  vscode-jsonrpc: ^6.0.0-next.3
   vscode-languageclient: ^7.0.0-next.6
   vscode-languageserver: ^7.0.0-next.4
   vscode-uri: ^2.1.2

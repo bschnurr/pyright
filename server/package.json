@@ -8,11 +8,7 @@
         "start": "npm run start:serverDebug && npm run start:server",
         "start:serverDebug": "npm i && npm run build:serverDebug",
         "start:serverProd": "npm i && npm run build:serverProd",
-        "build": "npm run build:serverProd && npm run build:serverDebug && npm run build:cli",
-        "build:serverDebug": "tsc && npm run installServer",
-        "build:serverProd": "npm run installServer && webpack --config webpack.config-server.js",
-        "installServer": "node ./customInstallServerIntoExtension.js ../client ./package.json ./tsconfig.json ./package-lock.json",
-        "build:cli": "node ./copyTypeshedFallback.js && npm run eslint && webpack --config webpack.config-cli.js",
+        "build": "tsc",
         "eslint": "eslint src/**/*.ts",
         "watch": "tsc --watch",
         "test": "jest --detectOpenHandles --forceExit",
@@ -26,7 +22,8 @@
         "leven": "^3.1.0",
         "typescript-char": "^0.0.0",
         "vscode-languageserver": "^7.0.0-next.4",
-        "vscode-uri": "^2.1.2"
+        "vscode-uri": "^2.1.2",
+        "vscode-jsonrpc": "^6.0.0-next.3"
     },
     "devDependencies": {
         "@types/chalk": "^2.2.0",
