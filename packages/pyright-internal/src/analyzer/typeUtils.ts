@@ -177,6 +177,11 @@ export const enum CanAssignFlags {
     // so TypeVars should match the specified type exactly rather than
     // employing narrowing or widening, and don't strip literals.
     PopulatingExpectedType = 1 << 10,
+
+    // We're comparing type compatibility of two distinct recursive types.
+    // This has the potential of recursing infinitely. This flag allows us
+    // to detect the recursion after the first level of checking.
+    SkipRecursiveTypeCheck = 1 << 11,
 }
 
 export enum ParameterSource {
@@ -1587,7 +1592,13 @@ export function getMembersForClass(classType: ClassType, symbolTable: SymbolTabl
                 if (symbol.isClassMember() || (includeInstanceVars && symbol.isInstanceMember())) {
                     if (!isClassTypedDict || !isTypedDictMemberAccessedThroughIndex(symbol)) {
                         if (!symbol.isInitVar()) {
-                            if (!symbolTable.get(name)) {
+                            const existingSymbol = symbolTable.get(name);
+
+                            if (!existingSymbol) {
+                                symbolTable.set(name, symbol);
+                            } else if (!existingSymbol.hasTypedDeclarations() && symbol.hasTypedDeclarations()) {
+                                // If the existing symbol is unannotated but a parent class
+                                // has an annotation for the symbol, use the parent type instead.
                                 symbolTable.set(name, symbol);
                             }
                         }
@@ -1604,7 +1615,13 @@ export function getMembersForClass(classType: ClassType, symbolTable: SymbolTabl
             for (const mroClass of metaclass.details.mro) {
                 if (isInstantiableClass(mroClass)) {
                     mroClass.details.fields.forEach((symbol, name) => {
-                        if (!symbolTable.get(name)) {
+                        const existingSymbol = symbolTable.get(name);
+
+                        if (!existingSymbol) {
+                            symbolTable.set(name, symbol);
+                        } else if (!existingSymbol.hasTypedDeclarations() && symbol.hasTypedDeclarations()) {
+                            // If the existing symbol is unannotated but a parent class
+                            // has an annotation for the symbol, use the parent type instead.
                             symbolTable.set(name, symbol);
                         }
                     });

@@ -27,6 +27,7 @@ import {
     AnyType,
     ClassType,
     ClassTypeFlags,
+    combineTypes,
     FunctionParameter,
     FunctionType,
     FunctionTypeFlags,
@@ -195,13 +196,21 @@ export function createNamedTupleType(
                         entryTypes.push(entryType);
                     }
                 });
-            } else if (entriesArg.valueExpression && entriesArg.valueExpression.nodeType === ParseNodeType.List) {
+            } else if (
+                entriesArg.valueExpression?.nodeType === ParseNodeType.List ||
+                entriesArg.valueExpression?.nodeType === ParseNodeType.Tuple
+            ) {
                 const entryList = entriesArg.valueExpression;
                 const entryMap = new Map<string, string>();
-                const firstParamWithDefaultIndex =
-                    defaultArgCount === undefined ? 0 : Math.max(0, entryList.entries.length - defaultArgCount);
+                const entryExpressions =
+                    entriesArg.valueExpression?.nodeType === ParseNodeType.List
+                        ? entriesArg.valueExpression.entries
+                        : entriesArg.valueExpression.expressions;
 
-                entryList.entries.forEach((entry, index) => {
+                const firstParamWithDefaultIndex =
+                    defaultArgCount === undefined ? 0 : Math.max(0, entryExpressions.length - defaultArgCount);
+
+                entryExpressions.forEach((entry, index) => {
                     let entryTypeNode: ExpressionNode | undefined;
                     let entryType: Type | undefined;
                     let entryNameNode: ExpressionNode | undefined;
@@ -385,13 +394,20 @@ export function updateNamedTupleBaseClass(classType: ClassType, typeArgs: Type[]
         return;
     }
 
-    const updatedTupleClass = specializeTupleClass(
-        typedTupleClass,
-        typeArgs.map((t) => {
-            return { type: t, isUnbounded: false };
-        }),
-        isTypeArgumentExplicit
-    );
+    const tupleTypeArgs: TupleTypeArgument[] = [];
+
+    if (!isTypeArgumentExplicit) {
+        tupleTypeArgs.push({
+            type: typeArgs.length > 0 ? combineTypes(typeArgs) : UnknownType.create(),
+            isUnbounded: true,
+        });
+    } else {
+        typeArgs.forEach((t) => {
+            tupleTypeArgs.push({ type: t, isUnbounded: false });
+        });
+    }
+
+    const updatedTupleClass = specializeTupleClass(typedTupleClass, tupleTypeArgs, isTypeArgumentExplicit);
 
     // Create a copy of the NamedTuple class that overrides the normal MRO
     // entries with a version of Tuple that is specialized appropriately.

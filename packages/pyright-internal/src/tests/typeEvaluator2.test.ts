@@ -54,6 +54,12 @@ test('CallbackProtocol7', () => {
     TestUtils.validateResults(analysisResults, 0);
 });
 
+test('CallbackProtocol8', () => {
+    const analysisResults = TestUtils.typeAnalyzeSampleFiles(['callbackProtocol8.py']);
+
+    TestUtils.validateResults(analysisResults, 0);
+});
+
 test('Assignment1', () => {
     const analysisResults = TestUtils.typeAnalyzeSampleFiles(['assignment1.py']);
 
@@ -785,11 +791,11 @@ test('GenericTypes71', () => {
 
     configOptions.diagnosticRuleSet.strictParameterNoneValue = false;
     let analysisResults = TestUtils.typeAnalyzeSampleFiles(['genericTypes71.py'], configOptions);
-    TestUtils.validateResults(analysisResults, 3);
+    TestUtils.validateResults(analysisResults, 4);
 
     configOptions.diagnosticRuleSet.strictParameterNoneValue = true;
     analysisResults = TestUtils.typeAnalyzeSampleFiles(['genericTypes71.py'], configOptions);
-    TestUtils.validateResults(analysisResults, 4);
+    TestUtils.validateResults(analysisResults, 5);
 });
 
 test('GenericTypes72', () => {
@@ -842,6 +848,12 @@ test('GenericTypes79', () => {
 
 test('GenericTypes80', () => {
     const analysisResults = TestUtils.typeAnalyzeSampleFiles(['genericTypes80.py']);
+
+    TestUtils.validateResults(analysisResults, 0);
+});
+
+test('GenericTypes81', () => {
+    const analysisResults = TestUtils.typeAnalyzeSampleFiles(['genericTypes81.py']);
 
     TestUtils.validateResults(analysisResults, 0);
 });
