@@ -32,7 +32,7 @@
 
 helper.verifyHover('markdown', {
     marker1: '```python\n(class)\nC1(name: str = "hello")\n```\n---\n\\_\\_init\\_\\_ docs',
-    marker2: '```python\n(type alias) unionType: Type[C1] | Type[C2]\n```',
+    marker2: '```python\n(type alias)\nunionType: Type[C1] | Type[C2]\n```',
     marker3: '```python\n(class)\nG(value: int)\n```',
     marker4: '```python\n(class)\nG(value: int)\n```',
     marker5: '```python\n(class)\nC1(name: str = "hello")\n```\n---\n\\_\\_init\\_\\_ docs',

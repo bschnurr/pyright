@@ -76,8 +76,8 @@ helper.verifyHover('markdown', {
     a_inner_docs: '```python\n(class)\nInner()\n```\n---\nA.Inner docs',
     func1_docs: '```python\n(function) func1() -> bool\n```\n---\nfunc1 docs',
     func2_docs: '```python\n(function) func2() -> bool\n```\n---\nfunc2 docs',
-    inner_method1_docs: '```python\n(method) method1() -> bool\n```\n---\nA.Inner.method1 docs',
-    method1_docs: '```python\n(method) method1() -> bool\n```\n---\nA.method1 docs',
-    module1_docs: '```python\n(module) module1\n```\n---\nmodule1 docs',
-    module2_docs: '```python\n(module) module2\n```\n---\nmodule2 docs',
+    inner_method1_docs: '```python\n(method)\nmethod1() -> bool\n```\n---\nA.Inner.method1 docs',
+    method1_docs: '```python\n(method)\nmethod1() -> bool\n```\n---\nA.method1 docs',
+    module1_docs: '```python\n(module)\nmodule1\n```\n---\nmodule1 docs',
+    module2_docs: '```python\n(module)\nmodule2\n```\n---\nmodule2 docs',
 });

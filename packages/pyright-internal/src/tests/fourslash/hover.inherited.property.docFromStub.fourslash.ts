@@ -86,6 +86,6 @@
 ////         ...
 
 helper.verifyHover('markdown', {
-    getter_docs: '```python\n(property) length: int\n```\n---\nread property doc',
-    setter_docs: '```python\n(property) length: int\n```\n---\nsetter property doc',
+    getter_docs: '```python\n(property)\nlength: int\n```\n---\nread property doc',
+    setter_docs: '```python\n(property)\nlength: int\n```\n---\nsetter property doc',
 });
