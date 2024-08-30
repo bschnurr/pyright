@@ -91,7 +91,13 @@ import {
     TestCancellationToken,
 } from './fourSlashTypes';
 import { TestFeatures, TestLanguageService } from './testLanguageService';
-import { createVfsInfoFromFourSlashData, getMarkerByName, getMarkerName, getMarkerNames } from './testStateUtils';
+import {
+    createVfsInfoFromFourSlashData,
+    getMarkerByName,
+    getMarkerName,
+    getMarkerNames,
+    getRangeByMarkerName,
+} from './testStateUtils';
 import { verifyWorkspaceEdit } from './workspaceEditTestUtils';
 
 export interface TextChange {
@@ -424,8 +430,7 @@ export class TestState {
     }
 
     getRangeByMarkerName(markerName: string): Range | undefined {
-        const marker = this.getMarkerByName(markerName);
-        return this.getRanges().find((r) => r.marker === marker);
+        return getRangeByMarkerName(this.testData, markerName);
     }
 
     goToBOF() {
@@ -1949,6 +1954,7 @@ export class TestState {
             backgroundAnalysisProgramFactory,
             configOptions,
             fileSystem: this.fs,
+            libraryReanalysisTimeProvider: () => 0,
         });
 
         // directly set files to track rather than using fileSpec from config
