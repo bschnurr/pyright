@@ -172,6 +172,7 @@ async function processArgs(): Promise<ExitStatus> {
         { name: 'version', type: Boolean },
         { name: 'warnings', type: Boolean },
         { name: 'watch', alias: 'w', type: Boolean },
+        { name: 'printDebug', type: String },
     ];
 
     let args: CommandLineOptions;
@@ -512,6 +513,22 @@ async function runSingleThreaded(
             }
             exitStatus.resolve(ExitStatus.NoErrors);
             return;
+        }
+
+        if (args.printFileInfo) {
+            try {
+                const filePath = combinePaths(process.cwd(), normalizePath(args.files[0]));
+                const uri = Uri.file(filePath, service.serviceProvider);
+                const params: [Uri, string] = [uri, args.printFileInfo];
+                const output = service.printFileDebugInfo(uri, params, cancellationNone);
+                console.log(output.join('\n'));
+            } catch (err) {
+                let errMessage = '';
+                if (err instanceof Error) {
+                    errMessage = err.message;
+                }
+                console.error(`Error occurred when printing node debug info: ${errMessage}`);
+            }
         }
 
         if (!args.outputjson) {

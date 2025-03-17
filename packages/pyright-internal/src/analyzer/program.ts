@@ -11,6 +11,7 @@
 import { CancellationToken } from 'vscode-languageserver';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { DumpFileDebugInfo } from '../commands/dumpFileDebugInfoCommand';
 import { OperationCanceledException, throwIfCancellationRequested } from '../common/cancellationUtils';
 import { ConfigOptions, ExecutionEnvironment, matchFileSpecs } from '../common/configOptions';
 import { ConsoleInterface, StandardConsole } from '../common/console';
@@ -878,6 +879,25 @@ export class Program {
 
         const evaluator = this._evaluator || this._createNewEvaluator();
         return evaluator.printType(type, options);
+    }
+
+    printFileDebugInfo(fileUri: Uri, args: any[], token: CancellationToken) {
+        const evaluator = this._evaluator || this._createNewEvaluator();
+        throwIfCancellationRequested(token);
+        const sourceFileInfo = this.getSourceFileInfo(fileUri);
+        if (!sourceFileInfo) {
+            return [];
+        }
+        return this._runEvaluatorWithCancellationToken(token, () => {
+            this._bindFile(sourceFileInfo);
+            const sourceFile = sourceFileInfo.sourceFile;
+            const parseResults = sourceFile.getParseResults();
+            if (!parseResults) {
+                return [];
+            }
+            const fileDebugInfo = new DumpFileDebugInfo();
+            return fileDebugInfo.dump(parseResults, fileUri, args, evaluator, token);
+        });
     }
 
     getTextOnRange(fileUri: Uri, range: Range, token: CancellationToken): string | undefined {
