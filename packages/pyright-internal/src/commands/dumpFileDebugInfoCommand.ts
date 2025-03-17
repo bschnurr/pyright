@@ -121,7 +121,6 @@ import {
 } from '../parser/parseNodes';
 import { ParseFileResults } from '../parser/parser';
 import { KeywordType, NewLineType, OperatorType, StringTokenFlags, Token, TokenType } from '../parser/tokenizerTypes';
-import { Workspace } from '../workspaceFactory';
 import { ServerCommand } from './commandController';
 
 export class DumpFileDebugInfoCommand implements ServerCommand {
@@ -131,115 +130,119 @@ export class DumpFileDebugInfoCommand implements ServerCommand {
         throwIfCancellationRequested(token);
 
         if (!params.arguments || params.arguments.length < 2) {
-            return [];
+            return 'Invalid arguments';
         }
 
         const fileUri = Uri.parse(params.arguments[0] as string, this._ls.serviceProvider);
         const workspace = await this._ls.getWorkspaceForFile(fileUri);
+        const parseResults = workspace.service.getParseResults(workspace.service.fs.realCasePath(fileUri));
+        const evaluator = workspace.service.backgroundAnalysisProgram.program.evaluator;
+        if (!evaluator) {
+            return 'Evaluator not available';
+        }
+        const output = new DumpFileDebugInfo().dump(parseResults, fileUri, params.arguments, evaluator, token); // updated to pass evaluator and console
 
-        return new DumpFileDebugInfo().dump(workspace, fileUri, params.arguments, token);
+        workspace.service.serviceProvider.console().info(output.join('\n'));
     }
 }
 
 export class DumpFileDebugInfo {
-    dump(workspace: Workspace, fileUri: Uri, args: any[], token: CancellationToken) {
-        return workspace.service.run((p) => {
-            const kind = args[1];
-
-            const parseResults = workspace.service.getParseResults(workspace.service.fs.realCasePath(fileUri));
-            if (!parseResults) {
-                return [];
-            }
-
-            const output: string[] = [];
-            const collectingConsole = {
-                info: (m: string) => {
-                    output.push(m);
-                },
-                log: (m: string) => {
-                    output.push(m);
-                },
-                error: (m: string) => {
-                    output.push(m);
-                },
-                warn: (m: string) => {
-                    output.push(m);
-                },
-            };
-
-            collectingConsole.info(`* Dump debug info for '${fileUri.toUserVisibleString()}'`);
-
-            switch (kind) {
-                case 'tokens': {
-                    collectingConsole.info(`* Token info (${parseResults.tokenizerOutput.tokens.count} tokens)`);
-
-                    for (let i = 0; i < parseResults.tokenizerOutput.tokens.count; i++) {
-                        const token = parseResults.tokenizerOutput.tokens.getItemAt(i);
-                        collectingConsole.info(
-                            `[${i}] ${getTokenString(fileUri, token, parseResults.tokenizerOutput.lines)}`
-                        );
-                    }
-                    break;
-                }
-                case 'nodes': {
-                    collectingConsole.info(`* Node info`);
-
-                    const dumper = new TreeDumper(fileUri, parseResults.tokenizerOutput.lines);
-                    dumper.walk(parseResults.parserOutput.parseTree);
-
-                    collectingConsole.info(dumper.output);
-                    break;
-                }
-                case 'types': {
-                    const evaluator = p.evaluator;
-                    const start = args[2] as number;
-                    const end = args[3] as number;
-                    if (!evaluator || !start || !end) {
-                        return [];
-                    }
-
-                    collectingConsole.info(`* Type info`);
-                    collectingConsole.info(`${getTypeEvaluatorString(fileUri, evaluator, parseResults, start, end)}`);
-                    break;
-                }
-                case 'cachedtypes': {
-                    const evaluator = p.evaluator;
-                    const start = args[2] as number;
-                    const end = args[3] as number;
-                    if (!evaluator || !start || !end) {
-                        return [];
-                    }
-
-                    collectingConsole.info(`* Cached Type info`);
-                    collectingConsole.info(
-                        `${getTypeEvaluatorString(fileUri, evaluator, parseResults, start, end, true)}`
-                    );
-                    break;
-                }
-
-                case 'codeflowgraph': {
-                    const evaluator = p.evaluator;
-                    const offset = args[2] as number;
-                    if (!evaluator || offset === undefined) {
-                        return [];
-                    }
-                    const node = findNodeByOffset(parseResults.parserOutput.parseTree, offset);
-                    if (!node) {
-                        return [];
-                    }
-                    const flowNode = getFlowNode(node);
-                    if (!flowNode) {
-                        return [];
-                    }
-                    collectingConsole.info(`* CodeFlow Graph`);
-                    evaluator.printControlFlowGraph(flowNode, undefined, 'Dump CodeFlowGraph', collectingConsole);
-                }
-            }
-
-            // Print all of the output in one message so the trace log is smaller.
-            workspace.service.serviceProvider.console().info(output.join('\n'));
+    dump(
+        parseResults: ParseFileResults | undefined,
+        fileUri: Uri,
+        args: any[],
+        evaluator: TypeEvaluator,
+        token: CancellationToken
+    ) {
+        throwIfCancellationRequested(token);
+        if (!parseResults) {
             return [];
-        }, token);
+        }
+
+        const kind = args[1];
+
+        const output: string[] = [];
+        const collectingConsole = {
+            info: (m: string) => {
+                output.push(m);
+            },
+            log: (m: string) => {
+                output.push(m);
+            },
+            error: (m: string) => {
+                output.push(m);
+            },
+            warn: (m: string) => {
+                output.push(m);
+            },
+        };
+
+        collectingConsole.info(`* Dump debug info for '${fileUri.toUserVisibleString()}'`);
+
+        switch (kind) {
+            case 'tokens': {
+                collectingConsole.info(`* Token info (${parseResults.tokenizerOutput.tokens.count} tokens)`);
+
+                for (let i = 0; i < parseResults.tokenizerOutput.tokens.count; i++) {
+                    const token = parseResults.tokenizerOutput.tokens.getItemAt(i);
+                    collectingConsole.info(
+                        `[${i}] ${getTokenString(fileUri, token, parseResults.tokenizerOutput.lines)}`
+                    );
+                }
+                break;
+            }
+            case 'nodes': {
+                collectingConsole.info(`* Node info`);
+
+                const dumper = new TreeDumper(fileUri, parseResults.tokenizerOutput.lines);
+                dumper.walk(parseResults.parserOutput.parseTree);
+
+                collectingConsole.info(dumper.output);
+                break;
+            }
+            case 'types': {
+                const start = args[2] as number;
+                const end = args[3] as number;
+                if (!evaluator || !start || !end) {
+                    return [];
+                }
+
+                collectingConsole.info(`* Type info`);
+                collectingConsole.info(`${getTypeEvaluatorString(fileUri, evaluator, parseResults, start, end)}`);
+                break;
+            }
+            case 'cachedtypes': {
+                const start = args[2] as number;
+                const end = args[3] as number;
+                if (!evaluator || !start || !end) {
+                    return [];
+                }
+
+                collectingConsole.info(`* Cached Type info`);
+                collectingConsole.info(`${getTypeEvaluatorString(fileUri, evaluator, parseResults, start, end, true)}`);
+                break;
+            }
+
+            case 'codeflowgraph': {
+                const offset = args[2] as number;
+                if (!evaluator || offset === undefined) {
+                    return [];
+                }
+                const node = findNodeByOffset(parseResults.parserOutput.parseTree, offset);
+                if (!node) {
+                    return [];
+                }
+                const flowNode = getFlowNode(node);
+                if (!flowNode) {
+                    return [];
+                }
+                collectingConsole.info(`* CodeFlow Graph`);
+                evaluator.printControlFlowGraph(flowNode, undefined, 'Dump CodeFlowGraph', collectingConsole);
+                break;
+            }
+        }
+
+        return output;
     }
 }
 

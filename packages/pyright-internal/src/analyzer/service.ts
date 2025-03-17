@@ -409,6 +409,10 @@ export class AnalyzerService {
         this._program.printDependencies(this._executionRootUri, verbose);
     }
 
+    printFileDebugInfo(fileUri: Uri, args: any[], token: CancellationToken) {
+        return this._program.printFileDebugInfo(fileUri, args, token);
+    }
+
     analyzeFile(fileUri: Uri, token: CancellationToken): Promise<boolean> {
         return this._backgroundAnalysisProgram.analyzeFile(fileUri, token);
     }

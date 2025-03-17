@@ -8,8 +8,9 @@
             "program": "${workspaceRoot}/packages/pyright/index.js",
             "preLaunchTask": "npm: build:cli:dev",
             "args": [
-                "--verifytypes",
-                "pandas.core.reshape.concat",
+                "abstractMethodInvocation.py",
+                "--printDebug",
+                "nodes",
             ],
             "internalConsoleOptions": "openOnSessionStart",
             "outFiles": [
