@@ -122,6 +122,40 @@ export function typeAnalyzeSampleFiles(
     return results;
 }
 
+export function typeAnalyzeSampleFilesWithoutDispose(
+    fileNames: string[],
+    configOptions = new ConfigOptions(Uri.empty()),
+    console?: ConsoleWithLogLevel
+): FileAnalysisResult[] {
+    // Always enable "test mode".
+    configOptions.internalTestMode = true;
+
+    const tempFile = new RealTempFile();
+    const fs = createFromRealFileSystem(tempFile);
+    const serviceProvider = createServiceProvider(fs, console || new NullConsole(), tempFile);
+    const importResolver = new ImportResolver(serviceProvider, configOptions, new FullAccessHost(serviceProvider));
+
+    const program = new Program(importResolver, configOptions, serviceProvider);
+    const fileUris = fileNames.map((name) => UriEx.file(resolveSampleFilePath(name)));
+    program.setTrackedFiles(fileUris);
+
+    // Set a "pre-check callback" so we can evaluate the types of each NameNode
+    // prior to checking the full document. This will exercise the contextual
+    // evaluation logic.
+    program.setPreCheckCallback((parserOutput: ParserOutput, evaluator: TypeEvaluator) => {
+        const nameTypeWalker = new NameTypeWalker(evaluator);
+        nameTypeWalker.walk(parserOutput.parseTree);
+    });
+
+    const results = getAnalysisResults(program, fileUris, configOptions);
+
+    // DO NOT dispose - this is intentional for memory leak testing
+    // program.dispose();
+    // serviceProvider.dispose();
+
+    return results;
+}
+
 export function getAnalysisResults(
     program: Program,
     fileUris: Uri[],
