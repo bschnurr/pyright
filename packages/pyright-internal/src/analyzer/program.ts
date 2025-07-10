@@ -201,6 +201,13 @@ export class Program {
 
     dispose() {
         this._cacheManager.unregisterCacheOwner(this);
+
+        // Dispose the type evaluator to help with garbage collection
+        if (this._evaluator) {
+            this._evaluator.disposeEvaluator();
+            this._evaluator = undefined;
+        }
+
         this._disposed = true;
     }
 

@@ -232,6 +232,12 @@ export class SpeculativeTypeTracker {
         return undefined;
     }
 
+    dispose() {
+        this._speculativeContextStack.length = 0;
+        this._speculativeTypeCache.clear();
+        this._activeDependentTypes.length = 0;
+    }
+
     // Determines whether a cache entry matches the current set of
     // active dependent types. If not, the cache entry can't be used
     // in the current context.

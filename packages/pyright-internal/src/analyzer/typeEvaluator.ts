@@ -708,6 +708,23 @@ export function createTypeEvaluator(
         typeCache = new Map<number, TypeCacheEntry>();
         effectiveTypeCache = new Map<number, Map<string, EffectiveTypeResult>>();
         expectedTypeCache = new Map<number, Type>();
+
+        // Clear additional data structures that could hold circular references
+        deferredClassCompletions.length = 0;
+        symbolResolutionStack.length = 0;
+        asymmetricAccessorAssignmentCache.clear();
+        speculativeTypeTracker.dispose();
+        suppressedNodeStack.length = 0;
+        assignClassToSelfStack.length = 0;
+        returnTypeInferenceContextStack.length = 0;
+        returnTypeInferenceTypeCache = undefined;
+        signatureTrackerStack.length = 0;
+        prefetched = undefined;
+
+        // Clear additional state variables
+        cancellationToken = undefined;
+        printExpressionSpaceCount = 0;
+        incompleteGenCount = 0;
     }
 
     function readTypeCacheEntry(node: ParseNode) {

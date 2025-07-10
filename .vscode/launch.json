@@ -96,6 +96,7 @@
             "name": "Pyright jest current file",
             "type": "node",
             "request": "launch",
+            "runtimeArgs": ["--expose-gc"],
             "args": [
                 "${fileBasenameNoExtension}",
                 "--runInBand",
