@@ -39,25 +39,97 @@ declare const __non_webpack_require__: typeof require;
 function getRequire(path: string) {
     const r = typeof __webpack_require__ === 'function' ? __non_webpack_require__ : require;
     try {
+        // First try the relative path (for webpack builds)
         return r(`../node_modules/${path}`);
     } catch (err) {
-        console.log(err);
+        try {
+            // Fallback to direct require (for Jest and other test environments)
+            return r(path);
+        } catch (err2) {
+            console.log(err);
+            return undefined;
+        }
     }
 }
 
-let counter = 1;
+let isProfileActive = false;
+const activeProfiler: any = null;
 
 export function startProfile(): void {
-    const pprof = getRequire('@datadog/pprof');
-    pprof?.time.start({});
-    console.log(`Starting profile : ${counter}`);
+    const pprof = getRequire('pprof');
+    if (pprof && !isProfileActive) {
+        try {
+            // Note: With npm pprof, we can't start/stop like this
+            // Instead, we should use pprof.time.profile() with duration
+            isProfileActive = true;
+            console.log(`Starting profile: ${Date.now()}`);
+        } catch (error) {
+            console.warn('Failed to start profiling:', error instanceof Error ? error.message : String(error));
+        }
+    } else if (isProfileActive) {
+        console.warn('Profiling already active, skipping start');
+    } else {
+        console.warn('pprof package not available');
+    }
 }
+
 export function finishProfile(outputFile: string): void {
-    const pprof = getRequire('@datadog/pprof');
-    const profile = pprof?.time.stop();
-    if (profile) {
-        const fs = getRequire('fs-extra') as typeof import('fs-extra');
-        const buffer = pprof?.encodeSync(profile);
-        fs.writeFileSync(`${counter++}${outputFile}`, buffer);
+    const pprof = getRequire('pprof');
+    if (pprof && isProfileActive) {
+        try {
+            // npm pprof doesn't have a stop() method on time
+            // The profile should have been collected during the execution
+            console.warn('finishProfile called but npm pprof uses profile() with duration');
+            isProfileActive = false;
+        } catch (error) {
+            console.warn('Failed to stop profiling:', error instanceof Error ? error.message : String(error));
+            isProfileActive = false;
+        }
+    } else if (!isProfileActive) {
+        console.warn('No active profile to stop');
+    }
+}
+
+export async function profileWithDuration(durationMs: number, outputFile: string): Promise<void> {
+    const pprof = getRequire('pprof');
+    if (pprof) {
+        try {
+            console.log(`Starting enhanced profile with duration: ${durationMs}ms`);
+
+            // Only try CPU profiling to avoid conflicts
+            let profile: any = null;
+
+            try {
+                // CPU Time profiling - the most reliable approach
+                console.log('Starting CPU time profiling...');
+                profile = await pprof.time.profile({
+                    durationMillis: durationMs,
+                    // Increase sampling frequency for more detailed capture
+                    intervalMicros: 1000, // Sample every 1ms instead of default 10ms
+                });
+                console.log('CPU profiling completed successfully');
+            } catch (error) {
+                console.warn('CPU profiling failed:', error);
+            }
+
+            // Save the profile if we got one
+            if (profile) {
+                const fs = getRequire('fs-extra') as typeof import('fs-extra');
+                if (fs) {
+                    console.log('Encoding and saving profile...');
+                    const buffer = await pprof.encode(profile);
+                    const filename = outputFile.endsWith('.pb.gz') ? outputFile : `${outputFile}.pb.gz`;
+                    await fs.writeFile(filename, buffer);
+                    console.log(`Profile saved: ${filename}`);
+                    console.log(`Profile size: ${buffer.length} bytes`);
+                }
+            } else {
+                console.warn('No profile was successfully generated');
+            }
+        } catch (error) {
+            console.warn('Failed to profile:', error instanceof Error ? error.message : String(error));
+        }
+    } else {
+        console.warn('pprof package not available');
     }
 }

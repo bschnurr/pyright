@@ -18,7 +18,11 @@
         "fix:eslint": "eslint --fix .",
         "check:prettier": "prettier -c .",
         "fix:prettier": "prettier --write .",
-        "typecheck": "npx lerna exec --stream --no-bail --ignore=pyright -- tsc --noEmit"
+        "typecheck": "npx lerna exec --stream --no-bail --ignore=pyright -- tsc --noEmit",
+        "test:memory": "cd packages/pyright-internal && npm run test:memory",
+        "test:memory:report": "cd packages/pyright-internal && npm run test:memory:report",
+        "test:memory:parser": "cd packages/pyright-internal && npm run test:memory:parser",
+        "test:memory:cli": "cd packages/pyright-internal && npm run test:memory:cli"
     },
     "devDependencies": {
         "@types/glob": "^8.1.0",
