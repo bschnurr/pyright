@@ -232,7 +232,6 @@ import {
     ClassTypeFlags,
     combineTypes,
     DataClassBehaviors,
-    EnumLiteral,
     findSubtype,
     FunctionParam,
     FunctionParamFlags,
@@ -269,7 +268,6 @@ import {
     ParamSpecType,
     removeFromUnion,
     removeUnbound,
-    SentinelLiteral,
     TupleTypeArg,
     Type,
     TypeAliasInfo,
@@ -1973,7 +1971,6 @@ export function createTypeEvaluator(
 
         return convertToInstance(annotationType);
     }
-
 
     // If a type contains a TypeGuard or TypeIs, convert it to a bool.
     function stripTypeGuard(type: Type): Type {
