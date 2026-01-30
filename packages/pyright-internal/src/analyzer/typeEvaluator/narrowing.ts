@@ -29,9 +29,10 @@ import {
     isUnion,
     isUnknown,
     Type,
+    TypeBase,
     UnionType,
 } from '../types';
-import { isIncompleteUnknown, isLiteralType, mapSubtypes } from '../typeUtils';
+import { getTypeCondition, isIncompleteUnknown, isLiteralType, mapSubtypes } from '../typeUtils';
 
 export interface NarrowingContext {
     evaluator: TypeEvaluator;
@@ -45,6 +46,16 @@ export interface NarrowTypeBasedOnAssignmentContext {
     // This is intentionally a small surface area: the evaluator owns assignability
     // rules (and recursion limits, diag addenda, etc.) and passes a minimal adapter.
     assignType: (destType: Type, srcType: Type) => boolean;
+}
+
+export interface StripTypeGuardContext {
+    getBoolType: () => Type;
+}
+
+export interface StripLiteralValueContext {
+    // Returns an instance type for `str` used when lowering `LiteralString`.
+    // If undefined, `LiteralString` is left as-is.
+    getStrInstanceTypeForLiteralString: () => Type | undefined;
 }
 
 // Conceptual narrowing entrypoint.
@@ -172,4 +183,46 @@ export function narrowTypeBasedOnAssignment(
     }
 
     return { type: narrowedType, isIncomplete: assignedTypeResult.isIncomplete };
+}
+
+export function stripTypeGuard(ctx: StripTypeGuardContext, type: Type): Type {
+    return mapSubtypes(type, (subtype) => {
+        if (isClassInstance(subtype) && ClassType.isBuiltIn(subtype, ['TypeGuard', 'TypeIs'])) {
+            return ctx.getBoolType();
+        }
+
+        return subtype;
+    });
+}
+
+export function stripLiteralValue(ctx: StripLiteralValueContext, type: Type): Type {
+    // Handle the not-uncommon case where the type is a union that consists
+    // only of literal values.
+    if (isUnion(type) && type.priv.subtypes.length > 0) {
+        if (
+            type.priv.literalInstances.literalStrMap?.size === type.priv.subtypes.length ||
+            type.priv.literalInstances.literalIntMap?.size === type.priv.subtypes.length ||
+            type.priv.literalInstances.literalEnumMap?.size === type.priv.subtypes.length
+        ) {
+            return stripLiteralValue(ctx, type.priv.subtypes[0]);
+        }
+    }
+
+    return mapSubtypes(type, (subtype) => {
+        if (isClass(subtype)) {
+            if (subtype.priv.literalValue !== undefined) {
+                subtype = ClassType.cloneWithLiteral(subtype, /* value */ undefined);
+            }
+
+            if (ClassType.isBuiltIn(subtype, 'LiteralString')) {
+                // Handle "LiteralString" specially.
+                const strInstance = ctx.getStrInstanceTypeForLiteralString();
+                if (strInstance && isClass(strInstance)) {
+                    return TypeBase.cloneForCondition(strInstance, getTypeCondition(subtype));
+                }
+            }
+        }
+
+        return subtype;
+    });
 }

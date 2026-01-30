@@ -1893,36 +1893,15 @@ export function createTypeEvaluator(
     }
 
     function stripLiteralValue(type: Type): Type {
-        // Handle the not-uncommon case where the type is a union that consists
-        // only of literal values.
-        if (isUnion(type) && type.priv.subtypes.length > 0) {
-            if (
-                type.priv.literalInstances.literalStrMap?.size === type.priv.subtypes.length ||
-                type.priv.literalInstances.literalIntMap?.size === type.priv.subtypes.length ||
-                type.priv.literalInstances.literalEnumMap?.size === type.priv.subtypes.length
-            ) {
-                return stripLiteralValue(type.priv.subtypes[0]);
-            }
-        }
-
-        return mapSubtypes(type, (subtype) => {
-            if (isClass(subtype)) {
-                if (subtype.priv.literalValue !== undefined) {
-                    subtype = ClassType.cloneWithLiteral(subtype, /* value */ undefined);
-                }
-
-                if (ClassType.isBuiltIn(subtype, 'LiteralString')) {
-                    // Handle "LiteralString" specially.
-                    if (prefetched?.strClass && isInstantiableClass(prefetched.strClass)) {
-                        let strInstance = ClassType.cloneAsInstance(prefetched.strClass);
-                        strInstance = TypeBase.cloneForCondition(strInstance, getTypeCondition(subtype));
-                        return strInstance;
-                    }
-                }
-            }
-
-            return subtype;
-        });
+        return TypeEvaluatorNarrowing.stripLiteralValue(
+            {
+                getStrInstanceTypeForLiteralString: () =>
+                    prefetched?.strClass && isInstantiableClass(prefetched.strClass)
+                        ? ClassType.cloneAsInstance(prefetched.strClass)
+                        : undefined,
+            },
+            type
+        );
     }
 
     function getTypeOfParamAnnotation(paramTypeNode: ExpressionNode, paramCategory: ParamCategory) {
@@ -2295,13 +2274,13 @@ export function createTypeEvaluator(
 
     // If a type contains a TypeGuard or TypeIs, convert it to a bool.
     function stripTypeGuard(type: Type): Type {
-        return mapSubtypes(type, (subtype) => {
-            if (isClassInstance(subtype) && ClassType.isBuiltIn(subtype, ['TypeGuard', 'TypeIs'])) {
-                return prefetched?.boolClass ? convertToInstance(prefetched.boolClass) : UnknownType.create();
-            }
-
-            return subtype;
-        });
+        return TypeEvaluatorNarrowing.stripTypeGuard(
+            {
+                getBoolType: () =>
+                    prefetched?.boolClass ? convertToInstance(prefetched.boolClass) : UnknownType.create(),
+            },
+            type
+        );
     }
 
     function solveAndApplyConstraints(
