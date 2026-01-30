@@ -176,6 +176,7 @@ import { isConstantName, isPrivateName, isPrivateOrProtectedName } from './symbo
 import { getLastTypedDeclarationForSymbol, isEffectivelyClassVar } from './symbolUtils';
 import { assignTupleTypeArgs, expandTuple, getSlicedTupleType, getTypeOfTuple, makeTupleObject } from './tuples';
 import { SpeculativeModeOptions, SpeculativeTypeTracker } from './typeCacheUtils';
+import * as TypeEvaluatorDiagnostics from './typeEvaluator/diagnostics';
 import {
     assignToTypedDict,
     assignTypedDictToTypedDict,
@@ -3483,41 +3484,26 @@ export function createTypeEvaluator(
         );
     }
 
+    function getDiagnosticsContext(): TypeEvaluatorDiagnostics.DiagnosticsContext {
+        return {
+            suppressedNodeStack,
+            isSpeculative: (node: ParseNode, ignoreIfDiagnosticsAllowed: boolean) =>
+                speculativeTypeTracker.isSpeculative(node, ignoreIfDiagnosticsAllowed),
+            isNodeReachable: (node: ParseNode) => isNodeReachable(node),
+            getEvaluatorInterface: () => evaluatorInterface,
+        };
+    }
+
     function addInformation(message: string, node: ParseNode, range?: TextRange) {
-        return addDiagnosticWithSuppressionCheck('information', message, node, range);
+        return TypeEvaluatorDiagnostics.addInformation(getDiagnosticsContext(), message, node, range);
     }
 
     function addUnreachableCode(node: ParseNode, reachability: Reachability, textRange: TextRange) {
-        if (reachability === Reachability.Reachable) {
-            return;
-        }
-
-        if (!isDiagnosticSuppressedForNode(node)) {
-            const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-            const reportTypeReachability = fileInfo.diagnosticRuleSet.enableReachabilityAnalysis;
-
-            if (
-                reachability === Reachability.UnreachableStructural ||
-                reachability === Reachability.UnreachableStaticCondition ||
-                reportTypeReachability
-            ) {
-                fileInfo.diagnosticSink.addUnreachableCodeWithTextRange(
-                    reachability === Reachability.UnreachableStructural
-                        ? LocMessage.unreachableCodeStructure()
-                        : reachability === Reachability.UnreachableStaticCondition
-                        ? LocMessage.unreachableCodeCondition()
-                        : LocMessage.unreachableCodeType(),
-                    textRange
-                );
-            }
-        }
+        return TypeEvaluatorDiagnostics.addUnreachableCode(getDiagnosticsContext(), node, reachability, textRange);
     }
 
     function addDeprecated(message: string, node: ParseNode) {
-        if (!isDiagnosticSuppressedForNode(node)) {
-            const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-            fileInfo.diagnosticSink.addDeprecatedWithTextRange(message, node);
-        }
+        return TypeEvaluatorDiagnostics.addDeprecated(getDiagnosticsContext(), message, node);
     }
 
     function addDiagnosticWithSuppressionCheck(
@@ -3526,97 +3512,28 @@ export function createTypeEvaluator(
         node: ParseNode,
         range?: TextRange
     ) {
-        if (isDiagnosticSuppressedForNode(node)) {
-            // See if this node is suppressed but the diagnostic should be generated
-            // anyway so it can be used by the caller that requested the suppression.
-            const suppressionEntry = suppressedNodeStack.find(
-                (suppressedNode) =>
-                    ParseTreeUtils.isNodeContainedWithin(node, suppressedNode.node) && suppressedNode.suppressedDiags
-            );
-            suppressionEntry?.suppressedDiags?.push(message);
-
-            return undefined;
-        }
-
-        if (isNodeReachable(node)) {
-            const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-            return fileInfo.diagnosticSink.addDiagnosticWithTextRange(diagLevel, message, range ?? node);
-        }
-
-        return undefined;
+        return TypeEvaluatorDiagnostics.addDiagnosticWithSuppressionCheck(
+            getDiagnosticsContext(),
+            diagLevel,
+            message,
+            node,
+            range
+        );
     }
 
     function isDiagnosticSuppressedForNode(node: ParseNode) {
-        if (speculativeTypeTracker.isSpeculative(node, /* ignoreIfDiagnosticsAllowed */ true)) {
-            return true;
-        }
-
-        return suppressedNodeStack.some((suppressedNode) =>
-            ParseTreeUtils.isNodeContainedWithin(node, suppressedNode.node)
-        );
+        return TypeEvaluatorDiagnostics.isDiagnosticSuppressedForNode(getDiagnosticsContext(), node);
     }
 
     // This function is similar to isDiagnosticSuppressedForNode except that it
     // returns false if diagnostics are suppressed for the node but the caller
     // has requested that diagnostics be generated anyway.
     function canSkipDiagnosticForNode(node: ParseNode) {
-        if (speculativeTypeTracker.isSpeculative(node, /* ignoreIfDiagnosticsAllowed */ true)) {
-            return true;
-        }
-
-        const suppressedEntries = suppressedNodeStack.filter((suppressedNode) =>
-            ParseTreeUtils.isNodeContainedWithin(node, suppressedNode.node)
-        );
-
-        if (suppressedEntries.length === 0) {
-            return false;
-        }
-
-        return suppressedEntries.every((entry) => !entry.suppressedDiags);
+        return TypeEvaluatorDiagnostics.canSkipDiagnosticForNode(getDiagnosticsContext(), node);
     }
 
     function addDiagnostic(rule: DiagnosticRule, message: string, node: ParseNode, range?: TextRange) {
-        const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-        const diagLevel = fileInfo.diagnosticRuleSet[rule] as DiagnosticLevel;
-
-        if (diagLevel === 'none') {
-            return undefined;
-        }
-
-        const containingFunction = ParseTreeUtils.getEnclosingFunction(node);
-
-        if (containingFunction) {
-            // Should we suppress this diagnostic because it's within an unannotated function?
-            const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-            if (!fileInfo.diagnosticRuleSet.analyzeUnannotatedFunctions) {
-                // Is the target node within the body of the function? If so, suppress the diagnostic.
-                if (
-                    ParseTreeUtils.isUnannotatedFunction(containingFunction) &&
-                    ParseTreeUtils.isNodeContainedWithin(node, containingFunction.d.suite)
-                ) {
-                    return undefined;
-                }
-            }
-
-            // Should we suppress this diagnostic because it's within a no_type_check function?
-            const containingClassNode = ParseTreeUtils.getEnclosingClass(containingFunction, /* stopAtFunction */ true);
-            const functionInfo = getFunctionInfoFromDecorators(
-                evaluatorInterface,
-                containingFunction,
-                !!containingClassNode
-            );
-
-            if ((functionInfo.flags & FunctionTypeFlags.NoTypeCheck) !== 0) {
-                return undefined;
-            }
-        }
-
-        const diagnostic = addDiagnosticWithSuppressionCheck(diagLevel, message, node, range);
-        if (diagnostic) {
-            diagnostic.setRule(rule);
-        }
-
-        return diagnostic;
+        return TypeEvaluatorDiagnostics.addDiagnostic(getDiagnosticsContext(), rule, message, node, range);
     }
 
     function addDiagnosticForTextRange(
@@ -3625,18 +3542,7 @@ export function createTypeEvaluator(
         message: string,
         range: TextRange
     ) {
-        const diagLevel = fileInfo.diagnosticRuleSet[rule] as DiagnosticLevel;
-
-        if (diagLevel === 'none') {
-            return undefined;
-        }
-
-        const diagnostic = fileInfo.diagnosticSink.addDiagnosticWithTextRange(diagLevel, message, range);
-        if (rule) {
-            diagnostic.setRule(rule);
-        }
-
-        return diagnostic;
+        return TypeEvaluatorDiagnostics.addDiagnosticForTextRange(fileInfo, rule, message, range);
     }
 
     function assignTypeToNameNode(
@@ -22028,21 +21934,7 @@ export function createTypeEvaluator(
         callback: () => T,
         diagCallback?: (suppressedDiags: string[]) => void
     ) {
-        suppressedNodeStack.push({ node, suppressedDiags: diagCallback ? [] : undefined });
-
-        try {
-            const result = callback();
-            const poppedNode = suppressedNodeStack.pop();
-            if (diagCallback && poppedNode?.suppressedDiags) {
-                diagCallback(poppedNode.suppressedDiags);
-            }
-            return result;
-        } catch (e) {
-            // We don't use finally here because the TypeScript debugger doesn't
-            // handle finally well when single stepping.
-            suppressedNodeStack.pop();
-            throw e;
-        }
+        return TypeEvaluatorDiagnostics.suppressDiagnostics(getDiagnosticsContext(), node, callback, diagCallback);
     }
 
     function getSignatureTrackerForNode(node: ParseNode): UniqueSignatureTracker | undefined {
