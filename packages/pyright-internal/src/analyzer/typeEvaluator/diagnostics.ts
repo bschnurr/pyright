@@ -26,8 +26,8 @@ import { AnalyzerFileInfo } from '../analyzerFileInfo';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { getFunctionInfoFromDecorators } from '../decorators';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { FunctionTypeFlags } from '../types';
 import { Reachability, TypeEvaluator } from '../typeEvaluatorTypes';
+import { FunctionTypeFlags } from '../types';
 
 export interface SuppressedNodeStackEntry {
     node: ParseNode;
@@ -80,8 +80,8 @@ export function addUnreachableCode(
                 reachability === Reachability.UnreachableStructural
                     ? LocMessage.unreachableCodeStructure()
                     : reachability === Reachability.UnreachableStaticCondition
-                      ? LocMessage.unreachableCodeCondition()
-                      : LocMessage.unreachableCodeType(),
+                    ? LocMessage.unreachableCodeCondition()
+                    : LocMessage.unreachableCodeType(),
                 textRange
             );
         }
@@ -133,7 +133,9 @@ export function isDiagnosticSuppressedForNode(ctx: DiagnosticsContext, node: Par
     }
 
     // Otherwise, suppression is purely structural (node containment).
-    return ctx.suppressedNodeStack.some((suppressedNode) => ParseTreeUtils.isNodeContainedWithin(node, suppressedNode.node));
+    return ctx.suppressedNodeStack.some((suppressedNode) =>
+        ParseTreeUtils.isNodeContainedWithin(node, suppressedNode.node)
+    );
 }
 
 // Similar to `isDiagnosticSuppressedForNode`, but returns false if the caller requested

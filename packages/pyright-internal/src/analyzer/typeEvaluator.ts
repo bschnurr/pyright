@@ -176,7 +176,6 @@ import { isConstantName, isPrivateName, isPrivateOrProtectedName } from './symbo
 import { getLastTypedDeclarationForSymbol, isEffectivelyClassVar } from './symbolUtils';
 import { assignTupleTypeArgs, expandTuple, getSlicedTupleType, getTypeOfTuple, makeTupleObject } from './tuples';
 import { SpeculativeModeOptions, SpeculativeTypeTracker } from './typeCacheUtils';
-import * as TypeEvaluatorDiagnostics from './typeEvaluator/diagnostics';
 import {
     assignToTypedDict,
     assignTypedDictToTypedDict,
@@ -188,6 +187,7 @@ import {
     getTypeOfIndexedTypedDict,
     synthesizeTypedDictClassMethods,
 } from './typedDicts';
+import * as TypeEvaluatorDiagnostics from './typeEvaluator/diagnostics';
 import {
     AbstractSymbol,
     Arg,
