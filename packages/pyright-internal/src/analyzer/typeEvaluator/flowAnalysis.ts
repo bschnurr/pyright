@@ -20,6 +20,7 @@
 
 import { isNever, isUnbound, Type, TypeVarType, UnboundType, UnknownType } from '../types';
 
+import { ConsoleInterface } from '../../common/console';
 import { TextRange } from '../../common/textRange';
 import {
     ClassNode,
@@ -99,6 +100,15 @@ export interface ConstrainedTypeVarNarrowingContext {
     narrowConstrainedTypeVar: (flowNode: FlowNode, typeVar: TypeVarType) => Type | undefined;
 }
 
+export interface PrintControlFlowGraphContext {
+    printControlFlowGraph: (
+        flowNode: FlowNode,
+        reference: CodeFlowReferenceExpressionNode | undefined,
+        callName: string,
+        logger: ConsoleInterface
+    ) => any;
+}
+
 // Given a code flow node and a constrained TypeVar, determines whether that type var can be
 // narrowed to a single one of its constraints based on isinstance checks within the code flow.
 export function narrowConstrainedTypeVar(
@@ -113,6 +123,16 @@ export function narrowConstrainedTypeVar(
     }
 
     return ctx.narrowConstrainedTypeVar(flowNode, typeVar);
+}
+
+export function printControlFlowGraph(
+    ctx: PrintControlFlowGraphContext,
+    flowNode: FlowNode,
+    reference: CodeFlowReferenceExpressionNode | undefined,
+    callName: string,
+    logger: ConsoleInterface
+) {
+    return ctx.printControlFlowGraph(flowNode, reference, callName, logger);
 }
 
 export interface AnalyzerCacheContext {

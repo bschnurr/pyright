@@ -28489,7 +28489,20 @@ export function createTypeEvaluator(
         callName: string,
         logger: ConsoleInterface
     ) {
-        return codeFlowEngine.printControlFlowGraph(flowNode, reference, callName, logger);
+        return TypeEvaluatorFlowAnalysis.printControlFlowGraph(
+            {
+                printControlFlowGraph: (
+                    flowNode: FlowNode,
+                    reference: CodeFlowReferenceExpressionNode | undefined,
+                    callName: string,
+                    logger: ConsoleInterface
+                ) => codeFlowEngine.printControlFlowGraph(flowNode, reference, callName, logger),
+            },
+            flowNode,
+            reference,
+            callName,
+            logger
+        );
     }
 
     // Track these apis internal usages when logging is on. otherwise, it should be noop.
