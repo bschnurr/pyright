@@ -188,6 +188,7 @@ import {
     synthesizeTypedDictClassMethods,
 } from './typedDicts';
 import * as TypeEvaluatorDiagnostics from './typeEvaluator/diagnostics';
+import * as TypeEvaluatorFlowAnalysis from './typeEvaluator/flowAnalysis';
 import {
     AbstractSymbol,
     Arg,
@@ -3399,88 +3400,79 @@ export function createTypeEvaluator(
     }
 
     function isNodeReachable(node: ParseNode, sourceNode?: ParseNode): boolean {
-        return getNodeReachability(node, sourceNode) === Reachability.Reachable;
+        return TypeEvaluatorFlowAnalysis.isNodeReachable(
+            {
+                checkCodeFlowTooComplex,
+                getCodeFlowAnalyzerForNode,
+                getFlowNodeReachability: (sinkFlowNode: FlowNode, sourceFlowNode?: FlowNode) =>
+                    codeFlowEngine.getFlowNodeReachability(sinkFlowNode, sourceFlowNode),
+            },
+            node,
+            sourceNode
+        );
     }
 
     function isAfterNodeReachable(node: ParseNode): boolean {
-        return getAfterNodeReachability(node) === Reachability.Reachable;
+        return TypeEvaluatorFlowAnalysis.isAfterNodeReachable(
+            {
+                checkCodeFlowTooComplex,
+                getCodeFlowAnalyzerForNode,
+                getFlowNodeReachability: (sinkFlowNode: FlowNode, sourceFlowNode?: FlowNode) =>
+                    codeFlowEngine.getFlowNodeReachability(sinkFlowNode, sourceFlowNode),
+            },
+            node
+        );
     }
 
     function getNodeReachability(node: ParseNode, sourceNode?: ParseNode): Reachability {
-        if (checkCodeFlowTooComplex(node)) {
-            return Reachability.Reachable;
-        }
-
-        const flowNode = AnalyzerNodeInfo.getFlowNode(node);
-        if (!flowNode) {
-            if (node.parent) {
-                return getNodeReachability(node.parent, sourceNode);
-            }
-            return Reachability.UnreachableStructural;
-        }
-
-        const sourceFlowNode = sourceNode ? AnalyzerNodeInfo.getFlowNode(sourceNode) : undefined;
-
-        return codeFlowEngine.getFlowNodeReachability(flowNode, sourceFlowNode);
+        return TypeEvaluatorFlowAnalysis.getNodeReachability(
+            {
+                checkCodeFlowTooComplex,
+                getCodeFlowAnalyzerForNode,
+                getFlowNodeReachability: (sinkFlowNode: FlowNode, sourceFlowNode?: FlowNode) =>
+                    codeFlowEngine.getFlowNodeReachability(sinkFlowNode, sourceFlowNode),
+            },
+            node,
+            sourceNode
+        );
     }
 
     function getAfterNodeReachability(node: ParseNode): Reachability {
-        const returnFlowNode = AnalyzerNodeInfo.getAfterFlowNode(node);
-        if (!returnFlowNode) {
-            return Reachability.UnreachableStructural;
-        }
-
-        if (checkCodeFlowTooComplex(node)) {
-            return Reachability.Reachable;
-        }
-
-        const reachability = codeFlowEngine.getFlowNodeReachability(returnFlowNode);
-        if (reachability !== Reachability.Reachable) {
-            return reachability;
-        }
-
-        const executionScopeNode = ParseTreeUtils.getExecutionScopeNode(node);
-        if (!isFlowNodeReachableUsingNeverNarrowing(executionScopeNode, returnFlowNode)) {
-            return Reachability.UnreachableByAnalysis;
-        }
-
-        return Reachability.Reachable;
+        return TypeEvaluatorFlowAnalysis.getAfterNodeReachability(
+            {
+                checkCodeFlowTooComplex,
+                getCodeFlowAnalyzerForNode,
+                getFlowNodeReachability: (sinkFlowNode: FlowNode, sourceFlowNode?: FlowNode) =>
+                    codeFlowEngine.getFlowNodeReachability(sinkFlowNode, sourceFlowNode),
+            },
+            node
+        );
     }
 
     // Although isFlowNodeReachable indicates that the node is reachable, it
     // may not be reachable if we apply "never narrowing".
     function isFlowNodeReachableUsingNeverNarrowing(node: ExecutionScopeNode, flowNode: FlowNode) {
-        const analyzer = getCodeFlowAnalyzerForNode(node, /* typeAtStart */ undefined);
-
-        if (checkCodeFlowTooComplex(node)) {
-            return true;
-        }
-
-        const codeFlowResult = analyzer.getTypeFromCodeFlow(flowNode, /* reference */ undefined, {
-            typeAtStart: { type: UnboundType.create() },
-        });
-
-        return codeFlowResult.type !== undefined && !isNever(codeFlowResult.type);
+        return TypeEvaluatorFlowAnalysis.isFlowNodeReachableUsingNeverNarrowing(
+            {
+                checkCodeFlowTooComplex,
+                getCodeFlowAnalyzerForNode,
+            },
+            node,
+            flowNode
+        );
     }
 
     // Determines whether there is a code flow path from sourceNode to sinkNode.
     function isFlowPathBetweenNodes(sourceNode: ParseNode, sinkNode: ParseNode, allowSelf = true) {
-        if (checkCodeFlowTooComplex(sourceNode)) {
-            return true;
-        }
-
-        const sourceFlowNode = AnalyzerNodeInfo.getFlowNode(sourceNode);
-        const sinkFlowNode = AnalyzerNodeInfo.getFlowNode(sinkNode);
-        if (!sourceFlowNode || !sinkFlowNode) {
-            return false;
-        }
-        if (sourceFlowNode === sinkFlowNode) {
-            return allowSelf;
-        }
-
-        return (
-            codeFlowEngine.getFlowNodeReachability(sinkFlowNode, sourceFlowNode, /* ignoreNoReturn */ true) ===
-            Reachability.Reachable
+        return TypeEvaluatorFlowAnalysis.isFlowPathBetweenNodes(
+            {
+                checkCodeFlowTooComplex,
+                getFlowNodeReachability: (sinkFlowNode: FlowNode, sourceFlowNode: FlowNode, ignoreNoReturn: boolean) =>
+                    codeFlowEngine.getFlowNodeReachability(sinkFlowNode, sourceFlowNode, ignoreNoReturn),
+            },
+            sourceNode,
+            sinkNode,
+            allowSelf
         );
     }
 
@@ -20985,36 +20977,15 @@ export function createTypeEvaluator(
         node: ExecutionScopeNode,
         typeAtStart: TypeResult | undefined
     ): CodeFlowAnalyzer {
-        let entries = codeFlowAnalyzerCache.get(node.id);
-
-        if (entries) {
-            const cachedEntry = entries.find((entry) => {
-                if (!typeAtStart || !entry.typeAtStart) {
-                    return !typeAtStart && !entry.typeAtStart;
-                }
-
-                if (!typeAtStart.isIncomplete !== !entry.typeAtStart.isIncomplete) {
-                    return false;
-                }
-
-                return isTypeSame(typeAtStart.type, entry.typeAtStart.type);
-            });
-
-            if (cachedEntry) {
-                return cachedEntry.codeFlowAnalyzer;
-            }
-        }
-
-        // Allocate a new code flow analyzer.
-        const analyzer = codeFlowEngine.createCodeFlowAnalyzer();
-        if (entries) {
-            entries.push({ typeAtStart, codeFlowAnalyzer: analyzer });
-        } else {
-            entries = [{ typeAtStart, codeFlowAnalyzer: analyzer }];
-            codeFlowAnalyzerCache.set(node.id, entries);
-        }
-
-        return analyzer;
+        return TypeEvaluatorFlowAnalysis.getCodeFlowAnalyzerForNode(
+            {
+                codeFlowAnalyzerCache,
+                createCodeFlowAnalyzer: () => codeFlowEngine.createCodeFlowAnalyzer(),
+                isTypeSame,
+            },
+            node,
+            typeAtStart
+        );
     }
 
     // Attempts to determine the type of the reference expression at the
@@ -21028,46 +20999,17 @@ export function createTypeEvaluator(
         startNode?: ClassNode | FunctionNode | LambdaNode,
         options?: FlowNodeTypeOptions
     ): FlowNodeTypeResult {
-        // See if this execution scope requires code flow for this reference expression.
-        const referenceKey = createKeyForReference(reference);
-        const executionNode = ParseTreeUtils.getExecutionScopeNode(startNode?.parent ?? reference);
-        const codeFlowExpressions = AnalyzerNodeInfo.getCodeFlowExpressions(executionNode);
-
-        if (
-            !codeFlowExpressions ||
-            (!codeFlowExpressions.has(referenceKey) && !codeFlowExpressions.has(wildcardImportReferenceKey))
-        ) {
-            return FlowNodeTypeResult.create(/* type */ undefined, /* isIncomplete */ false);
-        }
-
-        if (checkCodeFlowTooComplex(reference)) {
-            return FlowNodeTypeResult.create(
-                /* type */ options?.typeAtStart && isUnbound(options.typeAtStart.type)
-                    ? UnknownType.create()
-                    : undefined,
-                /* isIncomplete */ true
-            );
-        }
-
-        // Is there an code flow analyzer cached for this execution scope?
-        let analyzer: CodeFlowAnalyzer | undefined;
-
-        if (isNodeInReturnTypeInferenceContext(executionNode)) {
-            // If we're performing the analysis within a temporary
-            // context of a function for purposes of inferring its
-            // return type for a specified set of arguments, use
-            // a temporary analyzer that we'll use only for this context.
-            analyzer = getCodeFlowAnalyzerForReturnTypeInferenceContext();
-        } else {
-            analyzer = getCodeFlowAnalyzerForNode(executionNode, options?.typeAtStart);
-        }
-
-        const flowNode = AnalyzerNodeInfo.getFlowNode(startNode ?? reference);
-        if (flowNode === undefined) {
-            return FlowNodeTypeResult.create(/* type */ undefined, /* isIncomplete */ false);
-        }
-
-        return analyzer.getTypeFromCodeFlow(flowNode!, reference, options);
+        return TypeEvaluatorFlowAnalysis.getFlowTypeOfReference(
+            {
+                checkCodeFlowTooComplex,
+                isNodeInReturnTypeInferenceContext,
+                getCodeFlowAnalyzerForReturnTypeInferenceContext,
+                getCodeFlowAnalyzerForNode,
+            },
+            reference,
+            startNode,
+            options
+        );
     }
 
     // Specializes the specified (potentially generic) class type using
