@@ -95,12 +95,10 @@ import * as AnalyzerNodeInfo from './analyzerNodeInfo';
 import { CodeFlowAnalyzer, FlowNodeTypeOptions, FlowNodeTypeResult, getCodeFlowEngine } from './codeFlowEngine';
 import {
     CodeFlowReferenceExpressionNode,
-    createKeyForReference,
     FlowFlags,
     FlowNode,
     FlowWildcardImport,
     isCodeFlowSupportedForReference,
-    wildcardImportReferenceKey,
 } from './codeFlowTypes';
 import { ConstraintSolution } from './constraintSolution';
 import {

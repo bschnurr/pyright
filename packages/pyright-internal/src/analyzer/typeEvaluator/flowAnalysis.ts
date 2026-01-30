@@ -18,8 +18,9 @@
  *   cancellation/complexity gating, return-type inference context).
  */
 
-import { UnknownType, UnboundType, isNever, isUnbound } from '../types';
+import { isNever, isUnbound, UnboundType, UnknownType } from '../types';
 
+import { ClassNode, ExecutionScopeNode, FunctionNode, LambdaNode, ParseNode } from '../../parser/parseNodes';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { CodeFlowAnalyzer, FlowNodeTypeOptions, FlowNodeTypeResult } from '../codeFlowEngine';
 import {
@@ -28,7 +29,6 @@ import {
     FlowNode,
     wildcardImportReferenceKey,
 } from '../codeFlowTypes';
-import { ClassNode, ExecutionScopeNode, FunctionNode, LambdaNode, ParseNode } from '../../parser/parseNodes';
 import * as ParseTreeUtils from '../parseTreeUtils';
 import { Reachability, TypeResult } from '../typeEvaluatorTypes';
 
@@ -234,13 +234,22 @@ export function isFlowNodeReachableUsingNeverNarrowing(
 
 export interface FlowPathContext {
     checkCodeFlowTooComplex: (node: ParseNode) => boolean;
-    getFlowNodeReachability: (sinkFlowNode: FlowNode, sourceFlowNode: FlowNode, ignoreNoReturn: boolean) => Reachability;
+    getFlowNodeReachability: (
+        sinkFlowNode: FlowNode,
+        sourceFlowNode: FlowNode,
+        ignoreNoReturn: boolean
+    ) => Reachability;
 }
 
 // Determines whether there is a code flow path from `sourceNode` to `sinkNode`.
 //
 // This is used by the evaluator for reachability filtering during name/symbol resolution.
-export function isFlowPathBetweenNodes(ctx: FlowPathContext, sourceNode: ParseNode, sinkNode: ParseNode, allowSelf = true) {
+export function isFlowPathBetweenNodes(
+    ctx: FlowPathContext,
+    sourceNode: ParseNode,
+    sinkNode: ParseNode,
+    allowSelf = true
+) {
     if (ctx.checkCodeFlowTooComplex(sourceNode)) {
         return true;
     }
@@ -254,5 +263,7 @@ export function isFlowPathBetweenNodes(ctx: FlowPathContext, sourceNode: ParseNo
         return allowSelf;
     }
 
-    return ctx.getFlowNodeReachability(sinkFlowNode, sourceFlowNode, /* ignoreNoReturn */ true) === Reachability.Reachable;
+    return (
+        ctx.getFlowNodeReachability(sinkFlowNode, sourceFlowNode, /* ignoreNoReturn */ true) === Reachability.Reachable
+    );
 }
