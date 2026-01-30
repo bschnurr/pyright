@@ -17,8 +17,21 @@
  */
 
 import { ExpressionNode } from '../../parser/parseNodes';
-import { TypeEvaluator } from '../typeEvaluatorTypes';
-import { Type } from '../types';
+import { TypeEvaluator, TypeResult } from '../typeEvaluatorTypes';
+import {
+    ClassType,
+    combineTypes,
+    isClass,
+    isClassInstance,
+    isFunctionOrOverloaded,
+    isNever,
+    isTypeSame,
+    isUnion,
+    isUnknown,
+    Type,
+    UnionType,
+} from '../types';
+import { isIncompleteUnknown, isLiteralType, mapSubtypes } from '../typeUtils';
 
 export interface NarrowingContext {
     evaluator: TypeEvaluator;
@@ -26,6 +39,12 @@ export interface NarrowingContext {
 
 export interface NarrowForConditionOptions {
     isPositiveTest: boolean;
+}
+
+export interface NarrowTypeBasedOnAssignmentContext {
+    // This is intentionally a small surface area: the evaluator owns assignability
+    // rules (and recursion limits, diag addenda, etc.) and passes a minimal adapter.
+    assignType: (destType: Type, srcType: Type) => boolean;
 }
 
 // Conceptual narrowing entrypoint.
@@ -64,4 +83,93 @@ export function narrowTypeForCondition(
     // later slices.
     void ctx;
     return originalType;
+}
+
+// When a value is assigned to a variable with a declared type,
+// we may be able to narrow the type based on the assignment.
+//
+// NOTE: This logic intentionally mirrors the evaluator's historical behavior.
+// The typing spec does not currently define assignment-based narrowing rules.
+export function narrowTypeBasedOnAssignment(
+    ctx: NarrowTypeBasedOnAssignmentContext,
+    declaredType: Type,
+    assignedTypeResult: TypeResult
+): TypeResult {
+    // TODO: The rules for narrowing types on assignment are not defined in
+    // the typing spec. Pyright's current logic is currently not even internally
+    // consistent and probably not sound from a type theory perspective. It
+    // should be completely reworked once there has been a public discussion
+    // about the correct behavior.
+
+    const narrowedType = mapSubtypes(assignedTypeResult.type, (assignedSubtype) => {
+        // Handle the special case where the assigned type is a literal type.
+        // Some types include very large unions of literal types, and we don't
+        // want to use an n^2 loop to compare them.
+        if (isClass(assignedSubtype) && isLiteralType(assignedSubtype)) {
+            if (isUnion(declaredType) && UnionType.containsType(declaredType, assignedSubtype)) {
+                return assignedSubtype;
+            }
+        }
+
+        const narrowedSubtype = mapSubtypes(declaredType, (declaredSubtype) => {
+            if (!ctx.assignType(declaredSubtype, assignedSubtype)) {
+                return undefined;
+            }
+
+            // Retain unknowns for code flow analysis convergence and for
+            // unknown type reporting in strict mode.
+            if (isUnknown(assignedSubtype)) {
+                return assignedSubtype;
+            }
+
+            // If the two types are bidirectionally assignable, they are
+            // either equivalent (in which case it doesn't matter which
+            // one we choose) or one or both include gradual types (Any, etc.),
+            // in which case we'll want to stick with the declared subtype.
+            if (ctx.assignType(assignedSubtype, declaredSubtype)) {
+                // We need to be careful with TypedDict types that have
+                // narrowed fields. In this case, we want to return the
+                // assigned type.
+                if (
+                    isClass(assignedSubtype) &&
+                    assignedSubtype.priv.typedDictNarrowedEntries &&
+                    isTypeSame(assignedSubtype, declaredSubtype, { ignoreTypedDictNarrowEntries: true })
+                ) {
+                    return assignedSubtype;
+                }
+
+                // We also need to be careful with callback protocols.
+                if (isClassInstance(declaredSubtype) && ClassType.isProtocolClass(declaredSubtype)) {
+                    if (isFunctionOrOverloaded(assignedSubtype)) {
+                        return assignedSubtype;
+                    }
+                }
+
+                return declaredSubtype;
+            }
+
+            return assignedSubtype;
+        });
+
+        // If we couldn't assign the assigned subtype any of the declared
+        // subtypes, the types are incompatible. Return the unnarrowed form.
+        if (isNever(narrowedSubtype)) {
+            return assignedSubtype;
+        }
+
+        return narrowedSubtype;
+    });
+
+    // If the result of narrowing is an Unknown that is incomplete, propagate the
+    // incomplete type for the benefit of code flow analysis.
+    // If the result of narrowing is a complete Unknown, combine the Unknown type
+    // with the declared type. In strict mode, this will retain the "unknown type"
+    // diagnostics while still providing reasonable completion suggestions.
+    if (isIncompleteUnknown(narrowedType)) {
+        return { type: narrowedType, isIncomplete: assignedTypeResult.isIncomplete };
+    } else if (isUnknown(narrowedType)) {
+        return { type: combineTypes([narrowedType, declaredType]), isIncomplete: assignedTypeResult.isIncomplete };
+    }
+
+    return { type: narrowedType, isIncomplete: assignedTypeResult.isIncomplete };
 }

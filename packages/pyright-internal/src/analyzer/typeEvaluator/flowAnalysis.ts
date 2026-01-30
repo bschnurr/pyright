@@ -18,9 +18,17 @@
  *   cancellation/complexity gating, return-type inference context).
  */
 
-import { isNever, isUnbound, UnboundType, UnknownType } from '../types';
+import { isNever, isUnbound, Type, TypeVarType, UnboundType, UnknownType } from '../types';
 
-import { ClassNode, ExecutionScopeNode, FunctionNode, LambdaNode, ParseNode } from '../../parser/parseNodes';
+import { TextRange } from '../../common/textRange';
+import {
+    ClassNode,
+    ExecutionScopeNode,
+    FunctionNode,
+    LambdaNode,
+    ParseNode,
+    ParseNodeType,
+} from '../../parser/parseNodes';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { CodeFlowAnalyzer, FlowNodeTypeOptions, FlowNodeTypeResult } from '../codeFlowEngine';
 import {
@@ -32,6 +40,47 @@ import {
 import * as ParseTreeUtils from '../parseTreeUtils';
 import { Reachability, TypeResult } from '../typeEvaluatorTypes';
 
+export interface CodeFlowComplexityInfo {
+    scopeNode: ExecutionScopeNode;
+    codeComplexity: number;
+    isTooComplex: boolean;
+
+    // If `isTooComplex` is true, this indicates the text range the evaluator should
+    // use when emitting the "too complex" diagnostic.
+    errorRange: TextRange;
+}
+
+// Computes the code flow complexity for the execution scope containing `node`.
+// This is intentionally pure and does not emit diagnostics. The evaluator owns
+// the decision of whether and how to report this condition.
+export function getCodeFlowComplexityInfo(node: ParseNode, maxCodeComplexity: number): CodeFlowComplexityInfo {
+    const scopeNode: ExecutionScopeNode =
+        node.nodeType === ParseNodeType.Function ? node : ParseTreeUtils.getExecutionScopeNode(node);
+    const codeComplexity = AnalyzerNodeInfo.getCodeFlowComplexity(scopeNode);
+
+    if (codeComplexity <= maxCodeComplexity) {
+        return {
+            scopeNode,
+            codeComplexity,
+            isTooComplex: false,
+            errorRange: scopeNode,
+        };
+    }
+
+    let errorRange: TextRange = scopeNode;
+    if (scopeNode.nodeType === ParseNodeType.Function) {
+        errorRange = scopeNode.d.name;
+    } else if (scopeNode.nodeType === ParseNodeType.Module) {
+        errorRange = { start: 0, length: 0 };
+    }
+
+    return {
+        scopeNode,
+        codeComplexity,
+        isTooComplex: true,
+        errorRange,
+    };
+}
 export interface CodeFlowAnalyzerCacheEntry {
     typeAtStart: TypeResult | undefined;
     codeFlowAnalyzer: CodeFlowAnalyzer;
@@ -44,6 +93,26 @@ export interface FlowAnalysisContext {
     isNodeInReturnTypeInferenceContext: (executionScopeNode: any) => boolean;
     getCodeFlowAnalyzerForReturnTypeInferenceContext: () => CodeFlowAnalyzer;
     getCodeFlowAnalyzerForNode: (node: any, typeAtStart: TypeResult | undefined) => CodeFlowAnalyzer;
+}
+
+export interface ConstrainedTypeVarNarrowingContext {
+    narrowConstrainedTypeVar: (flowNode: FlowNode, typeVar: TypeVarType) => Type | undefined;
+}
+
+// Given a code flow node and a constrained TypeVar, determines whether that type var can be
+// narrowed to a single one of its constraints based on isinstance checks within the code flow.
+export function narrowConstrainedTypeVar(
+    ctx: ConstrainedTypeVarNarrowingContext,
+    node: ParseNode,
+    typeVar: TypeVarType
+): Type | undefined {
+    const flowNode = AnalyzerNodeInfo.getFlowNode(node);
+
+    if (!flowNode) {
+        return undefined;
+    }
+
+    return ctx.narrowConstrainedTypeVar(flowNode, typeVar);
 }
 
 export interface AnalyzerCacheContext {
