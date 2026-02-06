@@ -9,7 +9,7 @@
  * negative ("else") narrowing cases.
  */
 
-import { ArgCategory, AssignmentExpressionNode, ExpressionNode, NameNode, ParseNodeType } from '../parser/parseNodes';
+import { AssignmentExpressionNode, ExpressionNode, NameNode, ParseNodeType } from '../parser/parseNodes';
 import { KeywordType, OperatorType } from '../parser/tokenizerTypes';
 import { addConstraintsForExpectedType } from './constraintSolver';
 import { transformTypeForEnumMember } from './enums';
@@ -29,13 +29,7 @@ import {
     Type,
     TypeVarType,
 } from './types';
-import {
-    isLiteralType,
-    isLiteralTypeOrUnion,
-    isNoneInstance,
-    lookUpClassMember,
-    lookUpObjectMember,
-} from './typeUtils';
+import { isLiteralType, isNoneInstance, lookUpClassMember, lookUpObjectMember } from './typeUtils';
 
 export interface TypeNarrowingResult {
     type: Type;
@@ -178,6 +172,18 @@ function getIsLiteralOrClassNarrowingContext(
 function getIndexedLiteralNarrowingContext(
     evaluator: TypeEvaluator
 ): TypeEvaluatorNarrowing.IndexedLiteralNarrowingContext {
+    return {
+        getTypeOfExpression: (node) => evaluator.getTypeOfExpression(node),
+        isMatchingExpression: (reference, expression) =>
+            ParseTreeUtils.isMatchingExpression(reference, expression, (ref, expr) =>
+                isNameSameScope(evaluator, ref, expr)
+            ),
+    };
+}
+
+function getEqualsLiteralNarrowingContext(
+    evaluator: TypeEvaluator
+): TypeEvaluatorNarrowing.EqualsLiteralNarrowingContext {
     return {
         getTypeOfExpression: (node) => evaluator.getTypeOfExpression(node),
         isMatchingExpression: (reference, expression) =>
@@ -459,84 +465,56 @@ export function getTypeNarrowingCallback(
             }
 
             if (equalsOrNotEqualsOperator) {
-                // Look for X == <literal> or X != <literal>
-                const adjIsPositiveTest =
-                    testExpression.d.operator === OperatorType.Equals ? isPositiveTest : !isPositiveTest;
+                const equalsLiteralInfo = TypeEvaluatorNarrowing.getEqualsLiteralNarrowingInfo(
+                    getEqualsLiteralNarrowingContext(evaluator),
+                    reference,
+                    testExpression,
+                    isPositiveTest
+                );
 
-                if (
-                    ParseTreeUtils.isMatchingExpression(reference, testExpression.d.leftExpr, (ref, expr) =>
-                        isNameSameScope(evaluator, ref, expr)
-                    )
-                ) {
-                    const rightTypeResult = evaluator.getTypeOfExpression(testExpression.d.rightExpr);
-                    const rightType = rightTypeResult.type;
-
-                    if (isClassInstance(rightType) && rightType.priv.literalValue !== undefined) {
+                if (equalsLiteralInfo) {
+                    if (equalsLiteralInfo.kind === 'literal') {
                         return (type: Type) => {
                             return {
                                 type: TypeEvaluatorNarrowing.narrowTypeForLiteralComparison(
                                     getLiteralComparisonContext(evaluator),
                                     type,
-                                    rightType,
-                                    adjIsPositiveTest,
+                                    equalsLiteralInfo.rightType as ClassType,
+                                    equalsLiteralInfo.adjIsPositiveTest,
                                     /* isIsOperator */ false
                                 ),
-                                isIncomplete: !!rightTypeResult.isIncomplete,
+                                isIncomplete: equalsLiteralInfo.isIncomplete,
                             };
                         };
                     }
-                }
 
-                // Look for X[<literal>] == <literal> or X[<literal>] != <literal>
-                if (
-                    testExpression.d.leftExpr.nodeType === ParseNodeType.Index &&
-                    testExpression.d.leftExpr.d.items.length === 1 &&
-                    !testExpression.d.leftExpr.d.trailingComma &&
-                    testExpression.d.leftExpr.d.items[0].d.argCategory === ArgCategory.Simple &&
-                    ParseTreeUtils.isMatchingExpression(reference, testExpression.d.leftExpr.d.leftExpr, (ref, expr) =>
-                        isNameSameScope(evaluator, ref, expr)
-                    )
-                ) {
-                    const indexTypeResult = evaluator.getTypeOfExpression(
-                        testExpression.d.leftExpr.d.items[0].d.valueExpr
-                    );
-                    const indexType = indexTypeResult.type;
+                    return (type: Type) => {
+                        let narrowedType: Type;
+                        const indexType = equalsLiteralInfo.indexType!;
 
-                    if (isClassInstance(indexType) && isLiteralType(indexType)) {
-                        if (ClassType.isBuiltIn(indexType, ['str', 'int'])) {
-                            const rightTypeResult = evaluator.getTypeOfExpression(testExpression.d.rightExpr);
-                            const rightType = rightTypeResult.type;
-
-                            if (isLiteralTypeOrUnion(rightType)) {
-                                return (type: Type) => {
-                                    let narrowedType: Type;
-
-                                    if (ClassType.isBuiltIn(indexType, 'str')) {
-                                        narrowedType = narrowTypeForDiscriminatedDictEntryComparison(
-                                            evaluator,
-                                            type,
-                                            indexType,
-                                            rightType,
-                                            adjIsPositiveTest
-                                        );
-                                    } else {
-                                        narrowedType = narrowTypeForDiscriminatedTupleComparison(
-                                            evaluator,
-                                            type,
-                                            indexType,
-                                            rightType,
-                                            adjIsPositiveTest
-                                        );
-                                    }
-
-                                    return {
-                                        type: narrowedType,
-                                        isIncomplete: !!indexTypeResult.isIncomplete || !!rightTypeResult.isIncomplete,
-                                    };
-                                };
-                            }
+                        if (ClassType.isBuiltIn(indexType, 'str')) {
+                            narrowedType = narrowTypeForDiscriminatedDictEntryComparison(
+                                evaluator,
+                                type,
+                                indexType,
+                                equalsLiteralInfo.rightType,
+                                equalsLiteralInfo.adjIsPositiveTest
+                            );
+                        } else {
+                            narrowedType = narrowTypeForDiscriminatedTupleComparison(
+                                evaluator,
+                                type,
+                                indexType,
+                                equalsLiteralInfo.rightType,
+                                equalsLiteralInfo.adjIsPositiveTest
+                            );
                         }
-                    }
+
+                        return {
+                            type: narrowedType,
+                            isIncomplete: equalsLiteralInfo.isIncomplete,
+                        };
+                    };
                 }
             }
 

@@ -257,6 +257,19 @@ export interface IndexedLiteralNarrowingInfo {
     isIncomplete: boolean;
 }
 
+export interface EqualsLiteralNarrowingContext {
+    getTypeOfExpression: (node: ExpressionNode) => TypeResult;
+    isMatchingExpression: (reference: ExpressionNode, expression: ExpressionNode) => boolean;
+}
+
+export interface EqualsLiteralNarrowingInfo {
+    kind: 'literal' | 'indexed';
+    adjIsPositiveTest: boolean;
+    isIncomplete: boolean;
+    rightType: Type;
+    indexType?: ClassType;
+}
+
 export interface AliasedConditionNarrowingContext {
     isNodeReachable: (fromNode: ParseNode, toNode: ParseNode) => boolean;
 }
@@ -2151,6 +2164,72 @@ export function getIndexedLiteralNarrowingInfo(
                     rightType,
                     isIncomplete: !!rightTypeResult.isIncomplete,
                 };
+            }
+        }
+    }
+
+    return undefined;
+}
+
+export function getEqualsLiteralNarrowingInfo(
+    ctx: EqualsLiteralNarrowingContext,
+    reference: ExpressionNode,
+    testExpression: ExpressionNode,
+    isPositiveTest: boolean
+): EqualsLiteralNarrowingInfo | undefined {
+    if (testExpression.nodeType !== ParseNodeType.BinaryOperation) {
+        return undefined;
+    }
+
+    const equalsOrNotEqualsOperator =
+        testExpression.d.operator === OperatorType.Equals || testExpression.d.operator === OperatorType.NotEquals;
+
+    if (!equalsOrNotEqualsOperator) {
+        return undefined;
+    }
+
+    const adjIsPositiveTest = testExpression.d.operator === OperatorType.Equals ? isPositiveTest : !isPositiveTest;
+
+    // Look for X == <literal> or X != <literal>
+    if (ctx.isMatchingExpression(reference, testExpression.d.leftExpr)) {
+        const rightTypeResult = ctx.getTypeOfExpression(testExpression.d.rightExpr);
+        const rightType = rightTypeResult.type;
+
+        if (isClassInstance(rightType) && rightType.priv.literalValue !== undefined) {
+            return {
+                kind: 'literal',
+                adjIsPositiveTest,
+                isIncomplete: !!rightTypeResult.isIncomplete,
+                rightType,
+            };
+        }
+    }
+
+    // Look for X[<literal>] == <literal> or X[<literal>] != <literal>
+    if (
+        testExpression.d.leftExpr.nodeType === ParseNodeType.Index &&
+        testExpression.d.leftExpr.d.items.length === 1 &&
+        !testExpression.d.leftExpr.d.trailingComma &&
+        testExpression.d.leftExpr.d.items[0].d.argCategory === ArgCategory.Simple &&
+        ctx.isMatchingExpression(reference, testExpression.d.leftExpr.d.leftExpr)
+    ) {
+        const indexTypeResult = ctx.getTypeOfExpression(testExpression.d.leftExpr.d.items[0].d.valueExpr);
+        const indexType = indexTypeResult.type;
+
+        if (isClassInstance(indexType) && isLiteralType(indexType)) {
+            if (ClassType.isBuiltIn(indexType, ['str', 'int'])) {
+                const rightTypeResult = ctx.getTypeOfExpression(testExpression.d.rightExpr);
+                const rightType = rightTypeResult.type;
+
+                if (isLiteralTypeOrUnion(rightType)) {
+                    return {
+                        kind: 'indexed',
+                        adjIsPositiveTest,
+                        isIncomplete: !!indexTypeResult.isIncomplete || !!rightTypeResult.isIncomplete,
+                        rightType,
+                        indexType,
+                    };
+                }
             }
         }
     }
