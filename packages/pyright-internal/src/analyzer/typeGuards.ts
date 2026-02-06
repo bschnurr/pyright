@@ -32,25 +32,19 @@ import {
     ClassType,
     EnumLiteral,
     FunctionType,
-    isClass,
     isClassInstance,
     isFunction,
     isInstantiableClass,
     isOverloaded,
-    isTypeVar,
     maxTypeRecursionCount,
     OverloadedType,
     Type,
-    TypeBase,
     TypeVarType,
 } from './types';
 import {
-    convertToInstantiable,
-    doForEachSubtype,
     isLiteralType,
     isLiteralTypeOrUnion,
     isNoneInstance,
-    isTupleClass,
     lookUpClassMember,
     lookUpObjectMember,
 } from './typeUtils';
@@ -187,9 +181,7 @@ function getIsInstanceNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorN
     };
 }
 
-function getIsInstanceClassTypeContext(
-    evaluator: TypeEvaluator
-): TypeEvaluatorNarrowing.IsInstanceClassTypeContext {
+function getIsInstanceClassTypeContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.IsInstanceClassTypeContext {
     return {
         getTupleClassType: () => evaluator.getTupleClassType(),
         maxTypeRecursionCount,
