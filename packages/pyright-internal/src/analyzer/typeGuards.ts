@@ -251,6 +251,17 @@ function getTypeGuardCallNarrowingContext(
     };
 }
 
+function getDirectReferenceNarrowingContext(
+    evaluator: TypeEvaluator
+): TypeEvaluatorNarrowing.DirectReferenceNarrowingContext {
+    return {
+        isMatchingExpression: (reference, expression) =>
+            ParseTreeUtils.isMatchingExpression(reference, expression, (ref, expr) =>
+                isNameSameScope(evaluator, ref, expr)
+            ),
+    };
+}
+
 function getAliasedConditionNarrowingContext(
     evaluator: TypeEvaluator
 ): TypeEvaluatorNarrowing.AliasedConditionNarrowingContext {
@@ -767,8 +778,10 @@ export function getTypeNarrowingCallback(
     }
 
     if (
-        ParseTreeUtils.isMatchingExpression(reference, testExpression, (ref, expr) =>
-            isNameSameScope(evaluator, ref, expr)
+        TypeEvaluatorNarrowing.isDirectReferenceTest(
+            getDirectReferenceNarrowingContext(evaluator),
+            reference,
+            testExpression
         )
     ) {
         return (type: Type) => {
@@ -795,19 +808,20 @@ export function getTypeNarrowingCallback(
     // We normally won't find a "not" operator here because they are stripped out
     // by the binder when it creates condition flow nodes, but we can find this
     // in the case of local variables type narrowing.
-    if (reference.nodeType === ParseNodeType.Name) {
-        if (
-            testExpression.nodeType === ParseNodeType.UnaryOperation &&
-            testExpression.d.operator === OperatorType.Not
-        ) {
-            return getTypeNarrowingCallback(
-                evaluator,
-                reference,
-                testExpression.d.expr,
-                !isPositiveTest,
-                recursionCount
-            );
-        }
+    const notExpressionInfo = TypeEvaluatorNarrowing.getNotExpressionNarrowingInfo(
+        reference,
+        testExpression,
+        isPositiveTest
+    );
+
+    if (notExpressionInfo) {
+        return getTypeNarrowingCallback(
+            evaluator,
+            reference,
+            notExpressionInfo.innerExpression,
+            notExpressionInfo.adjIsPositiveTest,
+            recursionCount
+        );
     }
 
     return undefined;

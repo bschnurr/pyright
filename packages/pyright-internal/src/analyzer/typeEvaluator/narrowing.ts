@@ -341,6 +341,15 @@ export interface TypeGuardCallNarrowingInfo {
     typeGuardType: Type;
 }
 
+export interface DirectReferenceNarrowingContext {
+    isMatchingExpression: (reference: ExpressionNode, expression: ExpressionNode) => boolean;
+}
+
+export interface NotExpressionNarrowingInfo {
+    adjIsPositiveTest: boolean;
+    innerExpression: ExpressionNode;
+}
+
 export interface AliasedConditionNarrowingContext {
     isNodeReachable: (fromNode: ParseNode, toNode: ParseNode) => boolean;
 }
@@ -2655,6 +2664,33 @@ export function getTypeGuardCallNarrowingInfo(
     }
 
     return undefined;
+}
+
+export function isDirectReferenceTest(
+    ctx: DirectReferenceNarrowingContext,
+    reference: ExpressionNode,
+    testExpression: ExpressionNode
+): boolean {
+    return ctx.isMatchingExpression(reference, testExpression);
+}
+
+export function getNotExpressionNarrowingInfo(
+    reference: ExpressionNode,
+    testExpression: ExpressionNode,
+    isPositiveTest: boolean
+): NotExpressionNarrowingInfo | undefined {
+    if (reference.nodeType !== ParseNodeType.Name) {
+        return undefined;
+    }
+
+    if (testExpression.nodeType !== ParseNodeType.UnaryOperation || testExpression.d.operator !== OperatorType.Not) {
+        return undefined;
+    }
+
+    return {
+        adjIsPositiveTest: !isPositiveTest,
+        innerExpression: testExpression.d.expr,
+    };
 }
 
 export function getTypeNarrowingCallbackForAliasedCondition<TCallback>(
