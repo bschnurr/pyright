@@ -586,22 +586,6 @@ export function getTypeNarrowingCallback(
                     };
                 };
             }
-
-            if (memberAccessInfo.kind === 'literal-equals') {
-                return (type: Type) => {
-                    return {
-                        type: narrowTypeForDiscriminatedLiteralFieldComparison(
-                            evaluator,
-                            type,
-                            memberAccessInfo.memberName,
-                            memberAccessInfo.rightType!,
-                            memberAccessInfo.adjIsPositiveTest
-                        ),
-                        isIncomplete: memberAccessInfo.isIncomplete,
-                    };
-                };
-            }
-
             return (type: Type) => {
                 return {
                     type: narrowTypeForDiscriminatedLiteralFieldComparison(
