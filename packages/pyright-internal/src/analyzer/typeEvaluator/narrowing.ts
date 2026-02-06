@@ -17,6 +17,7 @@
  */
 
 import {
+    ArgCategory,
     AssignmentExpressionNode,
     ExpressionNode,
     isExpressionNode,
@@ -25,6 +26,7 @@ import {
     ParseNode,
     ParseNodeType,
 } from '../../parser/parseNodes';
+import { KeywordType, OperatorType } from '../../parser/tokenizerTypes';
 import { getFileInfo } from '../analyzerNodeInfo';
 import { ConstraintTracker } from '../constraintTracker';
 import { Declaration, DeclarationType } from '../declaration';
@@ -206,6 +208,16 @@ export interface EnumerateLiteralsContext {
 
 export interface NameSameScopeContext {
     lookUpSymbolRecursive: (node: NameNode, name: string, honorCodeFlow: boolean) => SymbolWithScope | undefined;
+}
+
+export interface NoneEllipsisNarrowingContext {
+    isMatchingExpression: (reference: ExpressionNode, expression: ExpressionNode) => boolean;
+}
+
+export interface NoneEllipsisNarrowingInfo {
+    kind: 'none' | 'tuple-none' | 'ellipsis';
+    adjIsPositiveTest: boolean;
+    tupleIndex?: number;
 }
 
 export interface AliasedConditionNarrowingContext {
@@ -1839,6 +1851,82 @@ export function isNameSameScope(ctx: NameSameScopeContext, reference: NameNode, 
     }
 
     return isScopeContainedWithin(refScope, exprScope);
+}
+
+export function getNoneEllipsisNarrowingInfo(
+    ctx: NoneEllipsisNarrowingContext,
+    reference: ExpressionNode,
+    testExpression: ExpressionNode,
+    isPositiveTest: boolean
+): NoneEllipsisNarrowingInfo | undefined {
+    if (testExpression.nodeType !== ParseNodeType.BinaryOperation) {
+        return undefined;
+    }
+
+    const isOrIsNotOperator =
+        testExpression.d.operator === OperatorType.Is || testExpression.d.operator === OperatorType.IsNot;
+    const equalsOrNotEqualsOperator =
+        testExpression.d.operator === OperatorType.Equals || testExpression.d.operator === OperatorType.NotEquals;
+
+    if (!isOrIsNotOperator && !equalsOrNotEqualsOperator) {
+        return undefined;
+    }
+
+    const adjIsPositiveTest =
+        testExpression.d.operator === OperatorType.Is || testExpression.d.operator === OperatorType.Equals
+            ? isPositiveTest
+            : !isPositiveTest;
+
+    // Look for "X is None", "X is not None", "X == None", and "X != None".
+    // These are commonly-used patterns used in control flow.
+    if (
+        testExpression.d.rightExpr.nodeType === ParseNodeType.Constant &&
+        testExpression.d.rightExpr.d.constType === KeywordType.None
+    ) {
+        // Allow the LHS to be either a simple expression or an assignment
+        // expression that assigns to a simple name.
+        let leftExpression = testExpression.d.leftExpr;
+        if (leftExpression.nodeType === ParseNodeType.AssignmentExpression) {
+            leftExpression = leftExpression.d.name;
+        }
+
+        if (ctx.isMatchingExpression(reference, leftExpression)) {
+            return { kind: 'none', adjIsPositiveTest };
+        }
+
+        if (
+            leftExpression.nodeType === ParseNodeType.Index &&
+            ctx.isMatchingExpression(reference, leftExpression.d.leftExpr) &&
+            leftExpression.d.items.length === 1 &&
+            !leftExpression.d.trailingComma &&
+            leftExpression.d.items[0].d.argCategory === ArgCategory.Simple &&
+            !leftExpression.d.items[0].d.name &&
+            leftExpression.d.items[0].d.valueExpr.nodeType === ParseNodeType.Number &&
+            leftExpression.d.items[0].d.valueExpr.d.isInteger &&
+            !leftExpression.d.items[0].d.valueExpr.d.isImaginary
+        ) {
+            const indexValue = leftExpression.d.items[0].d.valueExpr.d.value;
+            if (typeof indexValue === 'number') {
+                return { kind: 'tuple-none', adjIsPositiveTest, tupleIndex: indexValue };
+            }
+        }
+    }
+
+    // Look for "X is ...", "X is not ...", "X == ...", and "X != ...".
+    if (testExpression.d.rightExpr.nodeType === ParseNodeType.Ellipsis) {
+        // Allow the LHS to be either a simple expression or an assignment
+        // expression that assigns to a simple name.
+        let leftExpression = testExpression.d.leftExpr;
+        if (leftExpression.nodeType === ParseNodeType.AssignmentExpression) {
+            leftExpression = leftExpression.d.name;
+        }
+
+        if (ctx.isMatchingExpression(reference, leftExpression)) {
+            return { kind: 'ellipsis', adjIsPositiveTest };
+        }
+    }
+
+    return undefined;
 }
 
 export function getTypeNarrowingCallbackForAliasedCondition<TCallback>(

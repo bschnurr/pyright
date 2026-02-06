@@ -141,6 +141,17 @@ function getNameSameScopeContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowi
     };
 }
 
+function getNoneEllipsisNarrowingContext(
+    evaluator: TypeEvaluator
+): TypeEvaluatorNarrowing.NoneEllipsisNarrowingContext {
+    return {
+        isMatchingExpression: (reference, expression) =>
+            ParseTreeUtils.isMatchingExpression(reference, expression, (ref, expr) =>
+                isNameSameScope(evaluator, ref, expr)
+            ),
+    };
+}
+
 function getAliasedConditionNarrowingContext(
     evaluator: TypeEvaluator
 ): TypeEvaluatorNarrowing.AliasedConditionNarrowingContext {
@@ -266,92 +277,52 @@ export function getTypeNarrowingCallback(
                     ? isPositiveTest
                     : !isPositiveTest;
 
-            // Look for "X is None", "X is not None", "X == None", and "X != None".
-            // These are commonly-used patterns used in control flow.
-            if (
-                testExpression.d.rightExpr.nodeType === ParseNodeType.Constant &&
-                testExpression.d.rightExpr.d.constType === KeywordType.None
-            ) {
-                // Allow the LHS to be either a simple expression or an assignment
-                // expression that assigns to a simple name.
-                let leftExpression = testExpression.d.leftExpr;
-                if (leftExpression.nodeType === ParseNodeType.AssignmentExpression) {
-                    leftExpression = leftExpression.d.name;
-                }
+            const noneEllipsisInfo = TypeEvaluatorNarrowing.getNoneEllipsisNarrowingInfo(
+                getNoneEllipsisNarrowingContext(evaluator),
+                reference,
+                testExpression,
+                isPositiveTest
+            );
 
-                if (
-                    ParseTreeUtils.isMatchingExpression(reference, leftExpression, (ref, expr) =>
-                        isNameSameScope(evaluator, ref, expr)
-                    )
-                ) {
+            if (noneEllipsisInfo) {
+                if (noneEllipsisInfo.kind === 'none') {
                     return (type: Type) => {
                         return {
                             type: TypeEvaluatorNarrowing.narrowTypeForIsNone(
                                 getIsNoneNarrowingContext(evaluator),
                                 type,
-                                adjIsPositiveTest
+                                noneEllipsisInfo.adjIsPositiveTest
                             ),
                             isIncomplete: false,
                         };
                     };
                 }
 
-                if (
-                    leftExpression.nodeType === ParseNodeType.Index &&
-                    ParseTreeUtils.isMatchingExpression(reference, leftExpression.d.leftExpr, (ref, expr) =>
-                        isNameSameScope(evaluator, ref, expr)
-                    ) &&
-                    leftExpression.d.items.length === 1 &&
-                    !leftExpression.d.trailingComma &&
-                    leftExpression.d.items[0].d.argCategory === ArgCategory.Simple &&
-                    !leftExpression.d.items[0].d.name &&
-                    leftExpression.d.items[0].d.valueExpr.nodeType === ParseNodeType.Number &&
-                    leftExpression.d.items[0].d.valueExpr.d.isInteger &&
-                    !leftExpression.d.items[0].d.valueExpr.d.isImaginary
-                ) {
-                    const indexValue = leftExpression.d.items[0].d.valueExpr.d.value;
-                    if (typeof indexValue === 'number') {
-                        return (type: Type) => {
-                            return {
-                                type: TypeEvaluatorNarrowing.narrowTupleTypeForIsNone(
-                                    getIsNoneNarrowingContext(evaluator),
-                                    type,
-                                    adjIsPositiveTest,
-                                    indexValue
-                                ),
-                                isIncomplete: false,
-                            };
-                        };
-                    }
-                }
-            }
-
-            // Look for "X is ...", "X is not ...", "X == ...", and "X != ...".
-            if (testExpression.d.rightExpr.nodeType === ParseNodeType.Ellipsis) {
-                // Allow the LHS to be either a simple expression or an assignment
-                // expression that assigns to a simple name.
-                let leftExpression = testExpression.d.leftExpr;
-                if (leftExpression.nodeType === ParseNodeType.AssignmentExpression) {
-                    leftExpression = leftExpression.d.name;
-                }
-
-                if (
-                    ParseTreeUtils.isMatchingExpression(reference, leftExpression, (ref, expr) =>
-                        isNameSameScope(evaluator, ref, expr)
-                    )
-                ) {
+                if (noneEllipsisInfo.kind === 'tuple-none') {
                     return (type: Type) => {
                         return {
-                            type: TypeEvaluatorNarrowing.narrowTypeForIsEllipsis(
-                                getIsEllipsisNarrowingContext(evaluator),
-                                testExpression,
+                            type: TypeEvaluatorNarrowing.narrowTupleTypeForIsNone(
+                                getIsNoneNarrowingContext(evaluator),
                                 type,
-                                adjIsPositiveTest
+                                noneEllipsisInfo.adjIsPositiveTest,
+                                noneEllipsisInfo.tupleIndex!
                             ),
                             isIncomplete: false,
                         };
                     };
                 }
+
+                return (type: Type) => {
+                    return {
+                        type: TypeEvaluatorNarrowing.narrowTypeForIsEllipsis(
+                            getIsEllipsisNarrowingContext(evaluator),
+                            testExpression,
+                            type,
+                            noneEllipsisInfo.adjIsPositiveTest
+                        ),
+                        isIncomplete: false,
+                    };
+                };
             }
 
             // Look for "type(X) is Y", "type(X) is not Y", "type(X) == Y" or "type(X) != Y".
