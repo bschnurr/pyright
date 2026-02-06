@@ -1022,9 +1022,13 @@ function getTypeNarrowingCallbackForAssignmentExpression(
     isPositiveTest: boolean,
     recursionCount: number
 ) {
-    return (
-        getTypeNarrowingCallback(evaluator, reference, testExpression.d.rightExpr, isPositiveTest, recursionCount) ??
-        getTypeNarrowingCallback(evaluator, reference, testExpression.d.name, isPositiveTest, recursionCount)
+    return TypeEvaluatorNarrowing.getTypeNarrowingCallbackForAssignmentExpression(
+        reference,
+        testExpression,
+        isPositiveTest,
+        recursionCount,
+        (referenceNode, testExprNode, positiveTest, recursionCountOverride) =>
+            getTypeNarrowingCallback(evaluator, referenceNode, testExprNode, positiveTest, recursionCountOverride)
     );
 }
 

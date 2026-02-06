@@ -17,6 +17,7 @@
  */
 
 import {
+    AssignmentExpressionNode,
     ExpressionNode,
     isExpressionNode,
     NameNode,
@@ -1909,6 +1910,24 @@ export function getTypeNarrowingCallbackForAliasedCondition<TCallback>(
     }
 
     return getTypeNarrowingCallback(reference, initNode, isPositiveTest, recursionCount);
+}
+
+export function getTypeNarrowingCallbackForAssignmentExpression<TCallback>(
+    reference: ExpressionNode,
+    testExpression: AssignmentExpressionNode,
+    isPositiveTest: boolean,
+    recursionCount: number,
+    getTypeNarrowingCallback: (
+        reference: ExpressionNode,
+        testExpression: ExpressionNode,
+        isPositiveTest: boolean,
+        recursionCount: number
+    ) => TCallback | undefined
+): TCallback | undefined {
+    return (
+        getTypeNarrowingCallback(reference, testExpression.d.rightExpr, isPositiveTest, recursionCount) ??
+        getTypeNarrowingCallback(reference, testExpression.d.name, isPositiveTest, recursionCount)
+    );
 }
 
 // Determines whether the symbol is a local variable or parameter within
