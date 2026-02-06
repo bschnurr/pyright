@@ -295,6 +295,19 @@ export interface LenComparisonNarrowingInfo {
     isIncomplete: boolean;
 }
 
+export interface InOperatorNarrowingContext {
+    getTypeOfExpression: (node: ExpressionNode, flags?: EvalFlags) => TypeResult;
+    isMatchingExpression: (reference: ExpressionNode, expression: ExpressionNode) => boolean;
+}
+
+export interface InOperatorNarrowingInfo {
+    kind: 'container' | 'typed-dict-key';
+    adjIsPositiveTest: boolean;
+    isIncomplete: boolean;
+    containerType?: Type;
+    typedDictKeyType?: ClassType;
+}
+
 export interface AliasedConditionNarrowingContext {
     isNodeReachable: (fromNode: ParseNode, toNode: ParseNode) => boolean;
 }
@@ -2421,6 +2434,50 @@ export function getLenComparisonNarrowingInfo(
         tupleLength,
         isIncomplete: !!callTypeResult.isIncomplete || !!rightTypeResult.isIncomplete,
     };
+}
+
+export function getInOperatorNarrowingInfo(
+    ctx: InOperatorNarrowingContext,
+    reference: ExpressionNode,
+    testExpression: ExpressionNode,
+    isPositiveTest: boolean
+): InOperatorNarrowingInfo | undefined {
+    if (testExpression.nodeType !== ParseNodeType.BinaryOperation) {
+        return undefined;
+    }
+
+    if (testExpression.d.operator !== OperatorType.In && testExpression.d.operator !== OperatorType.NotIn) {
+        return undefined;
+    }
+
+    const adjIsPositiveTest = testExpression.d.operator === OperatorType.In ? isPositiveTest : !isPositiveTest;
+
+    if (ctx.isMatchingExpression(reference, testExpression.d.leftExpr)) {
+        const rightTypeResult = ctx.getTypeOfExpression(testExpression.d.rightExpr);
+
+        return {
+            kind: 'container',
+            adjIsPositiveTest,
+            isIncomplete: !!rightTypeResult.isIncomplete,
+            containerType: rightTypeResult.type,
+        };
+    }
+
+    if (ctx.isMatchingExpression(reference, testExpression.d.rightExpr)) {
+        const leftTypeResult = ctx.getTypeOfExpression(testExpression.d.leftExpr);
+        const leftType = leftTypeResult.type;
+
+        if (isClassInstance(leftType) && ClassType.isBuiltIn(leftType, 'str') && isLiteralType(leftType)) {
+            return {
+                kind: 'typed-dict-key',
+                adjIsPositiveTest,
+                isIncomplete: !!leftTypeResult.isIncomplete,
+                typedDictKeyType: ClassType.cloneAsInstantiable(leftType),
+            };
+        }
+    }
+
+    return undefined;
 }
 
 export function getTypeNarrowingCallbackForAliasedCondition<TCallback>(

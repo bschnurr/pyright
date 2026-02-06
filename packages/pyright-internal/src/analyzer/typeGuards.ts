@@ -29,7 +29,7 @@ import {
     Type,
     TypeVarType,
 } from './types';
-import { isLiteralType, lookUpClassMember, lookUpObjectMember } from './typeUtils';
+import { lookUpClassMember, lookUpObjectMember } from './typeUtils';
 
 export interface TypeNarrowingResult {
     type: Type;
@@ -208,6 +208,16 @@ function getMemberAccessNarrowingContext(
 function getLenComparisonNarrowingContext(
     evaluator: TypeEvaluator
 ): TypeEvaluatorNarrowing.LenComparisonNarrowingContext {
+    return {
+        getTypeOfExpression: (node, flags) => evaluator.getTypeOfExpression(node, flags),
+        isMatchingExpression: (reference, expression) =>
+            ParseTreeUtils.isMatchingExpression(reference, expression, (ref, expr) =>
+                isNameSameScope(evaluator, ref, expr)
+            ),
+    };
+}
+
+function getInOperatorNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.InOperatorNarrowingContext {
     return {
         getTypeOfExpression: (node, flags) => evaluator.getTypeOfExpression(node, flags),
         isMatchingExpression: (reference, expression) =>
@@ -620,50 +630,39 @@ export function getTypeNarrowingCallback(
         }
 
         if (testExpression.d.operator === OperatorType.In || testExpression.d.operator === OperatorType.NotIn) {
-            // Look for "x in y" or "x not in y" where y is one of several built-in types.
-            if (
-                ParseTreeUtils.isMatchingExpression(reference, testExpression.d.leftExpr, (ref, expr) =>
-                    isNameSameScope(evaluator, ref, expr)
-                )
-            ) {
-                const rightTypeResult = evaluator.getTypeOfExpression(testExpression.d.rightExpr);
-                const rightType = rightTypeResult.type;
-                const adjIsPositiveTest =
-                    testExpression.d.operator === OperatorType.In ? isPositiveTest : !isPositiveTest;
+            const inOperatorInfo = TypeEvaluatorNarrowing.getInOperatorNarrowingInfo(
+                getInOperatorNarrowingContext(evaluator),
+                reference,
+                testExpression,
+                isPositiveTest
+            );
 
-                return (type: Type) => {
-                    return {
-                        type: narrowTypeForContainerType(evaluator, type, rightType, adjIsPositiveTest),
-                        isIncomplete: !!rightTypeResult.isIncomplete,
-                    };
-                };
-            }
-
-            if (
-                ParseTreeUtils.isMatchingExpression(reference, testExpression.d.rightExpr, (ref, expr) =>
-                    isNameSameScope(evaluator, ref, expr)
-                )
-            ) {
-                // Look for <string literal> in y where y is a union that contains
-                // one or more TypedDicts.
-                const leftTypeResult = evaluator.getTypeOfExpression(testExpression.d.leftExpr);
-                const leftType = leftTypeResult.type;
-
-                if (isClassInstance(leftType) && ClassType.isBuiltIn(leftType, 'str') && isLiteralType(leftType)) {
-                    const adjIsPositiveTest =
-                        testExpression.d.operator === OperatorType.In ? isPositiveTest : !isPositiveTest;
+            if (inOperatorInfo) {
+                if (inOperatorInfo.kind === 'container') {
                     return (type: Type) => {
                         return {
-                            type: narrowTypeForTypedDictKey(
+                            type: narrowTypeForContainerType(
                                 evaluator,
                                 type,
-                                ClassType.cloneAsInstantiable(leftType),
-                                adjIsPositiveTest
+                                inOperatorInfo.containerType!,
+                                inOperatorInfo.adjIsPositiveTest
                             ),
-                            isIncomplete: !!leftTypeResult.isIncomplete,
+                            isIncomplete: inOperatorInfo.isIncomplete,
                         };
                     };
                 }
+
+                return (type: Type) => {
+                    return {
+                        type: narrowTypeForTypedDictKey(
+                            evaluator,
+                            type,
+                            inOperatorInfo.typedDictKeyType!,
+                            inOperatorInfo.adjIsPositiveTest
+                        ),
+                        isIncomplete: inOperatorInfo.isIncomplete,
+                    };
+                };
             }
         }
     }
