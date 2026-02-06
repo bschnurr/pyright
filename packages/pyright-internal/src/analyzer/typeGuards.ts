@@ -193,6 +193,18 @@ function getEqualsLiteralNarrowingContext(
     };
 }
 
+function getMemberAccessNarrowingContext(
+    evaluator: TypeEvaluator
+): TypeEvaluatorNarrowing.MemberAccessNarrowingContext {
+    return {
+        getTypeOfExpression: (node) => evaluator.getTypeOfExpression(node),
+        isMatchingExpression: (reference, expression) =>
+            ParseTreeUtils.isMatchingExpression(reference, expression, (ref, expr) =>
+                isNameSameScope(evaluator, ref, expr)
+            ),
+    };
+}
+
 function getAliasedConditionNarrowingContext(
     evaluator: TypeEvaluator
 ): TypeEvaluatorNarrowing.AliasedConditionNarrowingContext {
@@ -518,88 +530,53 @@ export function getTypeNarrowingCallback(
                 }
             }
 
-            // Look for X.Y == <literal> or X.Y != <literal>
-            if (
-                equalsOrNotEqualsOperator &&
-                testExpression.d.leftExpr.nodeType === ParseNodeType.MemberAccess &&
-                ParseTreeUtils.isMatchingExpression(reference, testExpression.d.leftExpr.d.leftExpr, (ref, expr) =>
-                    isNameSameScope(evaluator, ref, expr)
-                )
-            ) {
-                const rightTypeResult = evaluator.getTypeOfExpression(testExpression.d.rightExpr);
-                const rightType = rightTypeResult.type;
-                const memberName = testExpression.d.leftExpr.d.member;
+            const memberAccessInfo = TypeEvaluatorNarrowing.getMemberAccessNarrowingInfo(
+                getMemberAccessNarrowingContext(evaluator),
+                reference,
+                testExpression,
+                isPositiveTest
+            );
 
-                if (isClassInstance(rightType)) {
-                    if (rightType.priv.literalValue !== undefined || isNoneInstance(rightType)) {
-                        return (type: Type) => {
-                            return {
-                                type: narrowTypeForDiscriminatedLiteralFieldComparison(
-                                    evaluator,
-                                    type,
-                                    memberName.d.value,
-                                    rightType,
-                                    adjIsPositiveTest
-                                ),
-                                isIncomplete: !!rightTypeResult.isIncomplete,
-                            };
+            if (memberAccessInfo) {
+                if (memberAccessInfo.kind === 'none-is') {
+                    return (type: Type) => {
+                        return {
+                            type: narrowTypeForDiscriminatedFieldNoneComparison(
+                                evaluator,
+                                type,
+                                memberAccessInfo.memberName,
+                                memberAccessInfo.adjIsPositiveTest
+                            ),
+                            isIncomplete: false,
                         };
-                    }
+                    };
                 }
-            }
 
-            // Look for X.Y is <literal> or X.Y is not <literal> where <literal> is
-            // an enum or bool literal
-            if (
-                testExpression.d.leftExpr.nodeType === ParseNodeType.MemberAccess &&
-                ParseTreeUtils.isMatchingExpression(reference, testExpression.d.leftExpr.d.leftExpr, (ref, expr) =>
-                    isNameSameScope(evaluator, ref, expr)
-                )
-            ) {
-                const rightTypeResult = evaluator.getTypeOfExpression(testExpression.d.rightExpr);
-                const rightType = rightTypeResult.type;
-                const memberName = testExpression.d.leftExpr.d.member;
-
-                if (
-                    isClassInstance(rightType) &&
-                    (ClassType.isEnumClass(rightType) || ClassType.isBuiltIn(rightType, 'bool')) &&
-                    rightType.priv.literalValue !== undefined
-                ) {
+                if (memberAccessInfo.kind === 'literal-equals') {
                     return (type: Type) => {
                         return {
                             type: narrowTypeForDiscriminatedLiteralFieldComparison(
                                 evaluator,
                                 type,
-                                memberName.d.value,
-                                rightType,
-                                adjIsPositiveTest
+                                memberAccessInfo.memberName,
+                                memberAccessInfo.rightType!,
+                                memberAccessInfo.adjIsPositiveTest
                             ),
-                            isIncomplete: !!rightTypeResult.isIncomplete,
+                            isIncomplete: memberAccessInfo.isIncomplete,
                         };
                     };
                 }
-            }
 
-            // Look for X.Y is None or X.Y is not None
-            // These are commonly-used patterns used in control flow.
-            if (
-                testExpression.d.leftExpr.nodeType === ParseNodeType.MemberAccess &&
-                ParseTreeUtils.isMatchingExpression(reference, testExpression.d.leftExpr.d.leftExpr, (ref, expr) =>
-                    isNameSameScope(evaluator, ref, expr)
-                ) &&
-                testExpression.d.rightExpr.nodeType === ParseNodeType.Constant &&
-                testExpression.d.rightExpr.d.constType === KeywordType.None
-            ) {
-                const memberName = testExpression.d.leftExpr.d.member;
                 return (type: Type) => {
                     return {
-                        type: narrowTypeForDiscriminatedFieldNoneComparison(
+                        type: narrowTypeForDiscriminatedLiteralFieldComparison(
                             evaluator,
                             type,
-                            memberName.d.value,
-                            adjIsPositiveTest
+                            memberAccessInfo.memberName,
+                            memberAccessInfo.rightType!,
+                            memberAccessInfo.adjIsPositiveTest
                         ),
-                        isIncomplete: false,
+                        isIncomplete: memberAccessInfo.isIncomplete,
                     };
                 };
             }

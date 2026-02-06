@@ -270,6 +270,19 @@ export interface EqualsLiteralNarrowingInfo {
     indexType?: ClassType;
 }
 
+export interface MemberAccessNarrowingContext {
+    getTypeOfExpression: (node: ExpressionNode) => TypeResult;
+    isMatchingExpression: (reference: ExpressionNode, expression: ExpressionNode) => boolean;
+}
+
+export interface MemberAccessNarrowingInfo {
+    kind: 'literal-equals' | 'literal-is' | 'none-is';
+    adjIsPositiveTest: boolean;
+    isIncomplete: boolean;
+    memberName: string;
+    rightType?: ClassType;
+}
+
 export interface AliasedConditionNarrowingContext {
     isNodeReachable: (fromNode: ParseNode, toNode: ParseNode) => boolean;
 }
@@ -2231,6 +2244,90 @@ export function getEqualsLiteralNarrowingInfo(
                     };
                 }
             }
+        }
+    }
+
+    return undefined;
+}
+
+export function getMemberAccessNarrowingInfo(
+    ctx: MemberAccessNarrowingContext,
+    reference: ExpressionNode,
+    testExpression: ExpressionNode,
+    isPositiveTest: boolean
+): MemberAccessNarrowingInfo | undefined {
+    if (testExpression.nodeType !== ParseNodeType.BinaryOperation) {
+        return undefined;
+    }
+
+    const isOrIsNotOperator =
+        testExpression.d.operator === OperatorType.Is || testExpression.d.operator === OperatorType.IsNot;
+    const equalsOrNotEqualsOperator =
+        testExpression.d.operator === OperatorType.Equals || testExpression.d.operator === OperatorType.NotEquals;
+
+    if (!isOrIsNotOperator && !equalsOrNotEqualsOperator) {
+        return undefined;
+    }
+
+    if (
+        testExpression.d.leftExpr.nodeType !== ParseNodeType.MemberAccess ||
+        !ctx.isMatchingExpression(reference, testExpression.d.leftExpr.d.leftExpr)
+    ) {
+        return undefined;
+    }
+
+    const memberName = testExpression.d.leftExpr.d.member.d.value;
+
+    if (equalsOrNotEqualsOperator) {
+        const adjIsPositiveTest =
+            testExpression.d.operator === OperatorType.Equals ? isPositiveTest : !isPositiveTest;
+        const rightTypeResult = ctx.getTypeOfExpression(testExpression.d.rightExpr);
+        const rightType = rightTypeResult.type;
+
+        if (isClassInstance(rightType) && (rightType.priv.literalValue !== undefined || isNoneInstance(rightType))) {
+            return {
+                kind: 'literal-equals',
+                adjIsPositiveTest,
+                isIncomplete: !!rightTypeResult.isIncomplete,
+                memberName,
+                rightType,
+            };
+        }
+    }
+
+    // Look for X.Y is <literal> or X.Y is not <literal> where <literal> is
+    // an enum or bool literal.
+    if (isOrIsNotOperator) {
+        const adjIsPositiveTest =
+            testExpression.d.operator === OperatorType.Is ? isPositiveTest : !isPositiveTest;
+        const rightTypeResult = ctx.getTypeOfExpression(testExpression.d.rightExpr);
+        const rightType = rightTypeResult.type;
+
+        if (
+            isClassInstance(rightType) &&
+            (ClassType.isEnumClass(rightType) || ClassType.isBuiltIn(rightType, 'bool')) &&
+            rightType.priv.literalValue !== undefined
+        ) {
+            return {
+                kind: 'literal-is',
+                adjIsPositiveTest,
+                isIncomplete: !!rightTypeResult.isIncomplete,
+                memberName,
+                rightType,
+            };
+        }
+
+        // Look for X.Y is None or X.Y is not None.
+        if (
+            testExpression.d.rightExpr.nodeType === ParseNodeType.Constant &&
+            testExpression.d.rightExpr.d.constType === KeywordType.None
+        ) {
+            return {
+                kind: 'none-is',
+                adjIsPositiveTest,
+                isIncomplete: false,
+                memberName,
+            };
         }
     }
 
