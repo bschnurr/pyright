@@ -369,52 +369,19 @@ export function getTypeNarrowingCallback(
     }
 
     if (testExpression.nodeType === ParseNodeType.BinaryOperation) {
-        const isOrIsNotOperator =
-            testExpression.d.operator === OperatorType.Is || testExpression.d.operator === OperatorType.IsNot;
-        const equalsOrNotEqualsOperator =
-            testExpression.d.operator === OperatorType.Equals || testExpression.d.operator === OperatorType.NotEquals;
+        const noneEllipsisInfo = TypeEvaluatorNarrowing.getNoneEllipsisNarrowingInfo(
+            getNoneEllipsisNarrowingContext(evaluator),
+            reference,
+            testExpression,
+            isPositiveTest
+        );
 
-        if (isOrIsNotOperator || equalsOrNotEqualsOperator) {
-            const noneEllipsisInfo = TypeEvaluatorNarrowing.getNoneEllipsisNarrowingInfo(
-                getNoneEllipsisNarrowingContext(evaluator),
-                reference,
-                testExpression,
-                isPositiveTest
-            );
-
-            if (noneEllipsisInfo) {
-                if (noneEllipsisInfo.kind === 'none') {
-                    return (type: Type) => {
-                        return {
-                            type: TypeEvaluatorNarrowing.narrowTypeForIsNone(
-                                getIsNoneNarrowingContext(evaluator),
-                                type,
-                                noneEllipsisInfo.adjIsPositiveTest
-                            ),
-                            isIncomplete: false,
-                        };
-                    };
-                }
-
-                if (noneEllipsisInfo.kind === 'tuple-none') {
-                    return (type: Type) => {
-                        return {
-                            type: TypeEvaluatorNarrowing.narrowTupleTypeForIsNone(
-                                getIsNoneNarrowingContext(evaluator),
-                                type,
-                                noneEllipsisInfo.adjIsPositiveTest,
-                                noneEllipsisInfo.tupleIndex!
-                            ),
-                            isIncomplete: false,
-                        };
-                    };
-                }
-
+        if (noneEllipsisInfo) {
+            if (noneEllipsisInfo.kind === 'none') {
                 return (type: Type) => {
                     return {
-                        type: TypeEvaluatorNarrowing.narrowTypeForIsEllipsis(
-                            getIsEllipsisNarrowingContext(evaluator),
-                            testExpression,
+                        type: TypeEvaluatorNarrowing.narrowTypeForIsNone(
+                            getIsNoneNarrowingContext(evaluator),
                             type,
                             noneEllipsisInfo.adjIsPositiveTest
                         ),
@@ -423,195 +390,204 @@ export function getTypeNarrowingCallback(
                 };
             }
 
-            // Look for "type(X) is Y", "type(X) is not Y", "type(X) == Y" or "type(X) != Y".
-            const typeIsInfo = TypeEvaluatorNarrowing.getTypeIsCallNarrowingInfo(
-                getTypeIsCallNarrowingContext(evaluator),
-                reference,
-                testExpression,
-                isPositiveTest
-            );
-
-            if (typeIsInfo) {
+            if (noneEllipsisInfo.kind === 'tuple-none') {
                 return (type: Type) => {
                     return {
-                        type: TypeEvaluatorNarrowing.narrowTypeForTypeIs(
-                            getTypeIsNarrowingContext(evaluator),
+                        type: TypeEvaluatorNarrowing.narrowTupleTypeForIsNone(
+                            getIsNoneNarrowingContext(evaluator),
                             type,
-                            typeIsInfo.classTypes,
-                            typeIsInfo.adjIsPositiveTest
+                            noneEllipsisInfo.adjIsPositiveTest,
+                            noneEllipsisInfo.tupleIndex!
                         ),
-                        isIncomplete: typeIsInfo.isIncomplete,
+                        isIncomplete: false,
                     };
                 };
             }
 
-            if (isOrIsNotOperator) {
-                const literalOrClassInfo = TypeEvaluatorNarrowing.getIsLiteralOrClassNarrowingInfo(
-                    getIsLiteralOrClassNarrowingContext(evaluator),
-                    reference,
-                    testExpression,
-                    isPositiveTest
-                );
+            return (type: Type) => {
+                return {
+                    type: TypeEvaluatorNarrowing.narrowTypeForIsEllipsis(
+                        getIsEllipsisNarrowingContext(evaluator),
+                        testExpression,
+                        type,
+                        noneEllipsisInfo.adjIsPositiveTest
+                    ),
+                    isIncomplete: false,
+                };
+            };
+        }
 
-                if (literalOrClassInfo) {
-                    if (literalOrClassInfo.kind === 'literal') {
-                        return (type: Type) => {
-                            return {
-                                type: TypeEvaluatorNarrowing.narrowTypeForLiteralComparison(
-                                    getLiteralComparisonContext(evaluator),
-                                    type,
-                                    literalOrClassInfo.rightType,
-                                    literalOrClassInfo.adjIsPositiveTest,
-                                    /* isIsOperator */ true
-                                ),
-                                isIncomplete: literalOrClassInfo.isIncomplete,
-                            };
-                        };
-                    }
+        // Look for "type(X) is Y", "type(X) is not Y", "type(X) == Y" or "type(X) != Y".
+        const typeIsInfo = TypeEvaluatorNarrowing.getTypeIsCallNarrowingInfo(
+            getTypeIsCallNarrowingContext(evaluator),
+            reference,
+            testExpression,
+            isPositiveTest
+        );
 
-                    return (type: Type) => {
-                        return {
-                            type: TypeEvaluatorNarrowing.narrowTypeForClassComparison(
-                                getClassComparisonContext(evaluator),
-                                type,
-                                literalOrClassInfo.rightType,
-                                literalOrClassInfo.adjIsPositiveTest
-                            ),
-                            isIncomplete: literalOrClassInfo.isIncomplete,
-                        };
+        if (typeIsInfo) {
+            return (type: Type) => {
+                return {
+                    type: TypeEvaluatorNarrowing.narrowTypeForTypeIs(
+                        getTypeIsNarrowingContext(evaluator),
+                        type,
+                        typeIsInfo.classTypes,
+                        typeIsInfo.adjIsPositiveTest
+                    ),
+                    isIncomplete: typeIsInfo.isIncomplete,
+                };
+            };
+        }
+
+        const literalOrClassInfo = TypeEvaluatorNarrowing.getIsLiteralOrClassNarrowingInfo(
+            getIsLiteralOrClassNarrowingContext(evaluator),
+            reference,
+            testExpression,
+            isPositiveTest
+        );
+
+        if (literalOrClassInfo) {
+            if (literalOrClassInfo.kind === 'literal') {
+                return (type: Type) => {
+                    return {
+                        type: TypeEvaluatorNarrowing.narrowTypeForLiteralComparison(
+                            getLiteralComparisonContext(evaluator),
+                            type,
+                            literalOrClassInfo.rightType,
+                            literalOrClassInfo.adjIsPositiveTest,
+                            /* isIsOperator */ true
+                        ),
+                        isIncomplete: literalOrClassInfo.isIncomplete,
                     };
-                }
-
-                // Look for X[<literal>] is <literal> or X[<literal>] is not <literal>.
-                const indexedLiteralInfo = TypeEvaluatorNarrowing.getIndexedLiteralNarrowingInfo(
-                    getIndexedLiteralNarrowingContext(evaluator),
-                    reference,
-                    testExpression,
-                    isPositiveTest
-                );
-
-                if (indexedLiteralInfo) {
-                    if (indexedLiteralInfo.kind === 'dict') {
-                        return (type: Type) => {
-                            return {
-                                type: narrowTypeForDiscriminatedDictEntryComparison(
-                                    evaluator,
-                                    type,
-                                    indexedLiteralInfo.indexType,
-                                    indexedLiteralInfo.rightType,
-                                    indexedLiteralInfo.adjIsPositiveTest
-                                ),
-                                isIncomplete: indexedLiteralInfo.isIncomplete,
-                            };
-                        };
-                    }
-
-                    return (type: Type) => {
-                        return {
-                            type: narrowTypeForDiscriminatedTupleComparison(
-                                evaluator,
-                                type,
-                                indexedLiteralInfo.indexType,
-                                indexedLiteralInfo.rightType,
-                                indexedLiteralInfo.adjIsPositiveTest
-                            ),
-                            isIncomplete: indexedLiteralInfo.isIncomplete,
-                        };
-                    };
-                }
+                };
             }
 
-            if (equalsOrNotEqualsOperator) {
-                const equalsLiteralInfo = TypeEvaluatorNarrowing.getEqualsLiteralNarrowingInfo(
-                    getEqualsLiteralNarrowingContext(evaluator),
-                    reference,
-                    testExpression,
-                    isPositiveTest
-                );
+            return (type: Type) => {
+                return {
+                    type: TypeEvaluatorNarrowing.narrowTypeForClassComparison(
+                        getClassComparisonContext(evaluator),
+                        type,
+                        literalOrClassInfo.rightType,
+                        literalOrClassInfo.adjIsPositiveTest
+                    ),
+                    isIncomplete: literalOrClassInfo.isIncomplete,
+                };
+            };
+        }
 
-                if (equalsLiteralInfo) {
-                    if (equalsLiteralInfo.kind === 'literal') {
-                        return (type: Type) => {
-                            return {
-                                type: TypeEvaluatorNarrowing.narrowTypeForLiteralComparison(
-                                    getLiteralComparisonContext(evaluator),
-                                    type,
-                                    equalsLiteralInfo.rightType as ClassType,
-                                    equalsLiteralInfo.adjIsPositiveTest,
-                                    /* isIsOperator */ false
-                                ),
-                                isIncomplete: equalsLiteralInfo.isIncomplete,
-                            };
-                        };
-                    }
+        // Look for X[<literal>] is <literal> or X[<literal>] is not <literal>.
+        const indexedLiteralInfo = TypeEvaluatorNarrowing.getIndexedLiteralNarrowingInfo(
+            getIndexedLiteralNarrowingContext(evaluator),
+            reference,
+            testExpression,
+            isPositiveTest
+        );
 
-                    return (type: Type) => {
-                        let narrowedType: Type;
-                        const indexType = equalsLiteralInfo.indexType!;
-
-                        if (ClassType.isBuiltIn(indexType, 'str')) {
-                            narrowedType = narrowTypeForDiscriminatedDictEntryComparison(
-                                evaluator,
-                                type,
-                                indexType,
-                                equalsLiteralInfo.rightType,
-                                equalsLiteralInfo.adjIsPositiveTest
-                            );
-                        } else {
-                            narrowedType = narrowTypeForDiscriminatedTupleComparison(
-                                evaluator,
-                                type,
-                                indexType,
-                                equalsLiteralInfo.rightType,
-                                equalsLiteralInfo.adjIsPositiveTest
-                            );
-                        }
-
-                        return {
-                            type: narrowedType,
-                            isIncomplete: equalsLiteralInfo.isIncomplete,
-                        };
+        if (indexedLiteralInfo) {
+            if (indexedLiteralInfo.kind === 'dict') {
+                return (type: Type) => {
+                    return {
+                        type: narrowTypeForDiscriminatedDictEntryComparison(
+                            evaluator,
+                            type,
+                            indexedLiteralInfo.indexType,
+                            indexedLiteralInfo.rightType,
+                            indexedLiteralInfo.adjIsPositiveTest
+                        ),
+                        isIncomplete: indexedLiteralInfo.isIncomplete,
                     };
-                }
+                };
             }
 
-            const memberAccessInfo = TypeEvaluatorNarrowing.getMemberAccessNarrowingInfo(
-                getMemberAccessNarrowingContext(evaluator),
-                reference,
-                testExpression,
-                isPositiveTest
-            );
+            return (type: Type) => {
+                return {
+                    type: narrowTypeForDiscriminatedTupleComparison(
+                        evaluator,
+                        type,
+                        indexedLiteralInfo.indexType,
+                        indexedLiteralInfo.rightType,
+                        indexedLiteralInfo.adjIsPositiveTest
+                    ),
+                    isIncomplete: indexedLiteralInfo.isIncomplete,
+                };
+            };
+        }
 
-            if (memberAccessInfo) {
-                if (memberAccessInfo.kind === 'none-is') {
-                    return (type: Type) => {
-                        return {
-                            type: narrowTypeForDiscriminatedFieldNoneComparison(
-                                evaluator,
-                                type,
-                                memberAccessInfo.memberName,
-                                memberAccessInfo.adjIsPositiveTest
-                            ),
-                            isIncomplete: false,
-                        };
+        const equalsLiteralInfo = TypeEvaluatorNarrowing.getEqualsLiteralNarrowingInfo(
+            getEqualsLiteralNarrowingContext(evaluator),
+            reference,
+            testExpression,
+            isPositiveTest
+        );
+
+        if (equalsLiteralInfo) {
+            if (equalsLiteralInfo.kind === 'literal') {
+                return (type: Type) => {
+                    return {
+                        type: TypeEvaluatorNarrowing.narrowTypeForLiteralComparison(
+                            getLiteralComparisonContext(evaluator),
+                            type,
+                            equalsLiteralInfo.rightType as ClassType,
+                            equalsLiteralInfo.adjIsPositiveTest,
+                            /* isIsOperator */ false
+                        ),
+                        isIncomplete: equalsLiteralInfo.isIncomplete,
                     };
+                };
+            }
+
+            return (type: Type) => {
+                let narrowedType: Type;
+                const indexType = equalsLiteralInfo.indexType!;
+
+                if (ClassType.isBuiltIn(indexType, 'str')) {
+                    narrowedType = narrowTypeForDiscriminatedDictEntryComparison(
+                        evaluator,
+                        type,
+                        indexType,
+                        equalsLiteralInfo.rightType,
+                        equalsLiteralInfo.adjIsPositiveTest
+                    );
+                } else {
+                    narrowedType = narrowTypeForDiscriminatedTupleComparison(
+                        evaluator,
+                        type,
+                        indexType,
+                        equalsLiteralInfo.rightType,
+                        equalsLiteralInfo.adjIsPositiveTest
+                    );
                 }
 
-                if (memberAccessInfo.kind === 'literal-equals') {
-                    return (type: Type) => {
-                        return {
-                            type: narrowTypeForDiscriminatedLiteralFieldComparison(
-                                evaluator,
-                                type,
-                                memberAccessInfo.memberName,
-                                memberAccessInfo.rightType!,
-                                memberAccessInfo.adjIsPositiveTest
-                            ),
-                            isIncomplete: memberAccessInfo.isIncomplete,
-                        };
-                    };
-                }
+                return {
+                    type: narrowedType,
+                    isIncomplete: equalsLiteralInfo.isIncomplete,
+                };
+            };
+        }
 
+        const memberAccessInfo = TypeEvaluatorNarrowing.getMemberAccessNarrowingInfo(
+            getMemberAccessNarrowingContext(evaluator),
+            reference,
+            testExpression,
+            isPositiveTest
+        );
+
+        if (memberAccessInfo) {
+            if (memberAccessInfo.kind === 'none-is') {
+                return (type: Type) => {
+                    return {
+                        type: narrowTypeForDiscriminatedFieldNoneComparison(
+                            evaluator,
+                            type,
+                            memberAccessInfo.memberName,
+                            memberAccessInfo.adjIsPositiveTest
+                        ),
+                        isIncomplete: false,
+                    };
+                };
+            }
+
+            if (memberAccessInfo.kind === 'literal-equals') {
                 return (type: Type) => {
                     return {
                         type: narrowTypeForDiscriminatedLiteralFieldComparison(
@@ -625,6 +601,19 @@ export function getTypeNarrowingCallback(
                     };
                 };
             }
+
+            return (type: Type) => {
+                return {
+                    type: narrowTypeForDiscriminatedLiteralFieldComparison(
+                        evaluator,
+                        type,
+                        memberAccessInfo.memberName,
+                        memberAccessInfo.rightType!,
+                        memberAccessInfo.adjIsPositiveTest
+                    ),
+                    isIncomplete: memberAccessInfo.isIncomplete,
+                };
+            };
         }
 
         // Look for len(x) == <literal>, len(x) != <literal>, len(x) < <literal>, etc.
