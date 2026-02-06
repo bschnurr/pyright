@@ -32,33 +32,24 @@ import * as TypeEvaluatorNarrowing from './typeEvaluator/narrowing';
 import { EvalFlags, TypeEvaluator } from './typeEvaluatorTypes';
 import {
     ClassType,
-    combineTypes,
     EnumLiteral,
     FunctionType,
-    isAnyOrUnknown,
     isClass,
     isClassInstance,
     isFunction,
     isInstantiableClass,
     isOverloaded,
-    isParamSpec,
-    isTypeSame,
     isTypeVar,
-    isUnpackedTypeVarTuple,
     maxTypeRecursionCount,
     OverloadedType,
-    TupleTypeArg,
     Type,
     TypeBase,
-    TypedDictEntry,
     TypeVarType,
 } from './types';
 import {
-    addConditionToType,
     convertToInstantiable,
     doForEachSubtype,
     getUnknownTypeForCallable,
-    isLiteralLikeType,
     isLiteralType,
     isLiteralTypeOrUnion,
     isNoneInstance,
@@ -66,10 +57,7 @@ import {
     isTupleClass,
     lookUpClassMember,
     lookUpObjectMember,
-    mapSubtypes,
-    specializeTupleClass,
     specializeWithUnknownTypeArgs,
-    stripTypeForm,
 } from './typeUtils';
 
 export interface TypeNarrowingResult {
@@ -193,6 +181,34 @@ function getIsInstanceNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorN
             evaluator.mapSubtypesExpandTypeVars(type, options, callback),
         solveAndApplyConstraints: (type, constraints, options) =>
             evaluator.solveAndApplyConstraints(type, constraints, options),
+    };
+}
+
+function getTupleLengthNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.TupleLengthNarrowingContext {
+    return {
+        makeTopLevelTypeVarsConcrete: (type) => evaluator.makeTopLevelTypeVarsConcrete(type),
+    };
+}
+
+function getContainerNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.ContainerNarrowingContext {
+    return {
+        assignType: (destType, srcType) => evaluator.assignType(destType, srcType),
+        enumerateLiteralsForType: (type) => enumerateLiteralsForType(evaluator, type),
+        isTypeComparable: (srcType, destType) => evaluator.isTypeComparable(srcType, destType),
+        makeTopLevelTypeVarsConcrete: (type) => evaluator.makeTopLevelTypeVarsConcrete(type),
+        mapSubtypesExpandTypeVars: (type, callback) =>
+            evaluator.mapSubtypesExpandTypeVars(type, /* options */ undefined, callback),
+    };
+}
+
+function getTypedDictKeyNarrowingContext(
+    evaluator: TypeEvaluator
+): TypeEvaluatorNarrowing.TypedDictKeyNarrowingContext {
+    return {
+        getTypedDictMembersForClass: (type, allowNarrowed) =>
+            getTypedDictMembersForClass(evaluator, type, allowNarrowed),
+        mapSubtypesExpandTypeVars: (type, callback) =>
+            evaluator.mapSubtypesExpandTypeVars(type, /* options */ undefined, callback),
     };
 }
 
@@ -1234,107 +1250,13 @@ function narrowTypeForTupleLength(
     isPositiveTest: boolean,
     isLessThanCheck: boolean
 ) {
-    return mapSubtypes(referenceType, (subtype) => {
-        const concreteSubtype = evaluator.makeTopLevelTypeVarsConcrete(subtype);
-
-        // If it's not a tuple, we can't narrow it.
-        if (
-            !isClassInstance(concreteSubtype) ||
-            !isTupleClass(concreteSubtype) ||
-            !concreteSubtype.priv.tupleTypeArgs
-        ) {
-            return subtype;
-        }
-
-        // If the tuple contains a TypeVarTuple, we can't narrow it.
-        if (concreteSubtype.priv.tupleTypeArgs.some((typeArg) => isUnpackedTypeVarTuple(typeArg.type))) {
-            return subtype;
-        }
-
-        // If the tuple contains no unbounded elements, then we know its length exactly.
-        if (!concreteSubtype.priv.tupleTypeArgs.some((typeArg) => typeArg.isUnbounded)) {
-            const tupleLengthMatches = isLessThanCheck
-                ? concreteSubtype.priv.tupleTypeArgs.length < lengthValue
-                : concreteSubtype.priv.tupleTypeArgs.length === lengthValue;
-
-            return tupleLengthMatches === isPositiveTest ? subtype : undefined;
-        }
-
-        // The tuple contains a "...". We'll expand this into as many elements as
-        // necessary to match the lengthValue.
-        const elementsToAdd = lengthValue - concreteSubtype.priv.tupleTypeArgs.length + 1;
-
-        if (!isLessThanCheck) {
-            // If the specified length is smaller than the minimum length of this tuple,
-            // we can rule it out for a positive test and rule it in for a negative test.
-            if (elementsToAdd < 0) {
-                return isPositiveTest ? undefined : subtype;
-            }
-
-            if (!isPositiveTest) {
-                // If this is an equality check for the minimum length (e.g.
-                // "len(x) == 0"), we can expand the minimum length by one).
-                const minLen = concreteSubtype.priv.tupleTypeArgs.length - 1;
-                if (lengthValue === minLen) {
-                    return expandUnboundedTupleElement(concreteSubtype, 1, /* keepUnbounded */ true);
-                }
-                return subtype;
-            }
-
-            return expandUnboundedTupleElement(concreteSubtype, elementsToAdd, /* keepUnbounded */ false);
-        }
-
-        // If this is a tuple related to an "*args: P.args" parameter, don't expand it.
-        if (isParamSpec(subtype) && subtype.priv.paramSpecAccess) {
-            return subtype;
-        }
-
-        // Place an upper limit on the number of union subtypes we
-        // will expand the tuple to.
-        const maxTupleUnionExpansion = 32;
-        if (elementsToAdd > maxTupleUnionExpansion) {
-            return subtype;
-        }
-
-        if (isPositiveTest) {
-            if (elementsToAdd < 1) {
-                return undefined;
-            }
-
-            const typesToCombine: Type[] = [];
-
-            for (let i = 0; i < elementsToAdd; i++) {
-                typesToCombine.push(expandUnboundedTupleElement(concreteSubtype, i, /* keepUnbounded */ false));
-            }
-
-            return combineTypes(typesToCombine);
-        }
-
-        return expandUnboundedTupleElement(concreteSubtype, elementsToAdd, /* keepUnbounded */ true);
-    });
-}
-
-// Expands a tuple type that contains an unbounded element to include
-// multiple bounded elements of that same type in place of (or in addition
-// to) the unbounded element.
-function expandUnboundedTupleElement(tupleType: ClassType, elementsToAdd: number, keepUnbounded: boolean) {
-    const tupleTypeArgs: TupleTypeArg[] = [];
-
-    tupleType.priv.tupleTypeArgs!.forEach((typeArg) => {
-        if (!typeArg.isUnbounded) {
-            tupleTypeArgs.push(typeArg);
-        } else {
-            for (let i = 0; i < elementsToAdd; i++) {
-                tupleTypeArgs.push({ isUnbounded: false, type: typeArg.type });
-            }
-
-            if (keepUnbounded) {
-                tupleTypeArgs.push(typeArg);
-            }
-        }
-    });
-
-    return specializeTupleClass(tupleType, tupleTypeArgs);
+    return TypeEvaluatorNarrowing.narrowTypeForTupleLength(
+        getTupleLengthNarrowingContext(evaluator),
+        referenceType,
+        lengthValue,
+        isPositiveTest,
+        isLessThanCheck
+    );
 }
 
 // Attempts to narrow a type (make it more constrained) based on an "in" binary operator.
@@ -1344,129 +1266,24 @@ function narrowTypeForContainerType(
     containerType: Type,
     isPositiveTest: boolean
 ) {
-    if (isPositiveTest) {
-        const elementType = getElementTypeForContainerNarrowing(containerType);
-        if (!elementType) {
-            return referenceType;
-        }
-
-        return narrowTypeForContainerElementType(
-            evaluator,
-            referenceType,
-            evaluator.makeTopLevelTypeVarsConcrete(elementType)
-        );
-    }
-
-    // Narrowing in the negative case is possible only with tuples
-    // with a known length.
-    if (
-        !isClassInstance(containerType) ||
-        !ClassType.isBuiltIn(containerType, 'tuple') ||
-        !containerType.priv.tupleTypeArgs
-    ) {
-        return referenceType;
-    }
-
-    // Determine which tuple types can be eliminated. Only "None" and
-    // literal types can be handled here.
-    const typesToEliminate: Type[] = [];
-    containerType.priv.tupleTypeArgs.forEach((tupleEntry) => {
-        if (!tupleEntry.isUnbounded) {
-            if (isNoneInstance(tupleEntry.type)) {
-                typesToEliminate.push(tupleEntry.type);
-            } else if (isClassInstance(tupleEntry.type) && isLiteralType(tupleEntry.type)) {
-                typesToEliminate.push(tupleEntry.type);
-            }
-        }
-    });
-
-    if (typesToEliminate.length === 0) {
-        return referenceType;
-    }
-
-    return mapSubtypes(referenceType, (referenceSubtype) => {
-        referenceSubtype = evaluator.makeTopLevelTypeVarsConcrete(referenceSubtype);
-        if (isClassInstance(referenceSubtype) && referenceSubtype.priv.literalValue === undefined) {
-            // If we're able to enumerate all possible literal values
-            // (for bool or enum), we can eliminate all others in a negative test.
-            const allLiteralTypes = enumerateLiteralsForType(evaluator, referenceSubtype);
-            if (allLiteralTypes && allLiteralTypes.length > 0) {
-                return combineTypes(
-                    allLiteralTypes.filter((type) => !typesToEliminate.some((t) => isTypeSame(t, type)))
-                );
-            }
-        }
-
-        if (typesToEliminate.some((t) => isTypeSame(t, referenceSubtype))) {
-            return undefined;
-        }
-
-        return referenceSubtype;
-    });
+    return TypeEvaluatorNarrowing.narrowTypeForContainerType(
+        getContainerNarrowingContext(evaluator),
+        referenceType,
+        containerType,
+        isPositiveTest
+    );
 }
 
 export function getElementTypeForContainerNarrowing(containerType: Type) {
-    // We support contains narrowing only for certain built-in types that have been specialized.
-    const supportedContainers = ['list', 'set', 'frozenset', 'deque', 'tuple', 'dict', 'defaultdict', 'OrderedDict'];
-    if (!isClassInstance(containerType) || !ClassType.isBuiltIn(containerType, supportedContainers)) {
-        return undefined;
-    }
-
-    if (!containerType.priv.typeArgs || containerType.priv.typeArgs.length < 1) {
-        return undefined;
-    }
-
-    let elementType = containerType.priv.typeArgs[0];
-    if (isTupleClass(containerType) && containerType.priv.tupleTypeArgs) {
-        elementType = combineTypes(containerType.priv.tupleTypeArgs.map((t) => t.type));
-    }
-
-    return elementType;
+    return TypeEvaluatorNarrowing.getElementTypeForContainerNarrowing(containerType);
 }
 
 export function narrowTypeForContainerElementType(evaluator: TypeEvaluator, referenceType: Type, elementType: Type) {
-    return evaluator.mapSubtypesExpandTypeVars(referenceType, /* options */ undefined, (referenceSubtype) => {
-        return mapSubtypes(elementType, (elementSubtype) => {
-            if (isAnyOrUnknown(elementSubtype)) {
-                return referenceSubtype;
-            }
-
-            // If the two types are disjoint (i.e. are not comparable), eliminate this subtype.
-            if (!evaluator.isTypeComparable(elementSubtype, referenceSubtype)) {
-                return undefined;
-            }
-
-            // If one of the two types is a literal, we can narrow to that type.
-            if (
-                isClassInstance(elementSubtype) &&
-                (isLiteralLikeType(elementSubtype) || isNoneInstance(elementSubtype)) &&
-                evaluator.assignType(referenceSubtype, elementSubtype)
-            ) {
-                return stripTypeForm(addConditionToType(elementSubtype, referenceSubtype.props?.condition));
-            }
-
-            if (
-                isClassInstance(referenceSubtype) &&
-                (isLiteralLikeType(referenceSubtype) || isNoneInstance(referenceSubtype)) &&
-                evaluator.assignType(elementSubtype, referenceSubtype)
-            ) {
-                return stripTypeForm(addConditionToType(referenceSubtype, elementSubtype.props?.condition));
-            }
-
-            // If the element type is a known class object that is assignable to
-            // the reference type, we can narrow to that class object.
-            if (
-                isInstantiableClass(elementSubtype) &&
-                !elementSubtype.priv.includeSubclasses &&
-                evaluator.assignType(referenceSubtype, elementSubtype)
-            ) {
-                return stripTypeForm(addConditionToType(elementSubtype, referenceSubtype.props?.condition));
-            }
-
-            // It's not safe to narrow.
-            return referenceSubtype;
-        });
-    });
+    return TypeEvaluatorNarrowing.narrowTypeForContainerElementType(
+        getContainerNarrowingContext(evaluator),
+        referenceType,
+        elementType
+    );
 }
 
 // Attempts to narrow a type based on whether it is a TypedDict with
@@ -1477,77 +1294,12 @@ function narrowTypeForTypedDictKey(
     literalKey: ClassType,
     isPositiveTest: boolean
 ): Type {
-    const narrowedType = evaluator.mapSubtypesExpandTypeVars(
+    return TypeEvaluatorNarrowing.narrowTypeForTypedDictKey(
+        getTypedDictKeyNarrowingContext(evaluator),
         referenceType,
-        /* options */ undefined,
-        (subtype, unexpandedSubtype) => {
-            if (isParamSpec(unexpandedSubtype)) {
-                return unexpandedSubtype;
-            }
-
-            if (isClassInstance(subtype) && ClassType.isTypedDictClass(subtype)) {
-                const entries = getTypedDictMembersForClass(evaluator, subtype, /* allowNarrowed */ true);
-                const tdEntry = entries.knownItems.get(literalKey.priv.literalValue as string) ?? entries.extraItems;
-
-                if (isPositiveTest) {
-                    // The code that is commented out below implements the behavior that is technically
-                    // correct, but until we PEP 728 is ratified and we have a way to express "extra items"
-                    // and closed TypedDicts, we'll preserve the older (less correct) behavior to enable
-                    // narrowing of TypedDicts based on checks for specific keys.
-                    // TODO - remove this behavior once PEP 728 is accepted and the feature is no
-                    // longer experimental.
-                    if (!tdEntry) {
-                        return undefined;
-                    }
-
-                    // if (!tdEntry) {
-                    //     // If there is no TD entry for this key and no "extra items" defined,
-                    //     // we have to assume that the TypedDict may contain extra items, so
-                    //     // narrowing it isn't possible in this case.
-                    //     return subtype;
-                    // }
-
-                    // if (isNever(tdEntry.valueType)) {
-                    //     // If the entry is typed as Never or the "extra items" is typed as Never,
-                    //     // then this key cannot be present in the TypedDict, and we can eliminate it.
-                    //     return undefined;
-                    // }
-
-                    // If the entry is currently not required and not marked provided, we can mark
-                    // it as provided after this guard expression confirms it is.
-                    if (tdEntry.isRequired || tdEntry.isProvided) {
-                        return subtype;
-                    }
-
-                    const newNarrowedEntriesMap = new Map<string, TypedDictEntry>(
-                        subtype.priv.typedDictNarrowedEntries ?? []
-                    );
-
-                    // Add the new entry.
-                    newNarrowedEntriesMap.set(literalKey.priv.literalValue as string, {
-                        valueType: tdEntry.valueType,
-                        isReadOnly: tdEntry.isReadOnly,
-                        isRequired: false,
-                        isProvided: true,
-                    });
-
-                    // Clone the TypedDict object with the new entries.
-                    return ClassType.cloneAsInstance(
-                        ClassType.cloneForNarrowedTypedDictEntries(
-                            ClassType.cloneAsInstantiable(subtype),
-                            newNarrowedEntriesMap
-                        )
-                    );
-                } else {
-                    return tdEntry !== undefined && (tdEntry.isRequired || tdEntry.isProvided) ? undefined : subtype;
-                }
-            }
-
-            return subtype;
-        }
+        literalKey,
+        isPositiveTest
     );
-
-    return narrowedType;
 }
 
 // Attempts to narrow a TypedDict type based on a comparison (equal or not
