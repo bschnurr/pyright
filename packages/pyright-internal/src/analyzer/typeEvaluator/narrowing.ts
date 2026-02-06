@@ -16,52 +16,85 @@
  * would conceptually work.
  */
 
-import { ExpressionNode } from '../../parser/parseNodes';
-import { TypeEvaluator, TypeResult } from '../typeEvaluatorTypes';
+import { ExpressionNode, ParamCategory } from '../../parser/parseNodes';
+import { getFileInfo } from '../analyzerNodeInfo';
+import { addConstraintsForExpectedType } from '../constraintSolver';
+import { ConstraintTracker } from '../constraintTracker';
+import * as ParseTreeUtils from '../parseTreeUtils';
+import { Symbol, SymbolFlags } from '../symbol';
+import {
+    AssignTypeFlags,
+    MapSubtypesOptions,
+    TypeEvaluator,
+    TypeResult,
+} from '../typeEvaluatorTypes';
 import {
     AnyType,
     ClassType,
+    ClassTypeFlags,
     combineTypes,
     EnumLiteral,
     findSubtype,
     FunctionType,
+    FunctionTypeFlags,
+    FunctionParam,
+    FunctionParamFlags,
     isAny,
     isAnyOrUnknown,
     isClass,
     isClassInstance,
+    isFunction,
     isFunctionOrOverloaded,
     isInstantiableClass,
+    isModule,
     isNever,
+    isOverloaded,
+    isParamSpec,
     isTypeSame,
     isTypeVar,
     isUnion,
     isUnknown,
+    OverloadedType,
     SentinelLiteral,
     Type,
     TypeBase,
     TypeCategory,
     TypedDictEntries,
+    TypeCondition,
     TypeVarType,
     UnionType,
     UnknownType,
 } from '../types';
 import {
     addConditionToType,
+    ApplyTypeVarOptions,
+    computeMroLinearization,
     convertToInstance,
     convertToInstantiable,
+    derivesFromAnyOrUnknown,
     doForEachSubtype,
     getSpecializedTupleType,
     getTypeCondition,
+    getTypeVarScopeIds,
     isIncompleteUnknown,
     isLiteralType,
     isLiteralTypeOrUnion,
     isMaybeDescriptorInstance,
+    isMetaclassInstance,
+    isInstantiableMetaclass,
     isNoneInstance,
+    isNoneTypeClass,
     isProperty,
     isSentinelLiteral,
     isTupleClass,
+    isTupleGradualForm,
     isUnboundedTupleClass,
+    lookUpClassMember,
+    lookUpObjectMember,
+    makeTypeVarsFree,
     mapSubtypes,
+    MemberAccessFlags,
+    specializeTupleClass,
     transformPossibleRecursiveTypeAlias,
 } from '../typeUtils';
 
@@ -78,7 +111,6 @@ export interface NarrowTypeBasedOnAssignmentContext {
     // rules (and recursion limits, diag addenda, etc.) and passes a minimal adapter.
     assignType: (destType: Type, srcType: Type) => boolean;
 }
-
 export interface StripTypeGuardContext {
     getBoolType: () => Type;
 }
@@ -162,6 +194,30 @@ export interface TypeIsNarrowingContext {
         type: Type,
         callback: (subtype: Type, unexpandedSubtype: Type) => Type | undefined
     ) => Type;
+}
+
+export interface IsInstanceNarrowingContext {
+    addConstraintsForExpectedType: (
+        type: ClassType,
+        expectedType: Type,
+        constraints: ConstraintTracker,
+        errorNodeStart: number
+    ) => boolean;
+    assignType: (destType: Type, srcType: Type, flags?: AssignTypeFlags) => boolean;
+    createSubclass: (errorNode: ExpressionNode, type1: ClassType, type2: ClassType) => ClassType;
+    expandPromotionTypes: (node: ExpressionNode, type: Type) => Type;
+    getCallbackProtocolType: (objType: ClassType, recursionCount?: number) => FunctionType | OverloadedType | undefined;
+    getDictClassType: () => ClassType | undefined;
+    getStrClassType: () => ClassType | undefined;
+    getTupleClassType: () => ClassType | undefined;
+    getTypeClassType: () => ClassType | undefined;
+    makeTopLevelTypeVarsConcrete: (type: Type) => Type;
+    mapSubtypesExpandTypeVars: (
+        type: Type,
+        options: MapSubtypesOptions | undefined,
+        callback: (subtype: Type, unexpandedSubtype: Type) => Type | undefined
+    ) => Type;
+    solveAndApplyConstraints: (type: Type, constraints: ConstraintTracker, options: ApplyTypeVarOptions) => Type;
 }
 
 // Conceptual narrowing entrypoint.
@@ -1196,4 +1252,582 @@ export function narrowTypeForTypeIs(
     });
 
     return combineTypes(typesToCombine);
+}
+
+export function narrowTypeForInstanceOrSubclass(
+    ctx: IsInstanceNarrowingContext,
+    type: Type,
+    filterTypes: Type[],
+    isInstanceCheck: boolean,
+    isTypeIsCheck: boolean,
+    isPositiveTest: boolean,
+    errorNode: ExpressionNode
+): Type {
+    const narrowedType = narrowTypeForInstanceOrSubclassInternal(
+        ctx,
+        type,
+        filterTypes,
+        isInstanceCheck,
+        isTypeIsCheck,
+        isPositiveTest,
+        /* allowIntersections */ false,
+        errorNode
+    );
+
+    if (!isNever(narrowedType)) {
+        return narrowedType;
+    }
+
+    return narrowTypeForInstanceOrSubclassInternal(
+        ctx,
+        type,
+        filterTypes,
+        isInstanceCheck,
+        isTypeIsCheck,
+        isPositiveTest,
+        /* allowIntersections */ true,
+        errorNode
+    );
+}
+
+function narrowTypeForInstanceOrSubclassInternal(
+    ctx: IsInstanceNarrowingContext,
+    type: Type,
+    filterTypes: Type[],
+    isInstanceCheck: boolean,
+    isTypeIsCheck: boolean,
+    isPositiveTest: boolean,
+    allowIntersections: boolean,
+    errorNode: ExpressionNode
+): Type {
+    const result = mapSubtypes(type, (subtype) => {
+        let adjSubtype = subtype;
+        let resultRequiresAdj = false;
+        let adjFilterTypes = filterTypes;
+
+        if (!isInstanceCheck) {
+            const isTypeInstance = isClassInstance(subtype) && ClassType.isBuiltIn(subtype, 'type');
+
+            if (isMetaclassInstance(subtype) && !isTypeInstance) {
+                adjFilterTypes = filterTypes.map((filterType) => convertToInstantiable(filterType));
+            } else {
+                adjSubtype = convertToInstance(subtype);
+
+                if (!isAnyOrUnknown(subtype) || isPositiveTest) {
+                    resultRequiresAdj = true;
+                }
+            }
+        }
+
+        const narrowedResult = narrowTypeForInstance(
+            ctx,
+            adjSubtype,
+            adjFilterTypes,
+            isTypeIsCheck,
+            isPositiveTest,
+            allowIntersections,
+            errorNode
+        );
+
+        if (!resultRequiresAdj) {
+            return narrowedResult;
+        }
+
+        if (isAnyOrUnknown(narrowedResult)) {
+            const typeClass = ctx.getTypeClassType();
+            if (typeClass) {
+                return ClassType.specialize(ClassType.cloneAsInstance(typeClass), [narrowedResult]);
+            }
+        }
+
+        return convertToInstantiable(narrowedResult);
+    });
+
+    return result;
+}
+
+function narrowTypeForInstance(
+    ctx: IsInstanceNarrowingContext,
+    type: Type,
+    filterTypes: Type[],
+    isTypeIsCheck: boolean,
+    isPositiveTest: boolean,
+    allowIntersections: boolean,
+    errorNode: ExpressionNode
+): Type {
+    let expandedTypes = mapSubtypes(type, (subtype) => {
+        return transformPossibleRecursiveTypeAlias(subtype);
+    });
+
+    expandedTypes = ctx.expandPromotionTypes(errorNode, expandedTypes);
+
+    const convertVarTypeToFree = (varType: Type): Type => {
+        if (isTypeIsCheck) {
+            return varType;
+        }
+
+        return makeTypeVarsFree(varType, ParseTreeUtils.getTypeVarScopesForNode(errorNode));
+    };
+
+    const filterClassType = (
+        varType: Type,
+        concreteVarType: ClassType,
+        conditions: TypeCondition[] | undefined,
+        negativeFallbackType: Type
+    ): Type[] => {
+        const filteredTypes: Type[] = [];
+
+        let foundSuperclass = false;
+        let isClassRelationshipIndeterminate = false;
+
+        for (const filterType of filterTypes) {
+            const concreteFilterType = ctx.makeTopLevelTypeVarsConcrete(filterType);
+
+            if (isInstantiableClass(concreteFilterType)) {
+                const filterMetaclass = concreteFilterType.shared.effectiveMetaclass;
+                if (
+                    isInstantiableMetaclass(concreteVarType) &&
+                    TypeBase.getInstantiableDepth(concreteFilterType) > 0 &&
+                    filterMetaclass &&
+                    isInstantiableClass(filterMetaclass)
+                ) {
+                    const metaclassType = convertToInstance(concreteVarType);
+                    let isMetaclassOverlap = ctx.assignType(
+                        convertVarTypeToFree(metaclassType),
+                        ClassType.cloneAsInstance(filterMetaclass)
+                    );
+
+                    if (ClassType.isBuiltIn(filterMetaclass, 'type') && !filterMetaclass.priv.isTypeArgExplicit) {
+                        if (!isClass(metaclassType) || !ClassType.isBuiltIn(metaclassType, 'type')) {
+                            isMetaclassOverlap = false;
+                        }
+                    }
+
+                    if (isMetaclassOverlap) {
+                        if (isPositiveTest) {
+                            filteredTypes.push(filterType);
+                            foundSuperclass = true;
+                        } else if (!isTypeSame(metaclassType, filterMetaclass) || filterMetaclass.priv.includeSubclasses) {
+                            filteredTypes.push(metaclassType);
+                            isClassRelationshipIndeterminate = true;
+                        }
+                        continue;
+                    }
+                }
+
+                let runtimeVarType = concreteVarType;
+
+                if (!isTypeIsCheck) {
+                    runtimeVarType = makeTypeVarsFree(runtimeVarType, ParseTreeUtils.getTypeVarScopesForNode(errorNode));
+                }
+
+                if (isInstantiableClass(runtimeVarType) && ClassType.isTypedDictClass(runtimeVarType)) {
+                    const dictClass = ctx.getDictClassType();
+                    const strType = ctx.getStrClassType();
+
+                    if (dictClass && strType) {
+                        runtimeVarType = ClassType.specialize(dictClass, [
+                            ClassType.cloneAsInstance(strType),
+                            UnknownType.create(),
+                        ]);
+                    }
+                }
+
+                const filterIsSuperclass = ctx.assignType(
+                    filterType,
+                    runtimeVarType,
+                    AssignTypeFlags.AllowIsinstanceSpecialForms | AssignTypeFlags.AllowProtocolClassSource
+                );
+
+                let filterIsSubclass = ctx.assignType(
+                    runtimeVarType,
+                    filterType,
+                    AssignTypeFlags.AllowIsinstanceSpecialForms | AssignTypeFlags.AllowProtocolClassSource
+                );
+
+                if (filterIsSuperclass) {
+                    foundSuperclass = true;
+                }
+
+                if (ClassType.isBuiltIn(runtimeVarType, 'TypeForm')) {
+                    isClassRelationshipIndeterminate = true;
+                    filterIsSubclass = true;
+                }
+
+                if (filterIsSuperclass) {
+                    if (!isTypeIsCheck && concreteFilterType.priv.includeSubclasses) {
+                        isClassRelationshipIndeterminate = true;
+                    }
+
+                    if (filterIsSubclass && !ClassType.isSameGenericClass(runtimeVarType, concreteFilterType)) {
+                        if (
+                            !ClassType.isBuiltIn(concreteFilterType, 'type') ||
+                            TypeBase.getInstantiableDepth(runtimeVarType) === 0
+                        ) {
+                            isClassRelationshipIndeterminate = true;
+                        }
+                    }
+                }
+
+                if (isTypeVar(varType) && isTypeVar(filterType)) {
+                    isClassRelationshipIndeterminate = true;
+                }
+
+                if (isPositiveTest) {
+                    if (filterIsSuperclass) {
+                        if (isTypeVar(varType) && TypeVarType.isSelf(varType)) {
+                            filteredTypes.push(addConditionToType(varType, conditions));
+                        } else {
+                            filteredTypes.push(addConditionToType(concreteVarType, conditions));
+                        }
+                    } else if (filterIsSubclass) {
+                        let specializedFilterType = filterType;
+
+                        if (isClass(filterType)) {
+                            if (ClassType.isSpecialBuiltIn(filterType) || filterType.shared.typeParams.length > 0) {
+                                if (
+                                    !filterType.priv.isTypeArgExplicit &&
+                                    !ClassType.isSameGenericClass(concreteVarType, filterType)
+                                ) {
+                                    const constraints = new ConstraintTracker();
+                                    const unspecializedFilterType = ClassType.specialize(
+                                        filterType,
+                                        /* typeArg */ undefined
+                                    );
+
+                                    if (
+                                        ctx.addConstraintsForExpectedType(
+                                            ClassType.cloneAsInstance(unspecializedFilterType),
+                                            ClassType.cloneAsInstance(concreteVarType),
+                                            constraints,
+                                            errorNode.start
+                                        )
+                                    ) {
+                                        specializedFilterType = ctx.solveAndApplyConstraints(
+                                            unspecializedFilterType,
+                                            constraints,
+                                            {
+                                                replaceUnsolved: {
+                                                    scopeIds: getTypeVarScopeIds(filterType),
+                                                    useUnknown: true,
+                                                    tupleClassType: ctx.getTupleClassType(),
+                                                },
+                                            }
+                                        ) as ClassType;
+                                    }
+                                }
+                            }
+                        }
+
+                        filteredTypes.push(addConditionToType(specializedFilterType, conditions));
+                    } else if (
+                        ClassType.isSameGenericClass(
+                            ClassType.cloneAsInstance(concreteVarType),
+                            ClassType.cloneAsInstance(concreteFilterType)
+                        )
+                    ) {
+                        if (!isTypeIsCheck) {
+                            if (
+                                concreteVarType.priv?.literalValue === undefined &&
+                                concreteFilterType.priv?.literalValue === undefined
+                            ) {
+                                const intersection = intersectSameClassType(concreteVarType, concreteFilterType);
+                                filteredTypes.push(intersection ?? varType);
+                            }
+                        }
+                    } else if (
+                        allowIntersections &&
+                        !ClassType.isFinal(concreteVarType) &&
+                        !ClassType.isFinal(concreteFilterType)
+                    ) {
+                        let newClassType = ctx.createSubclass(errorNode, concreteVarType, concreteFilterType);
+                        if (isTypeVar(varType) && !isParamSpec(varType) && !TypeVarType.hasConstraints(varType)) {
+                            newClassType = addConditionToType(newClassType, [{ typeVar: varType, constraintIndex: 0 }]);
+                        }
+
+                        filteredTypes.push(addConditionToType(newClassType, concreteVarType.props?.condition));
+                    }
+                } else {
+                    if (isAnyOrUnknown(varType)) {
+                        filteredTypes.push(addConditionToType(varType, conditions));
+                    } else if (derivesFromAnyOrUnknown(varType) && !isTypeSame(concreteVarType, concreteFilterType)) {
+                        filteredTypes.push(addConditionToType(varType, conditions));
+                    }
+                }
+            } else if (isTypeVar(filterType) && TypeBase.isInstantiable(filterType)) {
+                if (TypeBase.isInstance(varType)) {
+                    if (isTypeVar(varType) && isTypeSame(convertToInstance(filterType), varType)) {
+                        if (isPositiveTest) {
+                            filteredTypes.push(varType);
+                        } else {
+                            foundSuperclass = true;
+                        }
+                    } else {
+                        if (isPositiveTest) {
+                            filteredTypes.push(convertToInstance(filterType));
+                        } else {
+                            filteredTypes.push(varType);
+                            isClassRelationshipIndeterminate = true;
+                        }
+                    }
+                }
+            } else if (isFunction(filterType)) {
+                let isCallable = false;
+
+                if (isClass(concreteVarType)) {
+                    if (TypeBase.isInstantiable(varType)) {
+                        isCallable = true;
+                    } else {
+                        isCallable = !!lookUpClassMember(
+                            concreteVarType,
+                            '__call__',
+                            MemberAccessFlags.SkipInstanceMembers
+                        );
+                    }
+                }
+
+                if (isCallable) {
+                    if (isPositiveTest) {
+                        filteredTypes.push(convertToInstantiable(varType));
+                    } else {
+                        foundSuperclass = true;
+                    }
+                } else if (
+                    ctx.assignType(
+                        convertVarTypeToFree(concreteVarType),
+                        filterType,
+                        AssignTypeFlags.AllowIsinstanceSpecialForms
+                    )
+                ) {
+                    if (isPositiveTest) {
+                        filteredTypes.push(addConditionToType(filterType, concreteVarType.props?.condition));
+                    }
+                } else if (allowIntersections && isPositiveTest) {
+                    const className = `<callable subtype of ${concreteVarType.shared.name}>`;
+                    const fileInfo = getFileInfo(errorNode);
+                    let newClassType = ClassType.createInstantiable(
+                        className,
+                        ParseTreeUtils.getClassFullName(errorNode, fileInfo.moduleName, className),
+                        fileInfo.moduleName,
+                        fileInfo.fileUri,
+                        ClassTypeFlags.None,
+                        ParseTreeUtils.getTypeSourceId(errorNode),
+                        /* declaredMetaclass */ undefined,
+                        concreteVarType.shared.effectiveMetaclass,
+                        concreteVarType.shared.docString
+                    );
+                    newClassType.shared.baseClasses = [concreteVarType];
+                    computeMroLinearization(newClassType);
+
+                    newClassType = addConditionToType(newClassType, concreteVarType.props?.condition);
+
+                    const callMethod = FunctionType.createSynthesizedInstance('__call__');
+                    const selfParam = FunctionParam.create(
+                        ParamCategory.Simple,
+                        ClassType.cloneAsInstance(newClassType),
+                        FunctionParamFlags.TypeDeclared,
+                        'self'
+                    );
+                    FunctionType.addParam(callMethod, selfParam);
+                    FunctionType.addDefaultParams(callMethod);
+                    callMethod.shared.declaredReturnType = UnknownType.create();
+                    ClassType.getSymbolTable(newClassType).set(
+                        '__call__',
+                        Symbol.createWithType(SymbolFlags.ClassMember, callMethod)
+                    );
+
+                    filteredTypes.push(ClassType.cloneAsInstance(newClassType));
+                }
+            }
+        }
+
+        if (!isPositiveTest) {
+            if (!foundSuperclass || isClassRelationshipIndeterminate) {
+                filteredTypes.push(convertToInstantiable(negativeFallbackType));
+            }
+        }
+
+        return filteredTypes.map((t) => convertToInstance(t));
+    };
+
+    const isFilterTypeCallbackProtocol = (filterType: Type) => {
+        return (
+            isInstantiableClass(filterType) &&
+            ctx.getCallbackProtocolType(ClassType.cloneAsInstance(filterType)) !== undefined
+        );
+    };
+
+    const filterFunctionType = (varType: FunctionType | OverloadedType, unexpandedType: Type): Type[] => {
+        const filteredTypes: Type[] = [];
+
+        if (isPositiveTest) {
+            for (const filterType of filterTypes) {
+                const concreteFilterType = ctx.makeTopLevelTypeVarsConcrete(filterType);
+
+                if (!isTypeIsCheck && isFilterTypeCallbackProtocol(concreteFilterType)) {
+                    filteredTypes.push(convertToInstance(varType));
+                } else if (ctx.assignType(convertVarTypeToFree(varType), convertToInstance(concreteFilterType))) {
+                    if (isFunction(filterType)) {
+                        filteredTypes.push(convertToInstance(unexpandedType));
+                    } else {
+                        filteredTypes.push(convertToInstance(filterType));
+                    }
+                } else {
+                    const filterTypeInstance = convertToInstance(convertVarTypeToFree(concreteFilterType));
+                    if (ctx.assignType(filterTypeInstance, varType)) {
+                        filteredTypes.push(convertToInstance(varType));
+                    } else {
+                        if (isClassInstance(filterTypeInstance) && !ClassType.isFinal(filterTypeInstance)) {
+                            const gradualFunc = FunctionType.createSynthesizedInstance(
+                                '',
+                                FunctionTypeFlags.GradualCallableForm
+                            );
+                            FunctionType.addDefaultParams(gradualFunc);
+
+                            if (!ctx.assignType(gradualFunc, filterTypeInstance)) {
+                                filteredTypes.push(convertToInstance(filterType));
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            if (
+                filterTypes.every((filterType) => {
+                    const concreteFilterType = ctx.makeTopLevelTypeVarsConcrete(filterType);
+
+                    if (!isTypeIsCheck && isFilterTypeCallbackProtocol(concreteFilterType)) {
+                        return false;
+                    }
+
+                    if (isFunction(concreteFilterType) && FunctionType.isGradualCallableForm(concreteFilterType)) {
+                        return false;
+                    }
+
+                    const isSubtype = ctx.assignType(
+                        convertToInstance(convertVarTypeToFree(concreteFilterType)),
+                        varType
+                    );
+                    const isSupertype = ctx.assignType(
+                        convertVarTypeToFree(varType),
+                        convertToInstance(concreteFilterType)
+                    );
+
+                    return !isSubtype || isSupertype;
+                })
+            ) {
+                filteredTypes.push(convertToInstance(varType));
+            }
+        }
+
+        return filteredTypes;
+    };
+
+    const classListContainsNoneType = () =>
+        filterTypes.some((t) => {
+            if (isNoneTypeClass(t)) {
+                return true;
+            }
+            return isInstantiableClass(t) && ClassType.isBuiltIn(t, 'NoneType');
+        });
+
+    const anyOrUnknownSubstitutions: Type[] = [];
+    const anyOrUnknown: Type[] = [];
+
+    const filteredType = ctx.mapSubtypesExpandTypeVars(
+        expandedTypes,
+        {
+            expandCallback: (type) => {
+                return ctx.expandPromotionTypes(errorNode, type);
+            },
+        },
+        (subtype, unexpandedSubtype) => {
+            const negativeFallback = getTypeCondition(subtype) ? subtype : unexpandedSubtype;
+
+            if (isPositiveTest && isAnyOrUnknown(subtype)) {
+                anyOrUnknownSubstitutions.push(
+                    combineTypes(filterTypes.map((classType) => convertToInstance(classType)))
+                );
+
+                anyOrUnknown.push(subtype);
+                return undefined;
+            }
+
+            if (isNoneInstance(subtype)) {
+                return classListContainsNoneType() === isPositiveTest ? subtype : undefined;
+            }
+
+            if (isModule(subtype) || (isClassInstance(subtype) && ClassType.isBuiltIn(subtype, 'ModuleType'))) {
+                if (isPositiveTest) {
+                    const filteredTypes = filterTypes.filter((classType) => {
+                        const concreteClassType = ctx.makeTopLevelTypeVarsConcrete(classType);
+                        return isInstantiableClass(concreteClassType) && ClassType.isProtocolClass(concreteClassType);
+                    });
+
+                    if (filteredTypes.length > 0) {
+                        return convertToInstance(combineTypes(filteredTypes));
+                    }
+                }
+            }
+
+            if (isClass(subtype)) {
+                return combineTypes(
+                    filterClassType(
+                        unexpandedSubtype,
+                        ClassType.cloneAsInstantiable(subtype),
+                        getTypeCondition(subtype),
+                        negativeFallback
+                    )
+                );
+            }
+
+            if (isFunctionOrOverloaded(subtype)) {
+                return combineTypes(filterFunctionType(subtype, unexpandedSubtype));
+            }
+
+            return isPositiveTest ? undefined : negativeFallback;
+        }
+    );
+
+    if (isNever(filteredType) && anyOrUnknownSubstitutions.length > 0) {
+        return combineTypes(anyOrUnknownSubstitutions);
+    }
+
+    if (isNever(filteredType) && anyOrUnknown.length > 0) {
+        return combineTypes(anyOrUnknown);
+    }
+
+    return filteredType;
+}
+
+function intersectSameClassType(type1: ClassType, type2: ClassType): ClassType | undefined {
+    if (!isInstantiableClass(type1) || !isInstantiableClass(type2)) {
+        return undefined;
+    }
+
+    if (!ClassType.isSameGenericClass(type1, type2)) {
+        return undefined;
+    }
+
+    if (type1.priv?.literalValue !== undefined || type2.priv?.literalValue !== undefined) {
+        return undefined;
+    }
+
+    if (ClassType.isBuiltIn(type1, 'tuple')) {
+        return intersectTupleTypes(type1, type1);
+    }
+
+    return undefined;
+}
+
+function intersectTupleTypes(type1: ClassType, type2: ClassType) {
+    if (!type2.priv.tupleTypeArgs || isTupleGradualForm(type2)) {
+        return addConditionToType(type1, type2.props?.condition);
+    }
+
+    if (!type1.priv.tupleTypeArgs || isTupleGradualForm(type1)) {
+        return addConditionToType(type2, type1.props?.condition);
+    }
+
+    return undefined;
 }
