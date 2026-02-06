@@ -244,6 +244,19 @@ export interface IsLiteralOrClassNarrowingInfo {
     isIncomplete: boolean;
 }
 
+export interface IndexedLiteralNarrowingContext {
+    getTypeOfExpression: (node: ExpressionNode) => TypeResult;
+    isMatchingExpression: (reference: ExpressionNode, expression: ExpressionNode) => boolean;
+}
+
+export interface IndexedLiteralNarrowingInfo {
+    kind: 'dict' | 'tuple';
+    adjIsPositiveTest: boolean;
+    indexType: ClassType;
+    rightType: ClassType;
+    isIncomplete: boolean;
+}
+
 export interface AliasedConditionNarrowingContext {
     isNodeReachable: (fromNode: ParseNode, toNode: ParseNode) => boolean;
 }
@@ -2063,6 +2076,83 @@ export function getIsLiteralOrClassNarrowingInfo(
             rightType,
             isIncomplete: !!rightTypeResult.isIncomplete,
         };
+    }
+
+    return undefined;
+}
+
+export function getIndexedLiteralNarrowingInfo(
+    ctx: IndexedLiteralNarrowingContext,
+    reference: ExpressionNode,
+    testExpression: ExpressionNode,
+    isPositiveTest: boolean
+): IndexedLiteralNarrowingInfo | undefined {
+    if (testExpression.nodeType !== ParseNodeType.BinaryOperation) {
+        return undefined;
+    }
+
+    const isOrIsNotOperator =
+        testExpression.d.operator === OperatorType.Is || testExpression.d.operator === OperatorType.IsNot;
+
+    if (!isOrIsNotOperator) {
+        return undefined;
+    }
+
+    const adjIsPositiveTest = testExpression.d.operator === OperatorType.Is ? isPositiveTest : !isPositiveTest;
+
+    if (
+        testExpression.d.leftExpr.nodeType !== ParseNodeType.Index ||
+        testExpression.d.leftExpr.d.items.length !== 1 ||
+        testExpression.d.leftExpr.d.trailingComma ||
+        testExpression.d.leftExpr.d.items[0].d.argCategory !== ArgCategory.Simple
+    ) {
+        return undefined;
+    }
+
+    if (!ctx.isMatchingExpression(reference, testExpression.d.leftExpr.d.leftExpr)) {
+        return undefined;
+    }
+
+    const indexTypeResult = ctx.getTypeOfExpression(testExpression.d.leftExpr.d.items[0].d.valueExpr);
+    const indexType = indexTypeResult.type;
+    if (!isClassInstance(indexType) || !isLiteralType(indexType)) {
+        return undefined;
+    }
+
+    if (ClassType.isBuiltIn(indexType, 'str')) {
+        const rightType = ctx.getTypeOfExpression(testExpression.d.rightExpr).type;
+        if (isClassInstance(rightType) && rightType.priv.literalValue !== undefined) {
+            return {
+                kind: 'dict',
+                adjIsPositiveTest,
+                indexType,
+                rightType,
+                isIncomplete: !!indexTypeResult.isIncomplete,
+            };
+        }
+    } else if (ClassType.isBuiltIn(indexType, 'int')) {
+        const rightTypeResult = ctx.getTypeOfExpression(testExpression.d.rightExpr);
+        const rightType = rightTypeResult.type;
+
+        if (isClassInstance(rightType) && rightType.priv.literalValue !== undefined) {
+            let canNarrow = false;
+            // Narrowing can be applied only for bool or enum literals.
+            if (ClassType.isBuiltIn(rightType, 'bool')) {
+                canNarrow = true;
+            } else if (rightType.priv.literalValue instanceof EnumLiteral) {
+                canNarrow = true;
+            }
+
+            if (canNarrow) {
+                return {
+                    kind: 'tuple',
+                    adjIsPositiveTest,
+                    indexType,
+                    rightType,
+                    isIncomplete: !!rightTypeResult.isIncomplete,
+                };
+            }
+        }
     }
 
     return undefined;

@@ -19,7 +19,6 @@ import * as TypeEvaluatorNarrowing from './typeEvaluator/narrowing';
 import { EvalFlags, TypeEvaluator } from './typeEvaluatorTypes';
 import {
     ClassType,
-    EnumLiteral,
     FunctionType,
     isClassInstance,
     isFunction,
@@ -167,6 +166,18 @@ function getTypeIsCallNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorN
 function getIsLiteralOrClassNarrowingContext(
     evaluator: TypeEvaluator
 ): TypeEvaluatorNarrowing.IsLiteralOrClassNarrowingContext {
+    return {
+        getTypeOfExpression: (node) => evaluator.getTypeOfExpression(node),
+        isMatchingExpression: (reference, expression) =>
+            ParseTreeUtils.isMatchingExpression(reference, expression, (ref, expr) =>
+                isNameSameScope(evaluator, ref, expr)
+            ),
+    };
+}
+
+function getIndexedLiteralNarrowingContext(
+    evaluator: TypeEvaluator
+): TypeEvaluatorNarrowing.IndexedLiteralNarrowingContext {
     return {
         getTypeOfExpression: (node) => evaluator.getTypeOfExpression(node),
         isMatchingExpression: (reference, expression) =>
@@ -409,67 +420,41 @@ export function getTypeNarrowingCallback(
                 }
 
                 // Look for X[<literal>] is <literal> or X[<literal>] is not <literal>.
-                if (
-                    testExpression.d.leftExpr.nodeType === ParseNodeType.Index &&
-                    testExpression.d.leftExpr.d.items.length === 1 &&
-                    !testExpression.d.leftExpr.d.trailingComma &&
-                    testExpression.d.leftExpr.d.items[0].d.argCategory === ArgCategory.Simple &&
-                    ParseTreeUtils.isMatchingExpression(reference, testExpression.d.leftExpr.d.leftExpr, (ref, expr) =>
-                        isNameSameScope(evaluator, ref, expr)
-                    )
-                ) {
-                    const indexTypeResult = evaluator.getTypeOfExpression(
-                        testExpression.d.leftExpr.d.items[0].d.valueExpr
-                    );
-                    const indexType = indexTypeResult.type;
+                const indexedLiteralInfo = TypeEvaluatorNarrowing.getIndexedLiteralNarrowingInfo(
+                    getIndexedLiteralNarrowingContext(evaluator),
+                    reference,
+                    testExpression,
+                    isPositiveTest
+                );
 
-                    if (isClassInstance(indexType) && isLiteralType(indexType)) {
-                        if (ClassType.isBuiltIn(indexType, 'str')) {
-                            const rightType = evaluator.getTypeOfExpression(testExpression.d.rightExpr).type;
-                            if (isClassInstance(rightType) && rightType.priv.literalValue !== undefined) {
-                                return (type: Type) => {
-                                    return {
-                                        type: narrowTypeForDiscriminatedDictEntryComparison(
-                                            evaluator,
-                                            type,
-                                            indexType,
-                                            rightType,
-                                            adjIsPositiveTest
-                                        ),
-                                        isIncomplete: !!indexTypeResult.isIncomplete,
-                                    };
-                                };
-                            }
-                        } else if (ClassType.isBuiltIn(indexType, 'int')) {
-                            const rightTypeResult = evaluator.getTypeOfExpression(testExpression.d.rightExpr);
-                            const rightType = rightTypeResult.type;
-
-                            if (isClassInstance(rightType) && rightType.priv.literalValue !== undefined) {
-                                let canNarrow = false;
-                                // Narrowing can be applied only for bool or enum literals.
-                                if (ClassType.isBuiltIn(rightType, 'bool')) {
-                                    canNarrow = true;
-                                } else if (rightType.priv.literalValue instanceof EnumLiteral) {
-                                    canNarrow = true;
-                                }
-
-                                if (canNarrow) {
-                                    return (type: Type) => {
-                                        return {
-                                            type: narrowTypeForDiscriminatedTupleComparison(
-                                                evaluator,
-                                                type,
-                                                indexType,
-                                                rightType,
-                                                adjIsPositiveTest
-                                            ),
-                                            isIncomplete: !!rightTypeResult.isIncomplete,
-                                        };
-                                    };
-                                }
-                            }
-                        }
+                if (indexedLiteralInfo) {
+                    if (indexedLiteralInfo.kind === 'dict') {
+                        return (type: Type) => {
+                            return {
+                                type: narrowTypeForDiscriminatedDictEntryComparison(
+                                    evaluator,
+                                    type,
+                                    indexedLiteralInfo.indexType,
+                                    indexedLiteralInfo.rightType,
+                                    indexedLiteralInfo.adjIsPositiveTest
+                                ),
+                                isIncomplete: indexedLiteralInfo.isIncomplete,
+                            };
+                        };
                     }
+
+                    return (type: Type) => {
+                        return {
+                            type: narrowTypeForDiscriminatedTupleComparison(
+                                evaluator,
+                                type,
+                                indexedLiteralInfo.indexType,
+                                indexedLiteralInfo.rightType,
+                                indexedLiteralInfo.adjIsPositiveTest
+                            ),
+                            isIncomplete: indexedLiteralInfo.isIncomplete,
+                        };
+                    };
                 }
             }
 
