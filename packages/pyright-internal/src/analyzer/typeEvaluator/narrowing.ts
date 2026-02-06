@@ -69,6 +69,7 @@ import {
     convertToInstantiable,
     derivesFromAnyOrUnknown,
     doForEachSubtype,
+    getUnknownTypeForCallable,
     getSpecializedTupleType,
     getTypeCondition,
     getTypeVarScopeIds,
@@ -90,6 +91,7 @@ import {
     makeTypeVarsFree,
     mapSubtypes,
     MemberAccessFlags,
+    specializeWithUnknownTypeArgs,
     specializeTupleClass,
     stripTypeForm,
     transformPossibleRecursiveTypeAlias,
@@ -220,6 +222,11 @@ export interface IsInstanceNarrowingContext {
         callback: (subtype: Type, unexpandedSubtype: Type) => Type | undefined
     ) => Type;
     solveAndApplyConstraints: (type: Type, constraints: ConstraintTracker, options: ApplyTypeVarOptions) => Type;
+}
+
+export interface IsInstanceClassTypeContext {
+    getTupleClassType: () => ClassType | undefined;
+    maxTypeRecursionCount: number;
 }
 
 export interface TupleLengthNarrowingContext {
@@ -1678,10 +1685,7 @@ export function narrowTypeForTypedDictKey(
     return narrowedType;
 }
 
-export function enumerateLiteralsForType(
-    ctx: EnumerateLiteralsContext,
-    type: ClassType
-): ClassType[] | undefined {
+export function enumerateLiteralsForType(ctx: EnumerateLiteralsContext, type: ClassType): ClassType[] | undefined {
     if (ClassType.isBuiltIn(type, 'bool')) {
         // Booleans have only two types: True and False.
         return [
@@ -1719,6 +1723,81 @@ export function enumerateLiteralsForType(
     }
 
     return undefined;
+}
+
+// The "isinstance" and "issubclass" calls support two forms - a simple form
+// that accepts a single class, and a more complex form that accepts a tuple
+// of classes (including arbitrarily-nested tuples). This method determines
+// which form and returns a list of classes or undefined.
+export function getIsInstanceClassTypes(
+    ctx: IsInstanceClassTypeContext,
+    argType: Type
+): (ClassType | TypeVarType | FunctionType)[] | undefined {
+    let foundNonClassType = false;
+    const classTypeList: (ClassType | TypeVarType | FunctionType)[] = [];
+
+    const isNoneTypeClassType = (type: Type): type is ClassType => isNoneTypeClass(type);
+
+    // Create a helper function that returns a list of class types or
+    // undefined if any of the types are not valid.
+    const addClassTypesToList = (types: Type[]) => {
+        types.forEach((subtype) => {
+            if (isClass(subtype)) {
+                subtype = specializeWithUnknownTypeArgs(subtype, ctx.getTupleClassType());
+
+                if (isInstantiableClass(subtype) && ClassType.isBuiltIn(subtype, 'Callable')) {
+                    subtype = convertToInstantiable(getUnknownTypeForCallable());
+                }
+            }
+
+            if (isInstantiableClass(subtype)) {
+                // If this is a reference to a class that has type promotions (e.g.
+                // float or complex), remove the promotions for purposes of the
+                // isinstance check).
+                if (!subtype.priv.includeSubclasses && subtype.priv.includePromotions) {
+                    subtype = ClassType.cloneRemoveTypePromotions(subtype);
+                }
+                classTypeList.push(subtype);
+            } else if (isTypeVar(subtype) && TypeBase.isInstantiable(subtype)) {
+                classTypeList.push(subtype);
+            } else if (isNoneTypeClassType(subtype)) {
+                classTypeList.push(subtype);
+            } else if (
+                isFunction(subtype) &&
+                subtype.shared.parameters.length === 2 &&
+                subtype.shared.parameters[0].category === ParamCategory.ArgsList &&
+                subtype.shared.parameters[1].category === ParamCategory.KwargsDict
+            ) {
+                classTypeList.push(subtype);
+            } else {
+                foundNonClassType = true;
+            }
+        });
+    };
+
+    const addClassTypesRecursive = (type: Type, recursionCount = 0) => {
+        if (recursionCount > ctx.maxTypeRecursionCount) {
+            return;
+        }
+
+        if (isClass(type) && TypeBase.isInstance(type) && isTupleClass(type)) {
+            if (type.priv.tupleTypeArgs) {
+                type.priv.tupleTypeArgs.forEach((tupleEntry) => {
+                    addClassTypesRecursive(tupleEntry.type, recursionCount + 1);
+                });
+            }
+        } else {
+            doForEachSubtype(type, (subtype) => {
+                addClassTypesToList([subtype]);
+            });
+        }
+    };
+
+    doForEachSubtype(argType, (subtype) => {
+        addClassTypesRecursive(subtype);
+    });
+
+    return foundNonClassType ? undefined : classTypeList;
 }
 
 function narrowTypeForInstanceOrSubclassInternal(
