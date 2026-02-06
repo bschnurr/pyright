@@ -37,7 +37,7 @@ This module accepts a `DiagnosticsContext` so it can operate without importing t
 - Completed:
   - `diagnostics.ts` extraction.
   - `flowAnalysis.ts` helpers (flow graph delegators, constrained typevar narrowing, `printControlFlowGraph`).
-  - `narrowing.ts` helpers for assignment-based narrowing, literal/type-guard stripping, truthiness handling, `None`/ellipsis comparisons, class/literal equality comparisons, discriminated equality helpers (tuple/dict/member), tuple length/containment/TypedDict-key narrowing, literal enumeration, `type(x) is y` narrowing, isinstance/issubclass narrowing (including class-type parsing and name-scope checks), and user-defined TypeGuard/TypeIs narrowing.
+  - `narrowing.ts` helpers for assignment-based narrowing, literal/type-guard stripping, truthiness handling, `None`/ellipsis comparisons, class/literal equality comparisons, discriminated equality helpers (tuple/dict/member), tuple length/containment/TypedDict-key narrowing, literal enumeration, `type(x) is y` narrowing, isinstance/issubclass narrowing (including class-type parsing and name-scope checks), aliased-condition narrowing, and user-defined TypeGuard/TypeIs narrowing.
 - In progress:
   - None.
 

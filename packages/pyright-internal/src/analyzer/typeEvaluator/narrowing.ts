@@ -16,12 +16,20 @@
  * would conceptually work.
  */
 
-import { ExpressionNode, NameNode, ParamCategory } from '../../parser/parseNodes';
+import {
+    ExpressionNode,
+    isExpressionNode,
+    NameNode,
+    ParamCategory,
+    ParseNode,
+    ParseNodeType,
+} from '../../parser/parseNodes';
 import { getFileInfo } from '../analyzerNodeInfo';
 import { ConstraintTracker } from '../constraintTracker';
+import { Declaration, DeclarationType } from '../declaration';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { SymbolWithScope } from '../scope';
-import { isScopeContainedWithin } from '../scopeUtils';
+import { ScopeType, SymbolWithScope } from '../scope';
+import { getScopeForNode, isScopeContainedWithin } from '../scopeUtils';
 import { Symbol, SymbolFlags } from '../symbol';
 import { AssignTypeFlags, MapSubtypesOptions, TypeEvaluator, TypeResult } from '../typeEvaluatorTypes';
 import {
@@ -197,6 +205,10 @@ export interface EnumerateLiteralsContext {
 
 export interface NameSameScopeContext {
     lookUpSymbolRecursive: (node: NameNode, name: string, honorCodeFlow: boolean) => SymbolWithScope | undefined;
+}
+
+export interface AliasedConditionNarrowingContext {
+    isNodeReachable: (fromNode: ParseNode, toNode: ParseNode) => boolean;
 }
 
 export interface TypeIsNarrowingContext {
@@ -1826,6 +1838,130 @@ export function isNameSameScope(ctx: NameSameScopeContext, reference: NameNode, 
     }
 
     return isScopeContainedWithin(refScope, exprScope);
+}
+
+export function getTypeNarrowingCallbackForAliasedCondition<TCallback>(
+    ctx: AliasedConditionNarrowingContext,
+    reference: ExpressionNode,
+    testExpression: ExpressionNode,
+    isPositiveTest: boolean,
+    recursionCount: number,
+    getTypeNarrowingCallback: (
+        reference: ExpressionNode,
+        testExpression: ExpressionNode,
+        isPositiveTest: boolean,
+        recursionCount: number
+    ) => TCallback | undefined
+): TCallback | undefined {
+    if (
+        testExpression.nodeType !== ParseNodeType.Name ||
+        reference.nodeType !== ParseNodeType.Name ||
+        testExpression === reference
+    ) {
+        return undefined;
+    }
+
+    // Make sure the reference expression is a constant parameter or variable.
+    // If the reference expression is modified within the scope multiple times,
+    // we need to validate that it is not modified between the test expression
+    // evaluation and the conditional check.
+    const testExprDecl = getDeclsForLocalVar(ctx, testExpression, testExpression, /* requireUnique */ true);
+    if (!testExprDecl || testExprDecl.length !== 1 || testExprDecl[0].type !== DeclarationType.Variable) {
+        return undefined;
+    }
+
+    const referenceDecls = getDeclsForLocalVar(ctx, reference, testExpression, /* requireUnique */ false);
+    if (!referenceDecls) {
+        return undefined;
+    }
+
+    let modifyingDecls: Declaration[] = [];
+    if (referenceDecls.length > 1) {
+        // If there is more than one assignment to the reference variable within
+        // the local scope, make sure that none of these assignments are done
+        // after the test expression but before the condition check.
+        //
+        // This is OK:
+        //  val = None
+        //  is_none = val is None
+        //  if is_none: ...
+        //
+        // This is not OK:
+        //  val = None
+        //  is_none = val is None
+        //  val = 1
+        //  if is_none: ...
+        modifyingDecls = referenceDecls.filter((decl) => {
+            return (
+                ctx.isNodeReachable(testExpression, decl.node) && ctx.isNodeReachable(decl.node, testExprDecl[0].node)
+            );
+        });
+    }
+
+    if (modifyingDecls.length !== 0) {
+        return undefined;
+    }
+
+    const initNode = testExprDecl[0].inferredTypeSource;
+
+    if (!initNode || ParseTreeUtils.isNodeContainedWithin(testExpression, initNode) || !isExpressionNode(initNode)) {
+        return undefined;
+    }
+
+    return getTypeNarrowingCallback(reference, initNode, isPositiveTest, recursionCount);
+}
+
+// Determines whether the symbol is a local variable or parameter within
+// the current scope. If requireUnique is true, there can be only one
+// declaration (assignment) of the symbol, otherwise it is rejected.
+function getDeclsForLocalVar(
+    ctx: AliasedConditionNarrowingContext,
+    name: NameNode,
+    reachableFrom: ParseNode,
+    requireUnique: boolean
+): Declaration[] | undefined {
+    const scope = getScopeForNode(name);
+    if (scope?.type !== ScopeType.Function && scope?.type !== ScopeType.Module) {
+        return undefined;
+    }
+
+    const symbol = scope.lookUpSymbol(name.d.value);
+    if (!symbol) {
+        return undefined;
+    }
+
+    const decls = symbol.getDeclarations();
+    if (requireUnique && decls.length > 1) {
+        return undefined;
+    }
+
+    if (
+        decls.length === 0 ||
+        decls.some((decl) => decl.type !== DeclarationType.Variable && decl.type !== DeclarationType.Param)
+    ) {
+        return undefined;
+    }
+
+    // If there are any assignments within different scopes (e.g. via a "global" or
+    // "nonlocal" reference), don't consider it a local variable.
+    let prevDeclScope: ParseNode | undefined;
+    if (
+        decls.some((decl) => {
+            const nodeToConsider = decl.type === DeclarationType.Param ? decl.node.d.name! : decl.node;
+            const declScopeNode = ParseTreeUtils.getExecutionScopeNode(nodeToConsider);
+            if (prevDeclScope && declScopeNode !== prevDeclScope) {
+                return true;
+            }
+            prevDeclScope = declScopeNode;
+            return false;
+        })
+    ) {
+        return undefined;
+    }
+
+    const reachableDecls = decls.filter((decl) => ctx.isNodeReachable(reachableFrom, decl.node));
+
+    return reachableDecls.length > 0 ? reachableDecls : undefined;
 }
 
 function narrowTypeForInstanceOrSubclassInternal(
