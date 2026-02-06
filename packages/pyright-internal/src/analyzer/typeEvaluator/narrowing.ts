@@ -24,6 +24,7 @@ import {
     combineTypes,
     EnumLiteral,
     findSubtype,
+    FunctionType,
     isAny,
     isAnyOrUnknown,
     isClass,
@@ -48,11 +49,15 @@ import {
     addConditionToType,
     convertToInstance,
     convertToInstantiable,
+    doForEachSubtype,
     getSpecializedTupleType,
     getTypeCondition,
     isIncompleteUnknown,
     isLiteralType,
+    isLiteralTypeOrUnion,
+    isMaybeDescriptorInstance,
     isNoneInstance,
+    isProperty,
     isSentinelLiteral,
     isTupleClass,
     isUnboundedTupleClass,
@@ -127,6 +132,29 @@ export interface LiteralComparisonContext {
     enumerateLiteralsForType: (type: ClassType) => ClassType[] | undefined;
     makeTopLevelTypeVarsConcrete: (type: Type) => Type;
     mapSubtypesExpandTypeVars: (type: Type, callback: (subtype: Type) => Type | undefined) => Type;
+}
+
+export interface DiscriminatedDictEntryContext {
+    assignType: (destType: Type, srcType: Type) => boolean;
+    getTypedDictMembersForClass: (type: ClassType) => TypedDictEntries | undefined;
+}
+
+export interface DiscriminatedTupleContext {
+    assignType: (destType: Type, srcType: Type) => boolean;
+}
+
+export interface DiscriminatedLiteralFieldContext {
+    assignType: (destType: Type, srcType: Type) => boolean;
+    getTypeOfMember: (member: any) => Type;
+    lookUpObjectMember: (type: ClassType, memberName: string) => any;
+    lookUpClassMember: (type: ClassType, memberName: string) => any;
+}
+
+export interface DiscriminatedFieldNoneContext {
+    getTypeOfMember: (member: any) => Type;
+    makeTopLevelTypeVarsConcrete: (type: Type) => Type;
+    lookUpObjectMember: (type: ClassType, memberName: string) => any;
+    lookUpClassMember: (type: ClassType, memberName: string) => any;
 }
 
 // Conceptual narrowing entrypoint.
@@ -919,6 +947,188 @@ export function narrowTypeForLiteralComparison(
             if (isIsOperator || isNoneInstance(subtype)) {
                 const isSubtype = ctx.assignType(subtype, literalType);
                 return isSubtype ? literalType : undefined;
+            }
+        }
+
+        return subtype;
+    });
+}
+
+// Attempts to narrow a TypedDict type based on a comparison (equal or not
+// equal) between a discriminating entry type that has a declared literal
+// type to a literal value.
+export function narrowTypeForDiscriminatedDictEntryComparison(
+    ctx: DiscriminatedDictEntryContext,
+    referenceType: Type,
+    indexLiteralType: ClassType,
+    literalType: Type,
+    isPositiveTest: boolean
+): Type {
+    let canNarrow = true;
+
+    const narrowedType = mapSubtypes(referenceType, (subtype) => {
+        if (isClassInstance(subtype) && ClassType.isTypedDictClass(subtype)) {
+            const symbolMap = ctx.getTypedDictMembersForClass(subtype);
+            const tdEntry = symbolMap?.knownItems.get(indexLiteralType.priv.literalValue as string);
+
+            if (tdEntry && isLiteralTypeOrUnion(tdEntry.valueType)) {
+                if (isPositiveTest) {
+                    let foundMatch = false;
+
+                    doForEachSubtype(literalType, (literalSubtype) => {
+                        if (ctx.assignType(tdEntry.valueType, literalSubtype)) {
+                            foundMatch = true;
+                        }
+                    });
+
+                    return foundMatch ? subtype : undefined;
+                } else {
+                    let foundNonMatch = false;
+
+                    doForEachSubtype(literalType, (literalSubtype) => {
+                        if (!ctx.assignType(literalSubtype, tdEntry.valueType)) {
+                            foundNonMatch = true;
+                        }
+                    });
+
+                    return foundNonMatch ? subtype : undefined;
+                }
+            }
+        }
+
+        canNarrow = false;
+        return subtype;
+    });
+
+    return canNarrow ? narrowedType : referenceType;
+}
+
+export function narrowTypeForDiscriminatedTupleComparison(
+    ctx: DiscriminatedTupleContext,
+    referenceType: Type,
+    indexLiteralType: ClassType,
+    literalType: Type,
+    isPositiveTest: boolean
+): Type {
+    let canNarrow = true;
+
+    const narrowedType = mapSubtypes(referenceType, (subtype) => {
+        if (
+            isClassInstance(subtype) &&
+            ClassType.isTupleClass(subtype) &&
+            !isUnboundedTupleClass(subtype) &&
+            typeof indexLiteralType.priv.literalValue === 'number' &&
+            isClassInstance(literalType)
+        ) {
+            const indexValue = indexLiteralType.priv.literalValue;
+            if (subtype.priv.tupleTypeArgs && indexValue >= 0 && indexValue < subtype.priv.tupleTypeArgs.length) {
+                const tupleEntryType = subtype.priv.tupleTypeArgs[indexValue]?.type;
+                if (tupleEntryType && isLiteralTypeOrUnion(tupleEntryType)) {
+                    if (isPositiveTest) {
+                        return ctx.assignType(tupleEntryType, literalType) ? subtype : undefined;
+                    } else {
+                        return ctx.assignType(literalType, tupleEntryType) ? undefined : subtype;
+                    }
+                }
+            }
+        }
+
+        canNarrow = false;
+        return subtype;
+    });
+
+    return canNarrow ? narrowedType : referenceType;
+}
+
+// Attempts to narrow a type based on a comparison (equal or not equal)
+// between a discriminating field that has a declared literal type to a
+// literal value.
+export function narrowTypeForDiscriminatedLiteralFieldComparison(
+    ctx: DiscriminatedLiteralFieldContext,
+    referenceType: Type,
+    memberName: string,
+    literalType: ClassType,
+    isPositiveTest: boolean
+): Type {
+    const narrowedType = mapSubtypes(referenceType, (subtype) => {
+        let memberInfo: any;
+
+        if (isClassInstance(subtype)) {
+            memberInfo = ctx.lookUpObjectMember(subtype, memberName);
+        } else if (isInstantiableClass(subtype)) {
+            memberInfo = ctx.lookUpClassMember(subtype, memberName);
+        }
+
+        if (memberInfo && memberInfo.isTypeDeclared) {
+            let memberType = ctx.getTypeOfMember(memberInfo);
+
+            // Handle the case where the field is a property
+            // that has a declared literal return type for its getter.
+            if (isClassInstance(subtype) && isClassInstance(memberType) && isProperty(memberType)) {
+                const getterType = memberType.priv.fgetInfo?.methodType;
+                if (getterType && getterType.shared.declaredReturnType) {
+                    const getterReturnType = FunctionType.getEffectiveReturnType(getterType);
+                    if (getterReturnType) {
+                        memberType = getterReturnType;
+                    }
+                }
+            }
+
+            if (isLiteralTypeOrUnion(memberType, /* allowNone */ true)) {
+                if (isPositiveTest) {
+                    return ctx.assignType(memberType, literalType) ? subtype : undefined;
+                } else {
+                    return ctx.assignType(literalType, memberType) ? undefined : subtype;
+                }
+            }
+        }
+
+        return subtype;
+    });
+
+    return narrowedType;
+}
+
+// Attempts to narrow a type based on a comparison (equal or not equal)
+// between a discriminating field that has a declared None type to a
+// None.
+export function narrowTypeForDiscriminatedFieldNoneComparison(
+    ctx: DiscriminatedFieldNoneContext,
+    referenceType: Type,
+    memberName: string,
+    isPositiveTest: boolean
+): Type {
+    return mapSubtypes(referenceType, (subtype) => {
+        let memberInfo: any;
+        if (isClassInstance(subtype)) {
+            memberInfo = ctx.lookUpObjectMember(subtype, memberName);
+        } else if (isInstantiableClass(subtype)) {
+            memberInfo = ctx.lookUpClassMember(subtype, memberName);
+        }
+
+        if (memberInfo && memberInfo.isTypeDeclared) {
+            const memberType = ctx.makeTopLevelTypeVarsConcrete(ctx.getTypeOfMember(memberInfo));
+            let canNarrow = true;
+
+            if (isPositiveTest) {
+                doForEachSubtype(memberType, (memberSubtype) => {
+                    memberSubtype = ctx.makeTopLevelTypeVarsConcrete(memberSubtype);
+
+                    // Don't attempt to narrow if the member is a descriptor or property.
+                    if (isProperty(memberSubtype) || isMaybeDescriptorInstance(memberSubtype)) {
+                        canNarrow = false;
+                    }
+
+                    if (isAnyOrUnknown(memberSubtype) || isNoneInstance(memberSubtype) || isNever(memberSubtype)) {
+                        canNarrow = false;
+                    }
+                });
+            } else {
+                canNarrow = isNoneInstance(memberType);
+            }
+
+            if (canNarrow) {
+                return undefined;
             }
         }
 
