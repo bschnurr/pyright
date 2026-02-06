@@ -152,9 +152,7 @@ function getNoneEllipsisNarrowingContext(
     };
 }
 
-function getTypeIsCallNarrowingContext(
-    evaluator: TypeEvaluator
-): TypeEvaluatorNarrowing.TypeIsCallNarrowingContext {
+function getTypeIsCallNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.TypeIsCallNarrowingContext {
     return {
         getTypeOfExpression: (node, flags) => evaluator.getTypeOfExpression(node, flags),
         isMatchingExpression: (reference, expression) =>
