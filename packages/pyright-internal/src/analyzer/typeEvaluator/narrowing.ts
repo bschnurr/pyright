@@ -16,10 +16,12 @@
  * would conceptually work.
  */
 
-import { ExpressionNode, ParamCategory } from '../../parser/parseNodes';
+import { ExpressionNode, NameNode, ParamCategory } from '../../parser/parseNodes';
 import { getFileInfo } from '../analyzerNodeInfo';
 import { ConstraintTracker } from '../constraintTracker';
 import * as ParseTreeUtils from '../parseTreeUtils';
+import { SymbolWithScope } from '../scope';
+import { isScopeContainedWithin } from '../scopeUtils';
 import { Symbol, SymbolFlags } from '../symbol';
 import { AssignTypeFlags, MapSubtypesOptions, TypeEvaluator, TypeResult } from '../typeEvaluatorTypes';
 import {
@@ -191,6 +193,10 @@ export interface DiscriminatedFieldNoneContext {
 export interface EnumerateLiteralsContext {
     getEffectiveTypeOfSymbol: (symbol: Symbol) => Type;
     transformTypeForEnumMember: (enumClassType: ClassType, memberName: string) => Type | undefined;
+}
+
+export interface NameSameScopeContext {
+    lookUpSymbolRecursive: (node: NameNode, name: string, honorCodeFlow: boolean) => SymbolWithScope | undefined;
 }
 
 export interface TypeIsNarrowingContext {
@@ -1798,6 +1804,28 @@ export function getIsInstanceClassTypes(
     });
 
     return foundNonClassType ? undefined : classTypeList;
+}
+
+// Determines whether the expression name node is in the same scope or
+// an outer scope from the reference name node. This allows isMatchingExpression
+// to determine whether two name nodes are referring to the same symbol.
+export function isNameSameScope(ctx: NameSameScopeContext, reference: NameNode, expression: NameNode): boolean {
+    const refSymbol = ctx.lookUpSymbolRecursive(reference, reference.d.value, /* honorCodeFlow */ false);
+    const exprSymbol = ctx.lookUpSymbolRecursive(expression, expression.d.value, /* honorCodeFlow */ false);
+
+    if (!refSymbol || !exprSymbol) {
+        // This shouldn't happen, but just to be safe...
+        return true;
+    }
+
+    const refScope = refSymbol.scope;
+    const exprScope = exprSymbol.scope;
+
+    if (refScope === exprScope) {
+        return true;
+    }
+
+    return isScopeContainedWithin(refScope, exprScope);
 }
 
 function narrowTypeForInstanceOrSubclassInternal(

@@ -24,7 +24,7 @@ import { Declaration, DeclarationType } from './declaration';
 import { transformTypeForEnumMember } from './enums';
 import * as ParseTreeUtils from './parseTreeUtils';
 import { ScopeType } from './scope';
-import { getScopeForNode, isScopeContainedWithin } from './scopeUtils';
+import { getScopeForNode } from './scopeUtils';
 import { getTypedDictMembersForClass } from './typedDicts';
 import * as TypeEvaluatorNarrowing from './typeEvaluator/narrowing';
 import { EvalFlags, TypeEvaluator } from './typeEvaluatorTypes';
@@ -142,6 +142,13 @@ function getEnumerateLiteralsContext(evaluator: TypeEvaluator): TypeEvaluatorNar
         getEffectiveTypeOfSymbol: (symbol) => evaluator.getEffectiveTypeOfSymbol(symbol),
         transformTypeForEnumMember: (enumClassType, memberName) =>
             transformTypeForEnumMember(evaluator, enumClassType, memberName),
+    };
+}
+
+function getNameSameScopeContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.NameSameScopeContext {
+    return {
+        lookUpSymbolRecursive: (node, name, honorCodeFlow) =>
+            evaluator.lookUpSymbolRecursive(node, name, honorCodeFlow),
     };
 }
 
@@ -1322,20 +1329,5 @@ export function enumerateLiteralsForType(evaluator: TypeEvaluator, type: ClassTy
 // an outer scope from the reference name node. This allows isMatchingExpression
 // to determine whether two name nodes are referring to the same symbol.
 function isNameSameScope(evaluator: TypeEvaluator, reference: NameNode, expression: NameNode): boolean {
-    const refSymbol = evaluator.lookUpSymbolRecursive(reference, reference.d.value, /* honorCodeFlow */ false);
-    const exprSymbol = evaluator.lookUpSymbolRecursive(expression, expression.d.value, /* honorCodeFlow */ false);
-
-    if (!refSymbol || !exprSymbol) {
-        // This shouldn't happen, but just to be safe...
-        return true;
-    }
-
-    const refScope = refSymbol.scope;
-    const exprScope = exprSymbol.scope;
-
-    if (refScope === exprScope) {
-        return true;
-    }
-
-    return isScopeContainedWithin(refScope, exprScope);
+    return TypeEvaluatorNarrowing.isNameSameScope(getNameSameScopeContext(evaluator), reference, expression);
 }
