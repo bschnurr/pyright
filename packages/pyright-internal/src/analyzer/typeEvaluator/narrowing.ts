@@ -157,6 +157,13 @@ export interface DiscriminatedFieldNoneContext {
     lookUpClassMember: (type: ClassType, memberName: string) => any;
 }
 
+export interface TypeIsNarrowingContext {
+    mapSubtypesExpandTypeVars: (
+        type: Type,
+        callback: (subtype: Type, unexpandedSubtype: Type) => Type | undefined
+    ) => Type;
+}
+
 // Conceptual narrowing entrypoint.
 //
 // A real implementation typically:
@@ -1134,4 +1141,59 @@ export function narrowTypeForDiscriminatedFieldNoneComparison(
 
         return subtype;
     });
+}
+
+// Attempts to narrow a type based on a "type(x) is y" or "type(x) is not y" check.
+export function narrowTypeForTypeIs(
+    ctx: TypeIsNarrowingContext,
+    type: Type,
+    classTypes: ClassType[],
+    isPositiveTest: boolean
+): Type {
+    if (!isPositiveTest && classTypes.length > 1) {
+        return type;
+    }
+
+    const typesToCombine = classTypes.map((classType) => {
+        return ctx.mapSubtypesExpandTypeVars(type, (subtype, unexpandedSubtype) => {
+            if (isClassInstance(subtype)) {
+                const matches = ClassType.isDerivedFrom(classType, ClassType.cloneAsInstantiable(subtype));
+                if (isPositiveTest) {
+                    if (matches) {
+                        if (ClassType.isSameGenericClass(ClassType.cloneAsInstantiable(subtype), classType)) {
+                            return addConditionToType(subtype, getTypeCondition(classType));
+                        }
+
+                        return addConditionToType(ClassType.cloneAsInstance(classType), subtype.props?.condition);
+                    }
+
+                    if (!classType.priv.includeSubclasses) {
+                        return undefined;
+                    }
+
+                    if (!isTypeVar(unexpandedSubtype) || !TypeVarType.isSelf(unexpandedSubtype)) {
+                        return addConditionToType(subtype, classType.props?.condition);
+                    }
+                }
+
+                if (!classType.priv.includeSubclasses) {
+                    if (matches && ClassType.isFinal(subtype)) {
+                        return undefined;
+                    }
+
+                    return subtype;
+                }
+            }
+
+            if (isAnyOrUnknown(subtype)) {
+                return isPositiveTest
+                    ? ClassType.cloneAsInstance(addConditionToType(classType, getTypeCondition(subtype)))
+                    : subtype;
+            }
+
+            return unexpandedSubtype;
+        });
+    });
+
+    return combineTypes(typesToCombine);
 }

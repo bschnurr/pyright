@@ -183,6 +183,13 @@ function getDiscriminatedFieldNoneContext(
     };
 }
 
+function getTypeIsNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.TypeIsNarrowingContext {
+    return {
+        mapSubtypesExpandTypeVars: (type, callback) =>
+            evaluator.mapSubtypesExpandTypeVars(type, /* options */ undefined, callback),
+    };
+}
+
 // Given a reference expression and a test expression, returns a callback that
 // can be used to narrow the type described by the reference expression.
 // If the specified flow node is not associated with the test expression,
@@ -355,7 +362,12 @@ export function getTypeNarrowingCallback(
                             if (isClassType && classTypes.length > 0) {
                                 return (type: Type) => {
                                     return {
-                                        type: narrowTypeForTypeIs(evaluator, type, classTypes, adjIsPositiveTest),
+                                        type: TypeEvaluatorNarrowing.narrowTypeForTypeIs(
+                                            getTypeIsNarrowingContext(evaluator),
+                                            type,
+                                            classTypes,
+                                            adjIsPositiveTest
+                                        ),
                                         isIncomplete: !!rhsResult.isIncomplete,
                                     };
                                 };
@@ -2302,67 +2314,6 @@ function narrowTypeForDiscriminatedFieldNoneComparison(
         memberName,
         isPositiveTest
     );
-}
-
-// Attempts to narrow a type based on a "type(x) is y" or "type(x) is not y" check.
-function narrowTypeForTypeIs(evaluator: TypeEvaluator, type: Type, classTypes: ClassType[], isPositiveTest: boolean) {
-    // We currently don't support narrowing in the negative direction
-    // when there are more than one class types.
-    if (!isPositiveTest && classTypes.length > 1) {
-        return type;
-    }
-
-    const typesToCombine = classTypes.map((classType) => {
-        return evaluator.mapSubtypesExpandTypeVars(
-            type,
-            /* options */ undefined,
-            (subtype: Type, unexpandedSubtype: Type) => {
-                if (isClassInstance(subtype)) {
-                    const matches = ClassType.isDerivedFrom(classType, ClassType.cloneAsInstantiable(subtype));
-                    if (isPositiveTest) {
-                        if (matches) {
-                            if (ClassType.isSameGenericClass(ClassType.cloneAsInstantiable(subtype), classType)) {
-                                return addConditionToType(subtype, getTypeCondition(classType));
-                            }
-
-                            return addConditionToType(ClassType.cloneAsInstance(classType), subtype.props?.condition);
-                        }
-
-                        if (!classType.priv.includeSubclasses) {
-                            return undefined;
-                        }
-
-                        if (!isTypeVar(unexpandedSubtype) || !TypeVarType.isSelf(unexpandedSubtype)) {
-                            return addConditionToType(subtype, classType.props?.condition);
-                        }
-                    }
-
-                    if (!classType.priv.includeSubclasses) {
-                        // If the class if marked final and it matches, then
-                        // we can eliminate it in the negative case.
-                        if (matches && ClassType.isFinal(subtype)) {
-                            return undefined;
-                        }
-
-                        // We can't eliminate the subtype in the negative
-                        // case because it could be a subclass of the type,
-                        // in which case `type(x) is y` would fail.
-                        return subtype;
-                    }
-                }
-
-                if (isAnyOrUnknown(subtype)) {
-                    return isPositiveTest
-                        ? ClassType.cloneAsInstance(addConditionToType(classType, getTypeCondition(subtype)))
-                        : subtype;
-                }
-
-                return unexpandedSubtype;
-            }
-        );
-    });
-
-    return combineTypes(typesToCombine);
 }
 
 export function enumerateLiteralsForType(evaluator: TypeEvaluator, type: ClassType): ClassType[] | undefined {
