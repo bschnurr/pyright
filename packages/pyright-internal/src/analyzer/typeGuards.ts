@@ -1113,37 +1113,12 @@ function narrowTypeForUserDefinedTypeGuard(
     isStrictTypeGuard: boolean,
     errorNode: ExpressionNode
 ): Type {
-    // For non-strict type guards, always narrow to the typeGuardType
-    // in the positive case and don't narrow in the negative case.
-    if (!isStrictTypeGuard) {
-        let result = type;
-
-        if (isPositiveTest) {
-            result = typeGuardType;
-
-            // If the type guard is a non-constrained TypeVar, add a
-            // condition to the resulting type.
-            if (isTypeVar(type) && !isParamSpec(type) && !TypeVarType.hasConstraints(type)) {
-                result = addConditionToType(result, [{ typeVar: type, constraintIndex: 0 }]);
-            }
-            return result;
-        }
-
-        return result;
-    }
-
-    const filterTypes: Type[] = [];
-    doForEachSubtype(typeGuardType, (typeGuardSubtype) => {
-        filterTypes.push(convertToInstantiable(typeGuardSubtype));
-    });
-
-    return narrowTypeForInstanceOrSubclass(
-        evaluator,
+    return TypeEvaluatorNarrowing.narrowTypeForUserDefinedTypeGuard(
+        getIsInstanceNarrowingContext(evaluator),
         type,
-        filterTypes,
-        /* isInstanceCheck */ true,
-        /* isTypeIsCheck */ true,
+        typeGuardType,
         isPositiveTest,
+        isStrictTypeGuard,
         errorNode
     );
 }

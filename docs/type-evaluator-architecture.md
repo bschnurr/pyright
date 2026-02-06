@@ -37,14 +37,14 @@ This module accepts a `DiagnosticsContext` so it can operate without importing t
 - Completed:
   - `diagnostics.ts` extraction.
   - `flowAnalysis.ts` helpers (flow graph delegators, constrained typevar narrowing, `printControlFlowGraph`).
-  - `narrowing.ts` helpers for assignment-based narrowing, literal/type-guard stripping, truthiness handling, `None`/ellipsis comparisons, class/literal equality comparisons, discriminated equality helpers (tuple/dict/member), `type(x) is y` narrowing, and isinstance/issubclass narrowing.
+  - `narrowing.ts` helpers for assignment-based narrowing, literal/type-guard stripping, truthiness handling, `None`/ellipsis comparisons, class/literal equality comparisons, discriminated equality helpers (tuple/dict/member), `type(x) is y` narrowing, isinstance/issubclass narrowing, and user-defined TypeGuard/TypeIs narrowing.
 - In progress:
-  - `narrowing.ts` equality and `isinstance` narrowing (pending extraction).
+  - None.
 
 ## Planned breakdown (future slices)
 
 - `evaluatorCore.ts` — main entrypoints (e.g. `getTypeOfExpression`, `getTypeOfExpressionCore`)
-- `narrowing.ts` — `isinstance` / truthiness / equality narrowing (truthiness extracted; equality/`isinstance` pending)
+- `narrowing.ts` — `isinstance` / truthiness / equality narrowing (truthiness, equality, isinstance, and user-defined TypeGuard/TypeIs extracted)
 - `flowAnalysis.ts` — flow graph traversal hooks (delegating to `codeFlowEngine.ts`)
 - `symbolScope.ts` — symbol lookup by scope (e.g. `lookUpSymbolRecursive`)
 - `expressionVisitors.ts` — per-expression-node handling (Name, Attribute, Call, Await, ...)
