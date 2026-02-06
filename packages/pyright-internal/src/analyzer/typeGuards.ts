@@ -373,20 +373,8 @@ export function getTypeNarrowingCallback(
             testExpression.d.operator === OperatorType.Is || testExpression.d.operator === OperatorType.IsNot;
         const equalsOrNotEqualsOperator =
             testExpression.d.operator === OperatorType.Equals || testExpression.d.operator === OperatorType.NotEquals;
-        const comparisonOperator =
-            equalsOrNotEqualsOperator ||
-            testExpression.d.operator === OperatorType.LessThan ||
-            testExpression.d.operator === OperatorType.LessThanOrEqual ||
-            testExpression.d.operator === OperatorType.GreaterThan ||
-            testExpression.d.operator === OperatorType.GreaterThanOrEqual;
 
         if (isOrIsNotOperator || equalsOrNotEqualsOperator) {
-            // Invert the "isPositiveTest" value if this is an "is not" operation.
-            const adjIsPositiveTest =
-                testExpression.d.operator === OperatorType.Is || testExpression.d.operator === OperatorType.Equals
-                    ? isPositiveTest
-                    : !isPositiveTest;
-
             const noneEllipsisInfo = TypeEvaluatorNarrowing.getNoneEllipsisNarrowingInfo(
                 getNoneEllipsisNarrowingContext(evaluator),
                 reference,
@@ -640,28 +628,26 @@ export function getTypeNarrowingCallback(
         }
 
         // Look for len(x) == <literal>, len(x) != <literal>, len(x) < <literal>, etc.
-        if (comparisonOperator) {
-            const lenComparisonInfo = TypeEvaluatorNarrowing.getLenComparisonNarrowingInfo(
-                getLenComparisonNarrowingContext(evaluator),
-                reference,
-                testExpression,
-                isPositiveTest
-            );
+        const lenComparisonInfo = TypeEvaluatorNarrowing.getLenComparisonNarrowingInfo(
+            getLenComparisonNarrowingContext(evaluator),
+            reference,
+            testExpression,
+            isPositiveTest
+        );
 
-            if (lenComparisonInfo) {
-                return (type: Type) => {
-                    return {
-                        type: narrowTypeForTupleLength(
-                            evaluator,
-                            type,
-                            lenComparisonInfo.tupleLength,
-                            lenComparisonInfo.adjIsPositiveTest,
-                            lenComparisonInfo.isLessThanCheck
-                        ),
-                        isIncomplete: lenComparisonInfo.isIncomplete,
-                    };
+        if (lenComparisonInfo) {
+            return (type: Type) => {
+                return {
+                    type: narrowTypeForTupleLength(
+                        evaluator,
+                        type,
+                        lenComparisonInfo.tupleLength,
+                        lenComparisonInfo.adjIsPositiveTest,
+                        lenComparisonInfo.isLessThanCheck
+                    ),
+                    isIncomplete: lenComparisonInfo.isIncomplete,
                 };
-            }
+            };
         }
 
         if (testExpression.d.operator === OperatorType.In || testExpression.d.operator === OperatorType.NotIn) {
