@@ -283,6 +283,18 @@ export interface MemberAccessNarrowingInfo {
     rightType?: ClassType;
 }
 
+export interface LenComparisonNarrowingContext {
+    getTypeOfExpression: (node: ExpressionNode, flags?: EvalFlags) => TypeResult;
+    isMatchingExpression: (reference: ExpressionNode, expression: ExpressionNode) => boolean;
+}
+
+export interface LenComparisonNarrowingInfo {
+    adjIsPositiveTest: boolean;
+    isLessThanCheck: boolean;
+    tupleLength: number;
+    isIncomplete: boolean;
+}
+
 export interface AliasedConditionNarrowingContext {
     isNodeReachable: (fromNode: ParseNode, toNode: ParseNode) => boolean;
 }
@@ -2279,8 +2291,7 @@ export function getMemberAccessNarrowingInfo(
     const memberName = testExpression.d.leftExpr.d.member.d.value;
 
     if (equalsOrNotEqualsOperator) {
-        const adjIsPositiveTest =
-            testExpression.d.operator === OperatorType.Equals ? isPositiveTest : !isPositiveTest;
+        const adjIsPositiveTest = testExpression.d.operator === OperatorType.Equals ? isPositiveTest : !isPositiveTest;
         const rightTypeResult = ctx.getTypeOfExpression(testExpression.d.rightExpr);
         const rightType = rightTypeResult.type;
 
@@ -2298,8 +2309,7 @@ export function getMemberAccessNarrowingInfo(
     // Look for X.Y is <literal> or X.Y is not <literal> where <literal> is
     // an enum or bool literal.
     if (isOrIsNotOperator) {
-        const adjIsPositiveTest =
-            testExpression.d.operator === OperatorType.Is ? isPositiveTest : !isPositiveTest;
+        const adjIsPositiveTest = testExpression.d.operator === OperatorType.Is ? isPositiveTest : !isPositiveTest;
         const rightTypeResult = ctx.getTypeOfExpression(testExpression.d.rightExpr);
         const rightType = rightTypeResult.type;
 

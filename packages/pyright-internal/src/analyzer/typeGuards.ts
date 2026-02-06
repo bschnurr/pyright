@@ -10,7 +10,7 @@
  */
 
 import { AssignmentExpressionNode, ExpressionNode, NameNode, ParseNodeType } from '../parser/parseNodes';
-import { KeywordType, OperatorType } from '../parser/tokenizerTypes';
+import { OperatorType } from '../parser/tokenizerTypes';
 import { addConstraintsForExpectedType } from './constraintSolver';
 import { transformTypeForEnumMember } from './enums';
 import * as ParseTreeUtils from './parseTreeUtils';
@@ -29,7 +29,7 @@ import {
     Type,
     TypeVarType,
 } from './types';
-import { isLiteralType, isNoneInstance, lookUpClassMember, lookUpObjectMember } from './typeUtils';
+import { isLiteralType, lookUpClassMember, lookUpObjectMember } from './typeUtils';
 
 export interface TypeNarrowingResult {
     type: Type;
