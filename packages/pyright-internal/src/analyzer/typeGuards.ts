@@ -148,6 +148,16 @@ function getDiscriminatedFieldNoneContext(
     };
 }
 
+function getEnumerateLiteralsContext(
+    evaluator: TypeEvaluator
+): TypeEvaluatorNarrowing.EnumerateLiteralsContext {
+    return {
+        getEffectiveTypeOfSymbol: (symbol) => evaluator.getEffectiveTypeOfSymbol(symbol),
+        transformTypeForEnumMember: (enumClassType, memberName) =>
+            transformTypeForEnumMember(evaluator, enumClassType, memberName),
+    };
+}
+
 function getTypeIsNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.TypeIsNarrowingContext {
     return {
         mapSubtypesExpandTypeVars: (type, callback) =>
@@ -1374,43 +1384,7 @@ function narrowTypeForDiscriminatedFieldNoneComparison(
 }
 
 export function enumerateLiteralsForType(evaluator: TypeEvaluator, type: ClassType): ClassType[] | undefined {
-    if (ClassType.isBuiltIn(type, 'bool')) {
-        // Booleans have only two types: True and False.
-        return [
-            ClassType.cloneWithLiteral(type, /* value */ true),
-            ClassType.cloneWithLiteral(type, /* value */ false),
-        ];
-    }
-
-    if (ClassType.isEnumClass(type)) {
-        // Enum expansion doesn't apply to enum classes that derive
-        // from enum.Flag.
-        if (type.shared.baseClasses.some((baseClass) => isClass(baseClass) && ClassType.isBuiltIn(baseClass, 'Flag'))) {
-            return undefined;
-        }
-
-        // Enumerate all of the values in this enumeration.
-        const enumList: ClassType[] = [];
-        const fields = ClassType.getSymbolTable(type);
-        fields.forEach((symbol, name) => {
-            if (!symbol.isIgnoredForProtocolMatch()) {
-                let symbolType = evaluator.getEffectiveTypeOfSymbol(symbol);
-                symbolType = transformTypeForEnumMember(evaluator, type, name) ?? symbolType;
-
-                if (
-                    isClassInstance(symbolType) &&
-                    ClassType.isSameGenericClass(type, symbolType) &&
-                    symbolType.priv.literalValue !== undefined
-                ) {
-                    enumList.push(symbolType);
-                }
-            }
-        });
-
-        return enumList;
-    }
-
-    return undefined;
+    return TypeEvaluatorNarrowing.enumerateLiteralsForType(getEnumerateLiteralsContext(evaluator), type);
 }
 
 // Determines whether the expression name node is in the same scope or
