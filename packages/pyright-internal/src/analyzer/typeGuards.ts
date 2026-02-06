@@ -164,6 +164,18 @@ function getTypeIsCallNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorN
     };
 }
 
+function getIsLiteralOrClassNarrowingContext(
+    evaluator: TypeEvaluator
+): TypeEvaluatorNarrowing.IsLiteralOrClassNarrowingContext {
+    return {
+        getTypeOfExpression: (node) => evaluator.getTypeOfExpression(node),
+        isMatchingExpression: (reference, expression) =>
+            ParseTreeUtils.isMatchingExpression(reference, expression, (ref, expr) =>
+                isNameSameScope(evaluator, ref, expr)
+            ),
+    };
+}
+
 function getAliasedConditionNarrowingContext(
     evaluator: TypeEvaluator
 ): TypeEvaluatorNarrowing.AliasedConditionNarrowingContext {
@@ -360,44 +372,40 @@ export function getTypeNarrowingCallback(
             }
 
             if (isOrIsNotOperator) {
-                if (
-                    ParseTreeUtils.isMatchingExpression(reference, testExpression.d.leftExpr, (ref, expr) =>
-                        isNameSameScope(evaluator, ref, expr)
-                    )
-                ) {
-                    const rightTypeResult = evaluator.getTypeOfExpression(testExpression.d.rightExpr);
-                    const rightType = rightTypeResult.type;
+                const literalOrClassInfo = TypeEvaluatorNarrowing.getIsLiteralOrClassNarrowingInfo(
+                    getIsLiteralOrClassNarrowingContext(evaluator),
+                    reference,
+                    testExpression,
+                    isPositiveTest
+                );
 
-                    // Look for "X is Y" or "X is not Y" where Y is a literal.
-                    if (isClassInstance(rightType) && rightType.priv.literalValue !== undefined) {
+                if (literalOrClassInfo) {
+                    if (literalOrClassInfo.kind === 'literal') {
                         return (type: Type) => {
                             return {
                                 type: TypeEvaluatorNarrowing.narrowTypeForLiteralComparison(
                                     getLiteralComparisonContext(evaluator),
                                     type,
-                                    rightType,
-                                    adjIsPositiveTest,
+                                    literalOrClassInfo.rightType,
+                                    literalOrClassInfo.adjIsPositiveTest,
                                     /* isIsOperator */ true
                                 ),
-                                isIncomplete: !!rightTypeResult.isIncomplete,
+                                isIncomplete: literalOrClassInfo.isIncomplete,
                             };
                         };
                     }
 
-                    // Look for X is <class> or X is not <class>.
-                    if (isInstantiableClass(rightType)) {
-                        return (type: Type) => {
-                            return {
-                                type: TypeEvaluatorNarrowing.narrowTypeForClassComparison(
-                                    getClassComparisonContext(evaluator),
-                                    type,
-                                    rightType,
-                                    adjIsPositiveTest
-                                ),
-                                isIncomplete: !!rightTypeResult.isIncomplete,
-                            };
+                    return (type: Type) => {
+                        return {
+                            type: TypeEvaluatorNarrowing.narrowTypeForClassComparison(
+                                getClassComparisonContext(evaluator),
+                                type,
+                                literalOrClassInfo.rightType,
+                                literalOrClassInfo.adjIsPositiveTest
+                            ),
+                            isIncomplete: literalOrClassInfo.isIncomplete,
                         };
-                    }
+                    };
                 }
 
                 // Look for X[<literal>] is <literal> or X[<literal>] is not <literal>.

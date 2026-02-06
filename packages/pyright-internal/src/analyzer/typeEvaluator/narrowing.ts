@@ -232,6 +232,18 @@ export interface TypeIsCallNarrowingInfo {
     isIncomplete: boolean;
 }
 
+export interface IsLiteralOrClassNarrowingContext {
+    getTypeOfExpression: (node: ExpressionNode) => TypeResult;
+    isMatchingExpression: (reference: ExpressionNode, expression: ExpressionNode) => boolean;
+}
+
+export interface IsLiteralOrClassNarrowingInfo {
+    kind: 'literal' | 'class';
+    adjIsPositiveTest: boolean;
+    rightType: ClassType;
+    isIncomplete: boolean;
+}
+
 export interface AliasedConditionNarrowingContext {
     isNodeReachable: (fromNode: ParseNode, toNode: ParseNode) => boolean;
 }
@@ -2005,6 +2017,55 @@ export function getTypeIsCallNarrowingInfo(
     }
 
     return { adjIsPositiveTest, classTypes, isIncomplete: !!rhsResult.isIncomplete };
+}
+
+export function getIsLiteralOrClassNarrowingInfo(
+    ctx: IsLiteralOrClassNarrowingContext,
+    reference: ExpressionNode,
+    testExpression: ExpressionNode,
+    isPositiveTest: boolean
+): IsLiteralOrClassNarrowingInfo | undefined {
+    if (testExpression.nodeType !== ParseNodeType.BinaryOperation) {
+        return undefined;
+    }
+
+    const isOrIsNotOperator =
+        testExpression.d.operator === OperatorType.Is || testExpression.d.operator === OperatorType.IsNot;
+
+    if (!isOrIsNotOperator) {
+        return undefined;
+    }
+
+    const adjIsPositiveTest = testExpression.d.operator === OperatorType.Is ? isPositiveTest : !isPositiveTest;
+
+    if (!ctx.isMatchingExpression(reference, testExpression.d.leftExpr)) {
+        return undefined;
+    }
+
+    const rightTypeResult = ctx.getTypeOfExpression(testExpression.d.rightExpr);
+    const rightType = rightTypeResult.type;
+
+    // Look for "X is Y" or "X is not Y" where Y is a literal.
+    if (isClassInstance(rightType) && rightType.priv.literalValue !== undefined) {
+        return {
+            kind: 'literal',
+            adjIsPositiveTest,
+            rightType,
+            isIncomplete: !!rightTypeResult.isIncomplete,
+        };
+    }
+
+    // Look for X is <class> or X is not <class>.
+    if (isInstantiableClass(rightType)) {
+        return {
+            kind: 'class',
+            adjIsPositiveTest,
+            rightType,
+            isIncomplete: !!rightTypeResult.isIncomplete,
+        };
+    }
+
+    return undefined;
 }
 
 export function getTypeNarrowingCallbackForAliasedCondition<TCallback>(
