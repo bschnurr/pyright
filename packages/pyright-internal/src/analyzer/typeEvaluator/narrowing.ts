@@ -55,6 +55,7 @@ import {
     isInstantiableClass,
     isModule,
     isNever,
+    isOverloaded,
     isParamSpec,
     isTypeSame,
     isTypeVar,
