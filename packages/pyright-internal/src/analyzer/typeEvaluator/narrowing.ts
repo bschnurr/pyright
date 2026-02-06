@@ -19,15 +19,20 @@
 import { ExpressionNode } from '../../parser/parseNodes';
 import { TypeEvaluator, TypeResult } from '../typeEvaluatorTypes';
 import {
+    AnyType,
     ClassType,
     combineTypes,
     EnumLiteral,
     findSubtype,
+    isAny,
+    isAnyOrUnknown,
     isClass,
     isClassInstance,
     isFunctionOrOverloaded,
+    isInstantiableClass,
     isNever,
     isTypeSame,
+    isTypeVar,
     isUnion,
     isUnknown,
     SentinelLiteral,
@@ -35,9 +40,15 @@ import {
     TypeBase,
     TypeCategory,
     TypedDictEntries,
+    TypeVarType,
     UnionType,
+    UnknownType,
 } from '../types';
 import {
+    addConditionToType,
+    convertToInstance,
+    convertToInstantiable,
+    getSpecializedTupleType,
     getTypeCondition,
     isIncompleteUnknown,
     isLiteralType,
@@ -46,6 +57,7 @@ import {
     isTupleClass,
     isUnboundedTupleClass,
     mapSubtypes,
+    transformPossibleRecursiveTypeAlias,
 } from '../typeUtils';
 
 export interface NarrowingContext {
@@ -78,6 +90,43 @@ export interface TruthinessContext {
     getTypedDictMembersForClass: (type: ClassType, allowNarrowed: boolean) => TypedDictEntries | undefined;
     lookUpObjectMember: (type: ClassType, memberName: string) => any;
     getTypeOfMember: (member: any) => Type;
+}
+
+export interface TruthinessNarrowingContext {
+    canBeTruthy: (type: Type) => boolean;
+    canBeFalsy: (type: Type) => boolean;
+    removeFalsinessFromType: (type: Type) => Type;
+    removeTruthinessFromType: (type: Type) => Type;
+}
+
+export interface IsNoneNarrowingContext {
+    assignType: (destType: Type, srcType: Type) => boolean;
+    getNoneType: () => Type;
+    makeTopLevelTypeVarsConcrete: (type: Type) => Type;
+    mapSubtypesExpandTypeVars: (
+        type: Type,
+        callback: (subtype: Type, unexpandedSubtype: Type) => Type | undefined
+    ) => Type;
+}
+
+export interface IsEllipsisNarrowingContext {
+    assignType: (destType: Type, srcType: Type) => boolean;
+    getBuiltInObject: (node: ExpressionNode, className: string) => Type | undefined;
+    mapSubtypesExpandTypeVars: (
+        type: Type,
+        callback: (subtype: Type, unexpandedSubtype: Type) => Type | undefined
+    ) => Type;
+}
+
+export interface ClassComparisonContext {
+    makeTopLevelTypeVarsConcrete: (type: Type) => Type;
+}
+
+export interface LiteralComparisonContext {
+    assignType: (destType: Type, srcType: Type) => boolean;
+    enumerateLiteralsForType: (type: ClassType) => ClassType[] | undefined;
+    makeTopLevelTypeVarsConcrete: (type: Type) => Type;
+    mapSubtypesExpandTypeVars: (type: Type, callback: (subtype: Type) => Type | undefined) => Type;
 }
 
 // Conceptual narrowing entrypoint.
@@ -552,5 +601,327 @@ export function removeFalsinessFromType(ctx: TruthinessContext, type: Type): Typ
         }
 
         return undefined;
+    });
+}
+
+export function narrowTypeForTruthiness(ctx: TruthinessNarrowingContext, type: Type, isPositiveTest: boolean) {
+    return mapSubtypes(type, (subtype) => {
+        if (isPositiveTest) {
+            if (ctx.canBeTruthy(subtype)) {
+                return ctx.removeFalsinessFromType(subtype);
+            }
+        } else {
+            if (ctx.canBeFalsy(subtype)) {
+                return ctx.removeTruthinessFromType(subtype);
+            }
+        }
+        return undefined;
+    });
+}
+
+// Handle type narrowing for expressions of the form "a[I] is None" and "a[I] is not None" where
+// I is an integer and a is a union of Tuples (or subtypes thereof) with known lengths and entry types.
+export function narrowTupleTypeForIsNone(
+    ctx: IsNoneNarrowingContext,
+    type: Type,
+    isPositiveTest: boolean,
+    indexValue: number
+): Type {
+    return ctx.mapSubtypesExpandTypeVars(type, (subtype) => {
+        const tupleType = getSpecializedTupleType(subtype);
+        if (!tupleType || isUnboundedTupleClass(tupleType) || !tupleType.priv.tupleTypeArgs) {
+            return subtype;
+        }
+
+        const tupleLength = tupleType.priv.tupleTypeArgs.length;
+        if (indexValue < 0 || indexValue >= tupleLength) {
+            return subtype;
+        }
+
+        const typeOfEntry = ctx.makeTopLevelTypeVarsConcrete(tupleType.priv.tupleTypeArgs[indexValue].type);
+
+        if (isPositiveTest) {
+            if (!ctx.assignType(typeOfEntry, ctx.getNoneType())) {
+                return undefined;
+            }
+        } else {
+            if (isNoneInstance(typeOfEntry)) {
+                return undefined;
+            }
+        }
+
+        return subtype;
+    });
+}
+
+// Handle type narrowing for expressions of the form "x is None" and "x is not None".
+export function narrowTypeForIsNone(ctx: IsNoneNarrowingContext, type: Type, isPositiveTest: boolean): Type {
+    const expandedType = mapSubtypes(type, (subtype) => {
+        return transformPossibleRecursiveTypeAlias(subtype);
+    });
+
+    let resultIncludesNoneSubtype = false;
+
+    const result = ctx.mapSubtypesExpandTypeVars(expandedType, (subtype, unexpandedSubtype) => {
+        if (isUnknown(subtype)) {
+            return subtype;
+        }
+
+        if (isAny(subtype)) {
+            return subtype;
+        }
+
+        let useExpandedSubtype = false;
+        if (isTypeVar(unexpandedSubtype) && !TypeVarType.isSelf(unexpandedSubtype)) {
+            if (
+                unexpandedSubtype.shared.constraints.some((constraint) => {
+                    return ctx.assignType(constraint, ctx.getNoneType());
+                })
+            ) {
+                useExpandedSubtype = true;
+            }
+
+            if (
+                unexpandedSubtype.shared.boundType &&
+                ctx.assignType(unexpandedSubtype.shared.boundType, ctx.getNoneType())
+            ) {
+                useExpandedSubtype = true;
+            }
+        }
+
+        const adjustedSubtype = useExpandedSubtype ? subtype : unexpandedSubtype;
+
+        if (isNoneInstance(subtype)) {
+            resultIncludesNoneSubtype = true;
+            return isPositiveTest ? adjustedSubtype : undefined;
+        }
+
+        if (ctx.assignType(subtype, ctx.getNoneType())) {
+            resultIncludesNoneSubtype = true;
+            return isPositiveTest ? addConditionToType(ctx.getNoneType(), subtype.props?.condition) : adjustedSubtype;
+        }
+
+        return isPositiveTest ? undefined : adjustedSubtype;
+    });
+
+    if (isPositiveTest && resultIncludesNoneSubtype) {
+        return mapSubtypes(result, (subtype) => {
+            return isNoneInstance(subtype) ? subtype : undefined;
+        });
+    }
+
+    return result;
+}
+
+// Handle type narrowing for expressions of the form "x is ..." and "x is not ...".
+export function narrowTypeForIsEllipsis(
+    ctx: IsEllipsisNarrowingContext,
+    node: ExpressionNode,
+    type: Type,
+    isPositiveTest: boolean
+): Type {
+    const expandedType = mapSubtypes(type, (subtype) => {
+        return transformPossibleRecursiveTypeAlias(subtype);
+    });
+
+    let resultIncludesEllipsisSubtype = false;
+
+    const ellipsisType =
+        ctx.getBuiltInObject(node, 'EllipsisType') ?? ctx.getBuiltInObject(node, 'ellipsis') ?? AnyType.create();
+
+    const isEllipsisInstance = (subtype: Type) => {
+        return isClassInstance(subtype) && ClassType.isBuiltIn(subtype, ['EllipsisType', 'ellipsis']);
+    };
+
+    const result = ctx.mapSubtypesExpandTypeVars(expandedType, (subtype, unexpandedSubtype) => {
+        if (isUnknown(subtype)) {
+            return subtype;
+        }
+
+        if (isAny(subtype)) {
+            return subtype;
+        }
+
+        const adjustedSubtype =
+            isTypeVar(unexpandedSubtype) && !TypeVarType.hasConstraints(unexpandedSubtype)
+                ? unexpandedSubtype
+                : subtype;
+
+        if (isEllipsisInstance(subtype)) {
+            resultIncludesEllipsisSubtype = true;
+            return isPositiveTest ? adjustedSubtype : undefined;
+        }
+
+        if (ctx.assignType(subtype, ellipsisType)) {
+            resultIncludesEllipsisSubtype = true;
+            return isPositiveTest ? addConditionToType(ellipsisType, subtype.props?.condition) : adjustedSubtype;
+        }
+
+        return isPositiveTest ? undefined : adjustedSubtype;
+    });
+
+    if (isPositiveTest && resultIncludesEllipsisSubtype) {
+        return mapSubtypes(result, (subtype) => {
+            return isEllipsisInstance(subtype) ? subtype : undefined;
+        });
+    }
+
+    return result;
+}
+
+// Attempts to narrow a type based on a comparison with a class using "is" or
+// "is not". This pattern is sometimes used for sentinels.
+export function narrowTypeForClassComparison(
+    ctx: ClassComparisonContext,
+    referenceType: Type,
+    classType: ClassType,
+    isPositiveTest: boolean
+): Type {
+    return mapSubtypes(referenceType, (subtype) => {
+        let concreteSubtype = ctx.makeTopLevelTypeVarsConcrete(subtype);
+
+        if (isPositiveTest) {
+            if (
+                isClassInstance(concreteSubtype) &&
+                TypeBase.isInstance(subtype) &&
+                ClassType.isBuiltIn(concreteSubtype, 'type')
+            ) {
+                concreteSubtype =
+                    concreteSubtype.priv.typeArgs && concreteSubtype.priv.typeArgs.length > 0
+                        ? convertToInstantiable(concreteSubtype.priv.typeArgs[0])
+                        : UnknownType.create();
+            }
+
+            if (isAnyOrUnknown(concreteSubtype)) {
+                return addConditionToType(classType, getTypeCondition(concreteSubtype));
+            }
+
+            if (isClass(concreteSubtype)) {
+                if (TypeBase.isInstance(concreteSubtype)) {
+                    return ClassType.isBuiltIn(concreteSubtype, 'object') ? classType : undefined;
+                }
+
+                const isSuperType = isFilterSuperclass(subtype, concreteSubtype, classType, classType);
+
+                if (!classType.priv.includeSubclasses) {
+                    if (!concreteSubtype.priv.includeSubclasses) {
+                        return ClassType.isSameGenericClass(concreteSubtype, classType) ? classType : undefined;
+                    }
+
+                    if (isSuperType) {
+                        return addConditionToType(classType, getTypeCondition(concreteSubtype));
+                    }
+
+                    const isSubType = ClassType.isDerivedFrom(classType, concreteSubtype);
+                    if (isSubType) {
+                        return addConditionToType(classType, getTypeCondition(concreteSubtype));
+                    }
+
+                    return undefined;
+                }
+
+                if (ClassType.isFinal(concreteSubtype) && !isSuperType) {
+                    return undefined;
+                }
+            }
+        } else {
+            if (
+                isInstantiableClass(concreteSubtype) &&
+                ClassType.isSameGenericClass(classType, concreteSubtype) &&
+                ClassType.isFinal(classType)
+            ) {
+                return undefined;
+            }
+        }
+
+        return subtype;
+    });
+}
+
+function isFilterSuperclass(
+    varType: Type,
+    concreteVarType: ClassType,
+    filterType: Type,
+    concreteFilterType: ClassType
+) {
+    if (isTypeVar(filterType) || concreteFilterType.priv.literalValue !== undefined) {
+        return isTypeSame(convertToInstance(filterType), varType);
+    }
+
+    if (concreteFilterType.priv.includeSubclasses) {
+        return false;
+    }
+
+    if (ClassType.isDerivedFrom(concreteVarType, concreteFilterType)) {
+        return true;
+    }
+
+    if (ClassType.isBuiltIn(concreteFilterType, 'dict') && ClassType.isTypedDictClass(concreteVarType)) {
+        return true;
+    }
+
+    return false;
+}
+
+// Attempts to narrow a type (make it more constrained) based on a comparison
+// (equal or not equal) to a literal value. It also handles "is" or "is not"
+// operators if isIsOperator is true.
+export function narrowTypeForLiteralComparison(
+    ctx: LiteralComparisonContext,
+    referenceType: Type,
+    literalType: ClassType,
+    isPositiveTest: boolean,
+    isIsOperator: boolean
+): Type {
+    return ctx.mapSubtypesExpandTypeVars(referenceType, (subtype) => {
+        subtype = ctx.makeTopLevelTypeVarsConcrete(subtype);
+
+        if (isAnyOrUnknown(subtype)) {
+            if (isPositiveTest) {
+                return literalType;
+            }
+
+            return subtype;
+        }
+
+        if (isClassInstance(subtype) && ClassType.isSameGenericClass(literalType, subtype)) {
+            if (subtype.priv.literalValue !== undefined) {
+                const literalValueMatches = ClassType.isLiteralValueSame(subtype, literalType);
+                if (isPositiveTest) {
+                    return literalValueMatches ? subtype : undefined;
+                }
+
+                const isSingleton =
+                    ClassType.isEnumClass(literalType) ||
+                    isSentinelLiteral(subtype) ||
+                    ClassType.isBuiltIn(literalType, 'bool');
+
+                return literalValueMatches && (isSingleton || !isIsOperator) ? undefined : subtype;
+            }
+
+            if (isPositiveTest) {
+                return literalType;
+            }
+
+            const allLiteralTypes = ctx.enumerateLiteralsForType(subtype);
+            if (allLiteralTypes && allLiteralTypes.length > 0) {
+                return combineTypes(allLiteralTypes.filter((type) => !ClassType.isLiteralValueSame(type, literalType)));
+            }
+
+            return subtype;
+        }
+
+        if (isPositiveTest) {
+            if (isClassInstance(subtype) && ClassType.isBuiltIn(subtype, 'LiteralString')) {
+                return literalType;
+            }
+
+            if (isIsOperator || isNoneInstance(subtype)) {
+                const isSubtype = ctx.assignType(subtype, literalType);
+                return isSubtype ? literalType : undefined;
+            }
+        }
+
+        return subtype;
     });
 }

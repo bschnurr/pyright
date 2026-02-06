@@ -31,9 +31,9 @@ import { ScopeType } from './scope';
 import { getScopeForNode, isScopeContainedWithin } from './scopeUtils';
 import { Symbol, SymbolFlags } from './symbol';
 import { getTypedDictMembersForClass } from './typedDicts';
+import * as TypeEvaluatorNarrowing from './typeEvaluator/narrowing';
 import { AssignTypeFlags, EvalFlags, TypeEvaluator } from './typeEvaluatorTypes';
 import {
-    AnyType,
     ClassType,
     ClassTypeFlags,
     combineTypes,
@@ -73,7 +73,6 @@ import {
     convertToInstantiable,
     derivesFromAnyOrUnknown,
     doForEachSubtype,
-    getSpecializedTupleType,
     getTypeCondition,
     getTypeVarScopeIds,
     getUnknownTypeForCallable,
@@ -86,7 +85,6 @@ import {
     isNoneInstance,
     isNoneTypeClass,
     isProperty,
-    isSentinelLiteral,
     isTupleClass,
     isTupleGradualForm,
     isUnboundedTupleClass,
@@ -107,6 +105,50 @@ export interface TypeNarrowingResult {
 }
 
 export type TypeNarrowingCallback = (type: Type) => TypeNarrowingResult | undefined;
+
+function getTruthinessNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.TruthinessNarrowingContext {
+    return {
+        canBeTruthy: (type) => evaluator.canBeTruthy(type),
+        canBeFalsy: (type) => evaluator.canBeFalsy(type),
+        removeFalsinessFromType: (type) => evaluator.removeFalsinessFromType(type),
+        removeTruthinessFromType: (type) => evaluator.removeTruthinessFromType(type),
+    };
+}
+
+function getIsNoneNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.IsNoneNarrowingContext {
+    return {
+        assignType: (destType, srcType) => evaluator.assignType(destType, srcType),
+        getNoneType: () => evaluator.getNoneType(),
+        makeTopLevelTypeVarsConcrete: (type) => evaluator.makeTopLevelTypeVarsConcrete(type),
+        mapSubtypesExpandTypeVars: (type, callback) =>
+            evaluator.mapSubtypesExpandTypeVars(type, /* options */ undefined, callback),
+    };
+}
+
+function getIsEllipsisNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.IsEllipsisNarrowingContext {
+    return {
+        assignType: (destType, srcType) => evaluator.assignType(destType, srcType),
+        getBuiltInObject: (node, name) => evaluator.getBuiltInObject(node, name),
+        mapSubtypesExpandTypeVars: (type, callback) =>
+            evaluator.mapSubtypesExpandTypeVars(type, /* options */ undefined, callback),
+    };
+}
+
+function getClassComparisonContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.ClassComparisonContext {
+    return {
+        makeTopLevelTypeVarsConcrete: (type) => evaluator.makeTopLevelTypeVarsConcrete(type),
+    };
+}
+
+function getLiteralComparisonContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.LiteralComparisonContext {
+    return {
+        assignType: (destType, srcType) => evaluator.assignType(destType, srcType),
+        enumerateLiteralsForType: (type) => enumerateLiteralsForType(evaluator, type),
+        makeTopLevelTypeVarsConcrete: (type) => evaluator.makeTopLevelTypeVarsConcrete(type),
+        mapSubtypesExpandTypeVars: (type, callback) =>
+            evaluator.mapSubtypesExpandTypeVars(type, /* options */ undefined, (subtype) => callback(subtype)),
+    };
+}
 
 // Given a reference expression and a test expression, returns a callback that
 // can be used to narrow the type described by the reference expression.
@@ -173,7 +215,14 @@ export function getTypeNarrowingCallback(
                     )
                 ) {
                     return (type: Type) => {
-                        return { type: narrowTypeForIsNone(evaluator, type, adjIsPositiveTest), isIncomplete: false };
+                        return {
+                            type: TypeEvaluatorNarrowing.narrowTypeForIsNone(
+                                getIsNoneNarrowingContext(evaluator),
+                                type,
+                                adjIsPositiveTest
+                            ),
+                            isIncomplete: false,
+                        };
                     };
                 }
 
@@ -194,7 +243,12 @@ export function getTypeNarrowingCallback(
                     if (typeof indexValue === 'number') {
                         return (type: Type) => {
                             return {
-                                type: narrowTupleTypeForIsNone(evaluator, type, adjIsPositiveTest, indexValue),
+                                type: TypeEvaluatorNarrowing.narrowTupleTypeForIsNone(
+                                    getIsNoneNarrowingContext(evaluator),
+                                    type,
+                                    adjIsPositiveTest,
+                                    indexValue
+                                ),
                                 isIncomplete: false,
                             };
                         };
@@ -218,7 +272,12 @@ export function getTypeNarrowingCallback(
                 ) {
                     return (type: Type) => {
                         return {
-                            type: narrowTypeForIsEllipsis(evaluator, testExpression, type, adjIsPositiveTest),
+                            type: TypeEvaluatorNarrowing.narrowTypeForIsEllipsis(
+                                getIsEllipsisNarrowingContext(evaluator),
+                                testExpression,
+                                type,
+                                adjIsPositiveTest
+                            ),
                             isIncomplete: false,
                         };
                     };
@@ -286,8 +345,8 @@ export function getTypeNarrowingCallback(
                     if (isClassInstance(rightType) && rightType.priv.literalValue !== undefined) {
                         return (type: Type) => {
                             return {
-                                type: narrowTypeForLiteralComparison(
-                                    evaluator,
+                                type: TypeEvaluatorNarrowing.narrowTypeForLiteralComparison(
+                                    getLiteralComparisonContext(evaluator),
                                     type,
                                     rightType,
                                     adjIsPositiveTest,
@@ -302,7 +361,12 @@ export function getTypeNarrowingCallback(
                     if (isInstantiableClass(rightType)) {
                         return (type: Type) => {
                             return {
-                                type: narrowTypeForClassComparison(evaluator, type, rightType, adjIsPositiveTest),
+                                type: TypeEvaluatorNarrowing.narrowTypeForClassComparison(
+                                    getClassComparisonContext(evaluator),
+                                    type,
+                                    rightType,
+                                    adjIsPositiveTest
+                                ),
                                 isIncomplete: !!rightTypeResult.isIncomplete,
                             };
                         };
@@ -390,8 +454,8 @@ export function getTypeNarrowingCallback(
                     if (isClassInstance(rightType) && rightType.priv.literalValue !== undefined) {
                         return (type: Type) => {
                             return {
-                                type: narrowTypeForLiteralComparison(
-                                    evaluator,
+                                type: TypeEvaluatorNarrowing.narrowTypeForLiteralComparison(
+                                    getLiteralComparisonContext(evaluator),
                                     type,
                                     rightType,
                                     adjIsPositiveTest,
@@ -1035,183 +1099,11 @@ function narrowTypeForUserDefinedTypeGuard(
 
 // Narrow the type based on whether the subtype can be true or false.
 function narrowTypeForTruthiness(evaluator: TypeEvaluator, type: Type, isPositiveTest: boolean) {
-    return mapSubtypes(type, (subtype) => {
-        if (isPositiveTest) {
-            if (evaluator.canBeTruthy(subtype)) {
-                return evaluator.removeFalsinessFromType(subtype);
-            }
-        } else {
-            if (evaluator.canBeFalsy(subtype)) {
-                return evaluator.removeTruthinessFromType(subtype);
-            }
-        }
-        return undefined;
-    });
-}
-
-// Handle type narrowing for expressions of the form "a[I] is None" and "a[I] is not None" where
-// I is an integer and a is a union of Tuples (or subtypes thereof) with known lengths and entry types.
-function narrowTupleTypeForIsNone(evaluator: TypeEvaluator, type: Type, isPositiveTest: boolean, indexValue: number) {
-    return evaluator.mapSubtypesExpandTypeVars(type, /* options */ undefined, (subtype) => {
-        const tupleType = getSpecializedTupleType(subtype);
-        if (!tupleType || isUnboundedTupleClass(tupleType) || !tupleType.priv.tupleTypeArgs) {
-            return subtype;
-        }
-
-        const tupleLength = tupleType.priv.tupleTypeArgs.length;
-        if (indexValue < 0 || indexValue >= tupleLength) {
-            return subtype;
-        }
-
-        const typeOfEntry = evaluator.makeTopLevelTypeVarsConcrete(tupleType.priv.tupleTypeArgs[indexValue].type);
-
-        if (isPositiveTest) {
-            if (!evaluator.assignType(typeOfEntry, evaluator.getNoneType())) {
-                return undefined;
-            }
-        } else {
-            if (isNoneInstance(typeOfEntry)) {
-                return undefined;
-            }
-        }
-
-        return subtype;
-    });
-}
-
-// Handle type narrowing for expressions of the form "x is None" and "x is not None".
-function narrowTypeForIsNone(evaluator: TypeEvaluator, type: Type, isPositiveTest: boolean) {
-    const expandedType = mapSubtypes(type, (subtype) => {
-        return transformPossibleRecursiveTypeAlias(subtype);
-    });
-
-    let resultIncludesNoneSubtype = false;
-
-    const result = evaluator.mapSubtypesExpandTypeVars(
-        expandedType,
-        /* options */ undefined,
-        (subtype, unexpandedSubtype) => {
-            if (isAnyOrUnknown(subtype)) {
-                // Assume that "Any" is always both None and not None, so it matches
-                // regardless of whether the test is positive or negative.
-                return subtype;
-            }
-
-            let useExpandedSubtype = false;
-            if (isTypeVar(unexpandedSubtype) && !TypeVarType.isSelf(unexpandedSubtype)) {
-                // If the TypeVar has value constraints and one or more of them
-                // are possibly compatible with None, use the expanded subtypes.
-                if (
-                    unexpandedSubtype.shared.constraints.some((constraint) => {
-                        return evaluator.assignType(constraint, evaluator.getNoneType());
-                    })
-                ) {
-                    useExpandedSubtype = true;
-                }
-
-                // If the TypeVar han an explicit bound that is possibly compatible
-                // with None (e.g. "T: int | None"), use the expanded subtypes.
-                if (
-                    unexpandedSubtype.shared.boundType &&
-                    evaluator.assignType(unexpandedSubtype.shared.boundType, evaluator.getNoneType())
-                ) {
-                    useExpandedSubtype = true;
-                }
-            }
-
-            const adjustedSubtype = useExpandedSubtype ? subtype : unexpandedSubtype;
-
-            // Is it an exact match for None?
-            if (isNoneInstance(subtype)) {
-                resultIncludesNoneSubtype = true;
-                return isPositiveTest ? adjustedSubtype : undefined;
-            }
-
-            // Is it potentially None?
-            if (evaluator.assignType(subtype, evaluator.getNoneType())) {
-                resultIncludesNoneSubtype = true;
-                return isPositiveTest
-                    ? addConditionToType(evaluator.getNoneType(), subtype.props?.condition)
-                    : adjustedSubtype;
-            }
-
-            return isPositiveTest ? undefined : adjustedSubtype;
-        }
+    return TypeEvaluatorNarrowing.narrowTypeForTruthiness(
+        getTruthinessNarrowingContext(evaluator),
+        type,
+        isPositiveTest
     );
-
-    // If this is a positive test and the result is a union that includes None,
-    // we can eliminate all the non-None subtypes include Any or Unknown. If some
-    // of the subtypes are None types with conditions, retain those.
-    if (isPositiveTest && resultIncludesNoneSubtype) {
-        return mapSubtypes(result, (subtype) => {
-            return isNoneInstance(subtype) ? subtype : undefined;
-        });
-    }
-
-    return result;
-}
-
-// Handle type narrowing for expressions of the form "x is ..." and "x is not ...".
-function narrowTypeForIsEllipsis(evaluator: TypeEvaluator, node: ExpressionNode, type: Type, isPositiveTest: boolean) {
-    const expandedType = mapSubtypes(type, (subtype) => {
-        return transformPossibleRecursiveTypeAlias(subtype);
-    });
-
-    let resultIncludesEllipsisSubtype = false;
-
-    const ellipsisType =
-        evaluator.getBuiltInObject(node, 'EllipsisType') ??
-        evaluator.getBuiltInObject(node, 'ellipsis') ??
-        AnyType.create();
-
-    const isEllipsisInstance = (subtype: Type) => {
-        return isClassInstance(subtype) && ClassType.isBuiltIn(subtype, ['EllipsisType', 'ellipsis']);
-    };
-
-    const result = evaluator.mapSubtypesExpandTypeVars(
-        expandedType,
-        /* options */ undefined,
-        (subtype, unexpandedSubtype) => {
-            if (isAnyOrUnknown(subtype)) {
-                // We need to assume that "Any" is always both ellipsis and not ellipsis,
-                // so it matches regardless of whether the test is positive or negative.
-                return subtype;
-            }
-
-            // If this is a TypeVar that isn't constrained, use the unexpanded
-            // TypeVar. For all other cases (including constrained TypeVars),
-            // use the expanded subtype.
-            const adjustedSubtype =
-                isTypeVar(unexpandedSubtype) && !TypeVarType.hasConstraints(unexpandedSubtype)
-                    ? unexpandedSubtype
-                    : subtype;
-
-            // Is it an exact match for ellipsis?
-            if (isEllipsisInstance(subtype)) {
-                resultIncludesEllipsisSubtype = true;
-                return isPositiveTest ? adjustedSubtype : undefined;
-            }
-
-            // Is it potentially ellipsis?
-            if (evaluator.assignType(subtype, ellipsisType)) {
-                resultIncludesEllipsisSubtype = true;
-                return isPositiveTest ? addConditionToType(ellipsisType, subtype.props?.condition) : adjustedSubtype;
-            }
-
-            return isPositiveTest ? undefined : adjustedSubtype;
-        }
-    );
-
-    // If this is a positive test and the result is a union that includes ellipsis,
-    // we can eliminate all the non-ellipsis subtypes include Any or Unknown. If some
-    // of the subtypes are ellipsis types with conditions, retain those.
-    if (isPositiveTest && resultIncludesEllipsisSubtype) {
-        return mapSubtypes(result, (subtype) => {
-            return isEllipsisInstance(subtype) ? subtype : undefined;
-        });
-    }
-
-    return result;
 }
 
 // The "isinstance" and "issubclass" calls support two forms - a simple form
@@ -2549,176 +2441,6 @@ function narrowTypeForTypeIs(evaluator: TypeEvaluator, type: Type, classTypes: C
     });
 
     return combineTypes(typesToCombine);
-}
-
-// Attempts to narrow a type based on a comparison with a class using "is" or
-// "is not". This pattern is sometimes used for sentinels.
-function narrowTypeForClassComparison(
-    evaluator: TypeEvaluator,
-    referenceType: Type,
-    classType: ClassType,
-    isPositiveTest: boolean
-): Type {
-    return mapSubtypes(referenceType, (subtype) => {
-        let concreteSubtype = evaluator.makeTopLevelTypeVarsConcrete(subtype);
-
-        if (isPositiveTest) {
-            if (
-                isClassInstance(concreteSubtype) &&
-                TypeBase.isInstance(subtype) &&
-                ClassType.isBuiltIn(concreteSubtype, 'type')
-            ) {
-                concreteSubtype =
-                    concreteSubtype.priv.typeArgs && concreteSubtype.priv.typeArgs.length > 0
-                        ? convertToInstantiable(concreteSubtype.priv.typeArgs[0])
-                        : UnknownType.create();
-            }
-
-            if (isAnyOrUnknown(concreteSubtype)) {
-                return addConditionToType(classType, getTypeCondition(concreteSubtype));
-            }
-
-            if (isClass(concreteSubtype)) {
-                if (TypeBase.isInstance(concreteSubtype)) {
-                    return ClassType.isBuiltIn(concreteSubtype, 'object') ? classType : undefined;
-                }
-
-                const isSuperType = isFilterSuperclass(subtype, concreteSubtype, classType, classType);
-
-                if (!classType.priv.includeSubclasses) {
-                    // Handle the case where the LHS and RHS operands are specific
-                    // classes, as opposed to types that represent classes and their
-                    // subclasses.
-                    if (!concreteSubtype.priv.includeSubclasses) {
-                        return ClassType.isSameGenericClass(concreteSubtype, classType) ? classType : undefined;
-                    }
-
-                    if (isSuperType) {
-                        return addConditionToType(classType, getTypeCondition(concreteSubtype));
-                    }
-
-                    const isSubType = ClassType.isDerivedFrom(classType, concreteSubtype);
-                    if (isSubType) {
-                        return addConditionToType(classType, getTypeCondition(concreteSubtype));
-                    }
-
-                    return undefined;
-                }
-
-                if (ClassType.isFinal(concreteSubtype) && !isSuperType) {
-                    return undefined;
-                }
-            }
-        } else {
-            if (
-                isInstantiableClass(concreteSubtype) &&
-                ClassType.isSameGenericClass(classType, concreteSubtype) &&
-                ClassType.isFinal(classType)
-            ) {
-                return undefined;
-            }
-        }
-
-        return subtype;
-    });
-}
-
-function isFilterSuperclass(
-    varType: Type,
-    concreteVarType: ClassType,
-    filterType: Type,
-    concreteFilterType: ClassType
-) {
-    if (isTypeVar(filterType) || concreteFilterType.priv.literalValue !== undefined) {
-        return isTypeSame(convertToInstance(filterType), varType);
-    }
-
-    // If the filter type represents all possible subclasses
-    // of a type, we can't make any statements about its superclass
-    // relationship with concreteVarType.
-    if (concreteFilterType.priv.includeSubclasses) {
-        return false;
-    }
-
-    if (ClassType.isDerivedFrom(concreteVarType, concreteFilterType)) {
-        return true;
-    }
-
-    // Handle the special case where the variable type is a TypedDict and
-    // we're filtering against 'dict'. TypedDict isn't derived from dict,
-    // but at runtime, isinstance returns True.
-    if (ClassType.isBuiltIn(concreteFilterType, 'dict') && ClassType.isTypedDictClass(concreteVarType)) {
-        return true;
-    }
-
-    return false;
-}
-
-// Attempts to narrow a type (make it more constrained) based on a comparison
-// (equal or not equal) to a literal value. It also handles "is" or "is not"
-// operators if isIsOperator is true.
-function narrowTypeForLiteralComparison(
-    evaluator: TypeEvaluator,
-    referenceType: Type,
-    literalType: ClassType,
-    isPositiveTest: boolean,
-    isIsOperator: boolean
-): Type {
-    return evaluator.mapSubtypesExpandTypeVars(referenceType, /* options */ undefined, (subtype) => {
-        subtype = evaluator.makeTopLevelTypeVarsConcrete(subtype);
-
-        if (isAnyOrUnknown(subtype)) {
-            if (isPositiveTest) {
-                return literalType;
-            }
-
-            return subtype;
-        }
-
-        if (isClassInstance(subtype) && ClassType.isSameGenericClass(literalType, subtype)) {
-            if (subtype.priv.literalValue !== undefined) {
-                const literalValueMatches = ClassType.isLiteralValueSame(subtype, literalType);
-                if (isPositiveTest) {
-                    return literalValueMatches ? subtype : undefined;
-                }
-
-                const isSingleton =
-                    ClassType.isEnumClass(literalType) ||
-                    isSentinelLiteral(subtype) ||
-                    ClassType.isBuiltIn(literalType, 'bool');
-
-                // For negative tests, we can eliminate the literal value if it doesn't match,
-                // but only for equality tests or for 'is' tests that involve enums, bools, or sentinels.
-                return literalValueMatches && (isSingleton || !isIsOperator) ? undefined : subtype;
-            }
-
-            if (isPositiveTest) {
-                return literalType;
-            }
-
-            // If we're able to enumerate all possible literal values
-            // (for bool or enum), we can eliminate all others in a negative test.
-            const allLiteralTypes = enumerateLiteralsForType(evaluator, subtype);
-            if (allLiteralTypes && allLiteralTypes.length > 0) {
-                return combineTypes(allLiteralTypes.filter((type) => !ClassType.isLiteralValueSame(type, literalType)));
-            }
-
-            return subtype;
-        }
-
-        if (isPositiveTest) {
-            if (isClassInstance(subtype) && ClassType.isBuiltIn(subtype, 'LiteralString')) {
-                return literalType;
-            }
-
-            if (isIsOperator || isNoneInstance(subtype)) {
-                const isSubtype = evaluator.assignType(subtype, literalType);
-                return isSubtype ? literalType : undefined;
-            }
-        }
-
-        return subtype;
-    });
 }
 
 export function enumerateLiteralsForType(evaluator: TypeEvaluator, type: ClassType): ClassType[] | undefined {
