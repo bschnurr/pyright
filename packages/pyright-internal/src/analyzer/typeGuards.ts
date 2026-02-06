@@ -10,7 +10,6 @@
  */
 
 import { AssignmentExpressionNode, ExpressionNode, NameNode, ParseNodeType } from '../parser/parseNodes';
-import { OperatorType } from '../parser/tokenizerTypes';
 import { addConstraintsForExpectedType } from './constraintSolver';
 import { transformTypeForEnumMember } from './enums';
 import * as ParseTreeUtils from './parseTreeUtils';
@@ -623,41 +622,39 @@ export function getTypeNarrowingCallback(
             };
         }
 
-        if (testExpression.d.operator === OperatorType.In || testExpression.d.operator === OperatorType.NotIn) {
-            const inOperatorInfo = TypeEvaluatorNarrowing.getInOperatorNarrowingInfo(
-                getInOperatorNarrowingContext(evaluator),
-                reference,
-                testExpression,
-                isPositiveTest
-            );
+        const inOperatorInfo = TypeEvaluatorNarrowing.getInOperatorNarrowingInfo(
+            getInOperatorNarrowingContext(evaluator),
+            reference,
+            testExpression,
+            isPositiveTest
+        );
 
-            if (inOperatorInfo) {
-                if (inOperatorInfo.kind === 'container') {
-                    return (type: Type) => {
-                        return {
-                            type: narrowTypeForContainerType(
-                                evaluator,
-                                type,
-                                inOperatorInfo.containerType!,
-                                inOperatorInfo.adjIsPositiveTest
-                            ),
-                            isIncomplete: inOperatorInfo.isIncomplete,
-                        };
-                    };
-                }
-
+        if (inOperatorInfo) {
+            if (inOperatorInfo.kind === 'container') {
                 return (type: Type) => {
                     return {
-                        type: narrowTypeForTypedDictKey(
+                        type: narrowTypeForContainerType(
                             evaluator,
                             type,
-                            inOperatorInfo.typedDictKeyType!,
+                            inOperatorInfo.containerType!,
                             inOperatorInfo.adjIsPositiveTest
                         ),
                         isIncomplete: inOperatorInfo.isIncomplete,
                     };
                 };
             }
+
+            return (type: Type) => {
+                return {
+                    type: narrowTypeForTypedDictKey(
+                        evaluator,
+                        type,
+                        inOperatorInfo.typedDictKeyType!,
+                        inOperatorInfo.adjIsPositiveTest
+                    ),
+                    isIncomplete: inOperatorInfo.isIncomplete,
+                };
+            };
         }
     }
 
