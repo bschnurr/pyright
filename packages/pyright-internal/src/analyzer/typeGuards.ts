@@ -21,35 +21,25 @@ import {
     ParseNodeType,
 } from '../parser/parseNodes';
 import { KeywordType, OperatorType } from '../parser/tokenizerTypes';
-import { getFileInfo } from './analyzerNodeInfo';
 import { addConstraintsForExpectedType } from './constraintSolver';
-import { ConstraintTracker } from './constraintTracker';
 import { Declaration, DeclarationType } from './declaration';
 import { transformTypeForEnumMember } from './enums';
 import * as ParseTreeUtils from './parseTreeUtils';
 import { ScopeType } from './scope';
 import { getScopeForNode, isScopeContainedWithin } from './scopeUtils';
-import { Symbol, SymbolFlags } from './symbol';
 import { getTypedDictMembersForClass } from './typedDicts';
 import * as TypeEvaluatorNarrowing from './typeEvaluator/narrowing';
-import { AssignTypeFlags, EvalFlags, TypeEvaluator } from './typeEvaluatorTypes';
+import { EvalFlags, TypeEvaluator } from './typeEvaluatorTypes';
 import {
     ClassType,
-    ClassTypeFlags,
     combineTypes,
     EnumLiteral,
-    FunctionParam,
-    FunctionParamFlags,
     FunctionType,
-    FunctionTypeFlags,
     isAnyOrUnknown,
     isClass,
     isClassInstance,
     isFunction,
-    isFunctionOrOverloaded,
     isInstantiableClass,
-    isModule,
-    isNever,
     isOverloaded,
     isParamSpec,
     isTypeSame,
@@ -60,39 +50,26 @@ import {
     TupleTypeArg,
     Type,
     TypeBase,
-    TypeCondition,
     TypedDictEntry,
     TypeVarType,
-    UnknownType,
 } from './types';
 import {
     addConditionToType,
-    computeMroLinearization,
-    convertToInstance,
     convertToInstantiable,
-    derivesFromAnyOrUnknown,
     doForEachSubtype,
-    getTypeCondition,
-    getTypeVarScopeIds,
     getUnknownTypeForCallable,
-    isInstantiableMetaclass,
     isLiteralLikeType,
     isLiteralType,
     isLiteralTypeOrUnion,
-    isMetaclassInstance,
     isNoneInstance,
     isNoneTypeClass,
     isTupleClass,
-    isTupleGradualForm,
     lookUpClassMember,
     lookUpObjectMember,
-    makeTypeVarsFree,
     mapSubtypes,
-    MemberAccessFlags,
     specializeTupleClass,
     specializeWithUnknownTypeArgs,
     stripTypeForm,
-    transformPossibleRecursiveTypeAlias,
 } from './typeUtils';
 
 export interface TypeNarrowingResult {
@@ -190,9 +167,7 @@ function getTypeIsNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorNarro
     };
 }
 
-function getIsInstanceNarrowingContext(
-    evaluator: TypeEvaluator
-): TypeEvaluatorNarrowing.IsInstanceNarrowingContext {
+function getIsInstanceNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.IsInstanceNarrowingContext {
     return {
         addConstraintsForExpectedType: (type, expectedType, constraints, errorNodeStart) =>
             addConstraintsForExpectedType(
@@ -207,7 +182,8 @@ function getIsInstanceNarrowingContext(
             evaluator.assignType(destType, srcType, /* diag */ undefined, /* constraints */ undefined, flags),
         createSubclass: (errorNode, type1, type2) => evaluator.createSubclass(errorNode, type1, type2),
         expandPromotionTypes: (node, type) => evaluator.expandPromotionTypes(node, type),
-        getCallbackProtocolType: (objType, recursionCount) => evaluator.getCallbackProtocolType(objType, recursionCount),
+        getCallbackProtocolType: (objType, recursionCount) =>
+            evaluator.getCallbackProtocolType(objType, recursionCount),
         getDictClassType: () => evaluator.getDictClassType(),
         getStrClassType: () => evaluator.getStrClassType(),
         getTupleClassType: () => evaluator.getTupleClassType(),

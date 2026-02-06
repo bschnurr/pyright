@@ -18,16 +18,10 @@
 
 import { ExpressionNode, ParamCategory } from '../../parser/parseNodes';
 import { getFileInfo } from '../analyzerNodeInfo';
-import { addConstraintsForExpectedType } from '../constraintSolver';
 import { ConstraintTracker } from '../constraintTracker';
 import * as ParseTreeUtils from '../parseTreeUtils';
 import { Symbol, SymbolFlags } from '../symbol';
-import {
-    AssignTypeFlags,
-    MapSubtypesOptions,
-    TypeEvaluator,
-    TypeResult,
-} from '../typeEvaluatorTypes';
+import { AssignTypeFlags, MapSubtypesOptions, TypeEvaluator, TypeResult } from '../typeEvaluatorTypes';
 import {
     AnyType,
     ClassType,
@@ -35,10 +29,10 @@ import {
     combineTypes,
     EnumLiteral,
     findSubtype,
-    FunctionType,
-    FunctionTypeFlags,
     FunctionParam,
     FunctionParamFlags,
+    FunctionType,
+    FunctionTypeFlags,
     isAny,
     isAnyOrUnknown,
     isClass,
@@ -48,7 +42,6 @@ import {
     isInstantiableClass,
     isModule,
     isNever,
-    isOverloaded,
     isParamSpec,
     isTypeSame,
     isTypeVar,
@@ -59,8 +52,8 @@ import {
     Type,
     TypeBase,
     TypeCategory,
-    TypedDictEntries,
     TypeCondition,
+    TypedDictEntries,
     TypeVarType,
     UnionType,
     UnknownType,
@@ -77,11 +70,11 @@ import {
     getTypeCondition,
     getTypeVarScopeIds,
     isIncompleteUnknown,
+    isInstantiableMetaclass,
     isLiteralType,
     isLiteralTypeOrUnion,
     isMaybeDescriptorInstance,
     isMetaclassInstance,
-    isInstantiableMetaclass,
     isNoneInstance,
     isNoneTypeClass,
     isProperty,
@@ -90,11 +83,9 @@ import {
     isTupleGradualForm,
     isUnboundedTupleClass,
     lookUpClassMember,
-    lookUpObjectMember,
     makeTypeVarsFree,
     mapSubtypes,
     MemberAccessFlags,
-    specializeTupleClass,
     transformPossibleRecursiveTypeAlias,
 } from '../typeUtils';
 
@@ -1407,7 +1398,10 @@ function narrowTypeForInstance(
                         if (isPositiveTest) {
                             filteredTypes.push(filterType);
                             foundSuperclass = true;
-                        } else if (!isTypeSame(metaclassType, filterMetaclass) || filterMetaclass.priv.includeSubclasses) {
+                        } else if (
+                            !isTypeSame(metaclassType, filterMetaclass) ||
+                            filterMetaclass.priv.includeSubclasses
+                        ) {
                             filteredTypes.push(metaclassType);
                             isClassRelationshipIndeterminate = true;
                         }
@@ -1418,7 +1412,10 @@ function narrowTypeForInstance(
                 let runtimeVarType = concreteVarType;
 
                 if (!isTypeIsCheck) {
-                    runtimeVarType = makeTypeVarsFree(runtimeVarType, ParseTreeUtils.getTypeVarScopesForNode(errorNode));
+                    runtimeVarType = makeTypeVarsFree(
+                        runtimeVarType,
+                        ParseTreeUtils.getTypeVarScopesForNode(errorNode)
+                    );
                 }
 
                 if (isInstantiableClass(runtimeVarType) && ClassType.isTypedDictClass(runtimeVarType)) {
