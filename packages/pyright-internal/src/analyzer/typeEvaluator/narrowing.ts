@@ -34,7 +34,7 @@ import * as ParseTreeUtils from '../parseTreeUtils';
 import { ScopeType, SymbolWithScope } from '../scope';
 import { getScopeForNode, isScopeContainedWithin } from '../scopeUtils';
 import { Symbol, SymbolFlags } from '../symbol';
-import { AssignTypeFlags, MapSubtypesOptions, TypeEvaluator, TypeResult } from '../typeEvaluatorTypes';
+import { AssignTypeFlags, EvalFlags, MapSubtypesOptions, TypeEvaluator, TypeResult } from '../typeEvaluatorTypes';
 import {
     AnyType,
     ClassType,
@@ -218,6 +218,18 @@ export interface NoneEllipsisNarrowingInfo {
     kind: 'none' | 'tuple-none' | 'ellipsis';
     adjIsPositiveTest: boolean;
     tupleIndex?: number;
+}
+
+export interface TypeIsCallNarrowingContext {
+    getTypeOfExpression: (node: ExpressionNode, flags?: EvalFlags) => TypeResult;
+    isMatchingExpression: (reference: ExpressionNode, expression: ExpressionNode) => boolean;
+    mapSubtypesExpandTypeVars: (type: Type, callback: (subtype: Type) => Type | undefined) => Type;
+}
+
+export interface TypeIsCallNarrowingInfo {
+    adjIsPositiveTest: boolean;
+    classTypes: ClassType[];
+    isIncomplete: boolean;
 }
 
 export interface AliasedConditionNarrowingContext {
@@ -1927,6 +1939,72 @@ export function getNoneEllipsisNarrowingInfo(
     }
 
     return undefined;
+}
+
+export function getTypeIsCallNarrowingInfo(
+    ctx: TypeIsCallNarrowingContext,
+    reference: ExpressionNode,
+    testExpression: ExpressionNode,
+    isPositiveTest: boolean
+): TypeIsCallNarrowingInfo | undefined {
+    if (testExpression.nodeType !== ParseNodeType.BinaryOperation) {
+        return undefined;
+    }
+
+    const isOrIsNotOperator =
+        testExpression.d.operator === OperatorType.Is || testExpression.d.operator === OperatorType.IsNot;
+    const equalsOrNotEqualsOperator =
+        testExpression.d.operator === OperatorType.Equals || testExpression.d.operator === OperatorType.NotEquals;
+
+    if (!isOrIsNotOperator && !equalsOrNotEqualsOperator) {
+        return undefined;
+    }
+
+    const adjIsPositiveTest =
+        testExpression.d.operator === OperatorType.Is || testExpression.d.operator === OperatorType.Equals
+            ? isPositiveTest
+            : !isPositiveTest;
+
+    // Look for "type(X) is Y", "type(X) is not Y", "type(X) == Y" or "type(X) != Y".
+    if (testExpression.d.leftExpr.nodeType !== ParseNodeType.Call) {
+        return undefined;
+    }
+
+    if (
+        testExpression.d.leftExpr.d.args.length !== 1 ||
+        testExpression.d.leftExpr.d.args[0].d.argCategory !== ArgCategory.Simple
+    ) {
+        return undefined;
+    }
+
+    const arg0Expr = testExpression.d.leftExpr.d.args[0].d.valueExpr;
+    if (!ctx.isMatchingExpression(reference, arg0Expr)) {
+        return undefined;
+    }
+
+    const callType = ctx.getTypeOfExpression(testExpression.d.leftExpr.d.leftExpr, EvalFlags.CallBaseDefaults).type;
+    if (!isInstantiableClass(callType) || !ClassType.isBuiltIn(callType, 'type')) {
+        return undefined;
+    }
+
+    const rhsResult = ctx.getTypeOfExpression(testExpression.d.rightExpr);
+    const classTypes: ClassType[] = [];
+    let isClassType = true;
+
+    ctx.mapSubtypesExpandTypeVars(rhsResult.type, (expandedSubtype) => {
+        if (isInstantiableClass(expandedSubtype)) {
+            classTypes.push(expandedSubtype);
+        } else {
+            isClassType = false;
+        }
+        return undefined;
+    });
+
+    if (!isClassType || classTypes.length === 0) {
+        return undefined;
+    }
+
+    return { adjIsPositiveTest, classTypes, isIncomplete: !!rhsResult.isIncomplete };
 }
 
 export function getTypeNarrowingCallbackForAliasedCondition<TCallback>(

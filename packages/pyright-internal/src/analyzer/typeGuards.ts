@@ -152,6 +152,20 @@ function getNoneEllipsisNarrowingContext(
     };
 }
 
+function getTypeIsCallNarrowingContext(
+    evaluator: TypeEvaluator
+): TypeEvaluatorNarrowing.TypeIsCallNarrowingContext {
+    return {
+        getTypeOfExpression: (node, flags) => evaluator.getTypeOfExpression(node, flags),
+        isMatchingExpression: (reference, expression) =>
+            ParseTreeUtils.isMatchingExpression(reference, expression, (ref, expr) =>
+                isNameSameScope(evaluator, ref, expr)
+            ),
+        mapSubtypesExpandTypeVars: (type, callback) =>
+            evaluator.mapSubtypesExpandTypeVars(type, /* options */ undefined, callback),
+    };
+}
+
 function getAliasedConditionNarrowingContext(
     evaluator: TypeEvaluator
 ): TypeEvaluatorNarrowing.AliasedConditionNarrowingContext {
@@ -326,56 +340,25 @@ export function getTypeNarrowingCallback(
             }
 
             // Look for "type(X) is Y", "type(X) is not Y", "type(X) == Y" or "type(X) != Y".
-            if (testExpression.d.leftExpr.nodeType === ParseNodeType.Call) {
-                if (
-                    testExpression.d.leftExpr.d.args.length === 1 &&
-                    testExpression.d.leftExpr.d.args[0].d.argCategory === ArgCategory.Simple
-                ) {
-                    const arg0Expr = testExpression.d.leftExpr.d.args[0].d.valueExpr;
-                    if (
-                        ParseTreeUtils.isMatchingExpression(reference, arg0Expr, (ref, expr) =>
-                            isNameSameScope(evaluator, ref, expr)
-                        )
-                    ) {
-                        const callType = evaluator.getTypeOfExpression(
-                            testExpression.d.leftExpr.d.leftExpr,
-                            EvalFlags.CallBaseDefaults
-                        ).type;
+            const typeIsInfo = TypeEvaluatorNarrowing.getTypeIsCallNarrowingInfo(
+                getTypeIsCallNarrowingContext(evaluator),
+                reference,
+                testExpression,
+                isPositiveTest
+            );
 
-                        if (isInstantiableClass(callType) && ClassType.isBuiltIn(callType, 'type')) {
-                            const rhsResult = evaluator.getTypeOfExpression(testExpression.d.rightExpr);
-                            const classTypes: ClassType[] = [];
-                            let isClassType = true;
-
-                            evaluator.mapSubtypesExpandTypeVars(
-                                rhsResult.type,
-                                /* options */ undefined,
-                                (expandedSubtype) => {
-                                    if (isInstantiableClass(expandedSubtype)) {
-                                        classTypes.push(expandedSubtype);
-                                    } else {
-                                        isClassType = false;
-                                    }
-                                    return undefined;
-                                }
-                            );
-
-                            if (isClassType && classTypes.length > 0) {
-                                return (type: Type) => {
-                                    return {
-                                        type: TypeEvaluatorNarrowing.narrowTypeForTypeIs(
-                                            getTypeIsNarrowingContext(evaluator),
-                                            type,
-                                            classTypes,
-                                            adjIsPositiveTest
-                                        ),
-                                        isIncomplete: !!rhsResult.isIncomplete,
-                                    };
-                                };
-                            }
-                        }
-                    }
-                }
+            if (typeIsInfo) {
+                return (type: Type) => {
+                    return {
+                        type: TypeEvaluatorNarrowing.narrowTypeForTypeIs(
+                            getTypeIsNarrowingContext(evaluator),
+                            type,
+                            typeIsInfo.classTypes,
+                            typeIsInfo.adjIsPositiveTest
+                        ),
+                        isIncomplete: typeIsInfo.isIncomplete,
+                    };
+                };
             }
 
             if (isOrIsNotOperator) {
