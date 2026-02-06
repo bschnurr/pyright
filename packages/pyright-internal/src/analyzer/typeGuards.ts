@@ -205,6 +205,18 @@ function getMemberAccessNarrowingContext(
     };
 }
 
+function getLenComparisonNarrowingContext(
+    evaluator: TypeEvaluator
+): TypeEvaluatorNarrowing.LenComparisonNarrowingContext {
+    return {
+        getTypeOfExpression: (node, flags) => evaluator.getTypeOfExpression(node, flags),
+        isMatchingExpression: (reference, expression) =>
+            ParseTreeUtils.isMatchingExpression(reference, expression, (ref, expr) =>
+                isNameSameScope(evaluator, ref, expr)
+            ),
+    };
+}
+
 function getAliasedConditionNarrowingContext(
     evaluator: TypeEvaluator
 ): TypeEvaluatorNarrowing.AliasedConditionNarrowingContext {
@@ -583,70 +595,27 @@ export function getTypeNarrowingCallback(
         }
 
         // Look for len(x) == <literal>, len(x) != <literal>, len(x) < <literal>, etc.
-        if (
-            comparisonOperator &&
-            testExpression.d.leftExpr.nodeType === ParseNodeType.Call &&
-            testExpression.d.leftExpr.d.args.length === 1
-        ) {
-            const arg0Expr = testExpression.d.leftExpr.d.args[0].d.valueExpr;
+        if (comparisonOperator) {
+            const lenComparisonInfo = TypeEvaluatorNarrowing.getLenComparisonNarrowingInfo(
+                getLenComparisonNarrowingContext(evaluator),
+                reference,
+                testExpression,
+                isPositiveTest
+            );
 
-            if (
-                ParseTreeUtils.isMatchingExpression(reference, arg0Expr, (ref, expr) =>
-                    isNameSameScope(evaluator, ref, expr)
-                )
-            ) {
-                const callTypeResult = evaluator.getTypeOfExpression(
-                    testExpression.d.leftExpr.d.leftExpr,
-                    EvalFlags.CallBaseDefaults
-                );
-                const callType = callTypeResult.type;
-
-                if (isFunction(callType) && callType.shared.fullName === 'builtins.len') {
-                    const rightTypeResult = evaluator.getTypeOfExpression(testExpression.d.rightExpr);
-                    const rightType = rightTypeResult.type;
-
-                    if (
-                        isClassInstance(rightType) &&
-                        typeof rightType.priv.literalValue === 'number' &&
-                        rightType.priv.literalValue >= 0
-                    ) {
-                        let tupleLength = rightType.priv.literalValue;
-
-                        // We'll treat <, <= and == as positive tests with >=, > and != as
-                        // their negative counterparts.
-                        const isLessOrEqual =
-                            testExpression.d.operator === OperatorType.Equals ||
-                            testExpression.d.operator === OperatorType.LessThan ||
-                            testExpression.d.operator === OperatorType.LessThanOrEqual;
-
-                        const adjIsPositiveTest = isLessOrEqual ? isPositiveTest : !isPositiveTest;
-
-                        // For <= (or its negative counterpart >), adjust the tuple length by 1.
-                        if (
-                            testExpression.d.operator === OperatorType.LessThanOrEqual ||
-                            testExpression.d.operator === OperatorType.GreaterThan
-                        ) {
-                            tupleLength++;
-                        }
-
-                        const isEqualityCheck =
-                            testExpression.d.operator === OperatorType.Equals ||
-                            testExpression.d.operator === OperatorType.NotEquals;
-
-                        return (type: Type) => {
-                            return {
-                                type: narrowTypeForTupleLength(
-                                    evaluator,
-                                    type,
-                                    tupleLength,
-                                    adjIsPositiveTest,
-                                    !isEqualityCheck
-                                ),
-                                isIncomplete: !!callTypeResult.isIncomplete || !!rightTypeResult.isIncomplete,
-                            };
-                        };
-                    }
-                }
+            if (lenComparisonInfo) {
+                return (type: Type) => {
+                    return {
+                        type: narrowTypeForTupleLength(
+                            evaluator,
+                            type,
+                            lenComparisonInfo.tupleLength,
+                            lenComparisonInfo.adjIsPositiveTest,
+                            lenComparisonInfo.isLessThanCheck
+                        ),
+                        isIncomplete: lenComparisonInfo.isIncomplete,
+                    };
+                };
             }
         }
 
