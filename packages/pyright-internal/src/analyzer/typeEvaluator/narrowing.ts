@@ -308,6 +308,39 @@ export interface InOperatorNarrowingInfo {
     typedDictKeyType?: ClassType;
 }
 
+export interface IsInstanceCallNarrowingContext {
+    getIsInstanceClassTypes: (argType: Type) => (ClassType | TypeVarType | FunctionType)[] | undefined;
+    getTypeOfExpression: (node: ExpressionNode, flags?: EvalFlags) => TypeResult;
+    isMatchingExpression: (reference: ExpressionNode, expression: ExpressionNode) => boolean;
+}
+
+export interface IsInstanceCallNarrowingInfo {
+    kind: 'narrow' | 'incomplete';
+    isIncomplete: boolean;
+    classTypeList?: Type[];
+    isInstanceCheck?: boolean;
+}
+
+export interface BoolCallNarrowingContext {
+    getTypeOfExpression: (node: ExpressionNode, flags?: EvalFlags) => TypeResult;
+    isMatchingExpression: (reference: ExpressionNode, expression: ExpressionNode) => boolean;
+}
+
+export interface BoolCallNarrowingInfo {
+    isIncomplete: boolean;
+}
+
+export interface TypeGuardCallNarrowingContext {
+    getTypeOfExpression: (node: ExpressionNode, flags?: EvalFlags) => TypeResult;
+    isMatchingExpression: (reference: ExpressionNode, expression: ExpressionNode) => boolean;
+}
+
+export interface TypeGuardCallNarrowingInfo {
+    isIncomplete: boolean;
+    isStrictTypeGuard: boolean;
+    typeGuardType: Type;
+}
+
 export interface AliasedConditionNarrowingContext {
     isNodeReachable: (fromNode: ParseNode, toNode: ParseNode) => boolean;
 }
@@ -2475,6 +2508,150 @@ export function getInOperatorNarrowingInfo(
                 typedDictKeyType: ClassType.cloneAsInstantiable(leftType),
             };
         }
+    }
+
+    return undefined;
+}
+
+export function getIsInstanceCallNarrowingInfo(
+    ctx: IsInstanceCallNarrowingContext,
+    reference: ExpressionNode,
+    testExpression: ExpressionNode,
+    _isPositiveTest: boolean
+): IsInstanceCallNarrowingInfo | undefined {
+    if (testExpression.nodeType !== ParseNodeType.Call) {
+        return undefined;
+    }
+
+    if (testExpression.d.args.length !== 2) {
+        return undefined;
+    }
+
+    const arg0Expr = testExpression.d.args[0].d.valueExpr;
+    const arg1Expr = testExpression.d.args[1].d.valueExpr;
+
+    if (!ctx.isMatchingExpression(reference, arg0Expr)) {
+        return undefined;
+    }
+
+    const callTypeResult = ctx.getTypeOfExpression(testExpression.d.leftExpr, EvalFlags.CallBaseDefaults);
+    const callType = callTypeResult.type;
+
+    if (!isFunction(callType) || !FunctionType.isBuiltIn(callType, ['isinstance', 'issubclass'])) {
+        return undefined;
+    }
+
+    const isInstanceCheck = FunctionType.isBuiltIn(callType, 'isinstance');
+    const arg1TypeResult = ctx.getTypeOfExpression(arg1Expr, EvalFlags.IsInstanceArgDefaults);
+    const arg1Type = arg1TypeResult.type;
+
+    const classTypeList = ctx.getIsInstanceClassTypes(arg1Type);
+    const isIncomplete = !!callTypeResult.isIncomplete || !!arg1TypeResult.isIncomplete;
+
+    if (classTypeList) {
+        return {
+            kind: 'narrow',
+            classTypeList,
+            isInstanceCheck,
+            isIncomplete,
+        };
+    }
+
+    if (isIncomplete) {
+        return {
+            kind: 'incomplete',
+            isIncomplete: true,
+        };
+    }
+
+    return undefined;
+}
+
+export function getBoolCallNarrowingInfo(
+    ctx: BoolCallNarrowingContext,
+    reference: ExpressionNode,
+    testExpression: ExpressionNode
+): BoolCallNarrowingInfo | undefined {
+    if (testExpression.nodeType !== ParseNodeType.Call) {
+        return undefined;
+    }
+
+    if (testExpression.d.args.length !== 1 || testExpression.d.args[0].d.name) {
+        return undefined;
+    }
+
+    if (!ctx.isMatchingExpression(reference, testExpression.d.args[0].d.valueExpr)) {
+        return undefined;
+    }
+
+    const callTypeResult = ctx.getTypeOfExpression(testExpression.d.leftExpr, EvalFlags.CallBaseDefaults);
+    const callType = callTypeResult.type;
+
+    if (!isInstantiableClass(callType) || !ClassType.isBuiltIn(callType, 'bool')) {
+        return undefined;
+    }
+
+    return {
+        isIncomplete: !!callTypeResult.isIncomplete,
+    };
+}
+
+export function getTypeGuardCallNarrowingInfo(
+    ctx: TypeGuardCallNarrowingContext,
+    reference: ExpressionNode,
+    testExpression: ExpressionNode
+): TypeGuardCallNarrowingInfo | undefined {
+    if (testExpression.nodeType !== ParseNodeType.Call) {
+        return undefined;
+    }
+
+    if (testExpression.d.args.length < 1) {
+        return undefined;
+    }
+
+    const arg0Expr = testExpression.d.args[0].d.valueExpr;
+    if (!ctx.isMatchingExpression(reference, arg0Expr)) {
+        return undefined;
+    }
+
+    const isFunctionReturnTypeGuard = (type: FunctionType) => {
+        return (
+            type.shared.declaredReturnType &&
+            isClassInstance(type.shared.declaredReturnType) &&
+            ClassType.isBuiltIn(type.shared.declaredReturnType, ['TypeGuard', 'TypeIs'])
+        );
+    };
+
+    const callTypeResult = ctx.getTypeOfExpression(testExpression.d.leftExpr, EvalFlags.CallBaseDefaults);
+    const callType = callTypeResult.type;
+    let isPossiblyTypeGuard = false;
+
+    if (isFunction(callType) && isFunctionReturnTypeGuard(callType)) {
+        isPossiblyTypeGuard = true;
+    } else if (isOverloaded(callType) && OverloadedType.getOverloads(callType).some(isFunctionReturnTypeGuard)) {
+        isPossiblyTypeGuard = true;
+    } else if (isClassInstance(callType)) {
+        isPossiblyTypeGuard = true;
+    }
+
+    if (!isPossiblyTypeGuard) {
+        return undefined;
+    }
+
+    const functionReturnTypeResult = ctx.getTypeOfExpression(testExpression);
+    const functionReturnType = functionReturnTypeResult.type;
+
+    if (
+        isClassInstance(functionReturnType) &&
+        ClassType.isBuiltIn(functionReturnType, ['TypeGuard', 'TypeIs']) &&
+        functionReturnType.priv.typeArgs &&
+        functionReturnType.priv.typeArgs.length > 0
+    ) {
+        return {
+            isIncomplete: !!callTypeResult.isIncomplete || !!functionReturnTypeResult.isIncomplete,
+            isStrictTypeGuard: ClassType.isBuiltIn(functionReturnType, 'TypeIs'),
+            typeGuardType: functionReturnType.priv.typeArgs[0],
+        };
     }
 
     return undefined;

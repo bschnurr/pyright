@@ -16,19 +16,8 @@ import { transformTypeForEnumMember } from './enums';
 import * as ParseTreeUtils from './parseTreeUtils';
 import { getTypedDictMembersForClass } from './typedDicts';
 import * as TypeEvaluatorNarrowing from './typeEvaluator/narrowing';
-import { EvalFlags, TypeEvaluator } from './typeEvaluatorTypes';
-import {
-    ClassType,
-    FunctionType,
-    isClassInstance,
-    isFunction,
-    isInstantiableClass,
-    isOverloaded,
-    maxTypeRecursionCount,
-    OverloadedType,
-    Type,
-    TypeVarType,
-} from './types';
+import { TypeEvaluator } from './typeEvaluatorTypes';
+import { ClassType, FunctionType, maxTypeRecursionCount, Type, TypeVarType } from './types';
 import { lookUpClassMember, lookUpObjectMember } from './typeUtils';
 
 export interface TypeNarrowingResult {
@@ -218,6 +207,41 @@ function getLenComparisonNarrowingContext(
 }
 
 function getInOperatorNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.InOperatorNarrowingContext {
+    return {
+        getTypeOfExpression: (node, flags) => evaluator.getTypeOfExpression(node, flags),
+        isMatchingExpression: (reference, expression) =>
+            ParseTreeUtils.isMatchingExpression(reference, expression, (ref, expr) =>
+                isNameSameScope(evaluator, ref, expr)
+            ),
+    };
+}
+
+function getIsInstanceCallNarrowingContext(
+    evaluator: TypeEvaluator
+): TypeEvaluatorNarrowing.IsInstanceCallNarrowingContext {
+    return {
+        getIsInstanceClassTypes: (argType) => getIsInstanceClassTypes(evaluator, argType),
+        getTypeOfExpression: (node, flags) => evaluator.getTypeOfExpression(node, flags),
+        isMatchingExpression: (reference, expression) =>
+            ParseTreeUtils.isMatchingExpression(reference, expression, (ref, expr) =>
+                isNameSameScope(evaluator, ref, expr)
+            ),
+    };
+}
+
+function getBoolCallNarrowingContext(evaluator: TypeEvaluator): TypeEvaluatorNarrowing.BoolCallNarrowingContext {
+    return {
+        getTypeOfExpression: (node, flags) => evaluator.getTypeOfExpression(node, flags),
+        isMatchingExpression: (reference, expression) =>
+            ParseTreeUtils.isMatchingExpression(reference, expression, (ref, expr) =>
+                isNameSameScope(evaluator, ref, expr)
+            ),
+    };
+}
+
+function getTypeGuardCallNarrowingContext(
+    evaluator: TypeEvaluator
+): TypeEvaluatorNarrowing.TypeGuardCallNarrowingContext {
     return {
         getTypeOfExpression: (node, flags) => evaluator.getTypeOfExpression(node, flags),
         isMatchingExpression: (reference, expression) =>
@@ -669,152 +693,76 @@ export function getTypeNarrowingCallback(
 
     if (testExpression.nodeType === ParseNodeType.Call) {
         // Look for "isinstance(X, Y)" or "issubclass(X, Y)".
-        if (testExpression.d.args.length === 2) {
-            // Make sure the first parameter is a supported expression type
-            // and the second parameter is a valid class type or a tuple
-            // of valid class types.
-            const arg0Expr = testExpression.d.args[0].d.valueExpr;
-            const arg1Expr = testExpression.d.args[1].d.valueExpr;
+        const isInstanceInfo = TypeEvaluatorNarrowing.getIsInstanceCallNarrowingInfo(
+            getIsInstanceCallNarrowingContext(evaluator),
+            reference,
+            testExpression,
+            isPositiveTest
+        );
 
-            if (
-                ParseTreeUtils.isMatchingExpression(reference, arg0Expr, (ref, expr) =>
-                    isNameSameScope(evaluator, ref, expr)
-                )
-            ) {
-                const callTypeResult = evaluator.getTypeOfExpression(
-                    testExpression.d.leftExpr,
-                    EvalFlags.CallBaseDefaults
-                );
-                const callType = callTypeResult.type;
-
-                if (isFunction(callType) && FunctionType.isBuiltIn(callType, ['isinstance', 'issubclass'])) {
-                    const isInstanceCheck = FunctionType.isBuiltIn(callType, 'isinstance');
-                    const arg1TypeResult = evaluator.getTypeOfExpression(arg1Expr, EvalFlags.IsInstanceArgDefaults);
-                    const arg1Type = arg1TypeResult.type;
-
-                    const classTypeList = getIsInstanceClassTypes(evaluator, arg1Type);
-                    const isIncomplete = !!callTypeResult.isIncomplete || !!arg1TypeResult.isIncomplete;
-
-                    if (classTypeList) {
-                        return (type: Type) => {
-                            return {
-                                type: narrowTypeForInstanceOrSubclass(
-                                    evaluator,
-                                    type,
-                                    classTypeList,
-                                    isInstanceCheck,
-                                    /* isTypeIsCheck */ false,
-                                    isPositiveTest,
-                                    testExpression
-                                ),
-                                isIncomplete,
-                            };
-                        };
-                    } else if (isIncomplete) {
-                        // If the type is incomplete, it may include unknowns, which will result
-                        // in classTypeList being undefined.
-                        return (type: Type) => {
-                            return {
-                                type,
-                                isIncomplete: true,
-                            };
-                        };
-                    }
-                }
+        if (isInstanceInfo) {
+            if (isInstanceInfo.kind === 'narrow') {
+                return (type: Type) => {
+                    return {
+                        type: narrowTypeForInstanceOrSubclass(
+                            evaluator,
+                            type,
+                            isInstanceInfo.classTypeList!,
+                            isInstanceInfo.isInstanceCheck!,
+                            /* isTypeIsCheck */ false,
+                            isPositiveTest,
+                            testExpression
+                        ),
+                        isIncomplete: isInstanceInfo.isIncomplete,
+                    };
+                };
             }
+
+            return (type: Type) => {
+                return {
+                    type,
+                    isIncomplete: true,
+                };
+            };
         }
 
         // Look for "bool(X)"
-        if (testExpression.d.args.length === 1 && !testExpression.d.args[0].d.name) {
-            if (
-                ParseTreeUtils.isMatchingExpression(reference, testExpression.d.args[0].d.valueExpr, (ref, expr) =>
-                    isNameSameScope(evaluator, ref, expr)
-                )
-            ) {
-                const callTypeResult = evaluator.getTypeOfExpression(
-                    testExpression.d.leftExpr,
-                    EvalFlags.CallBaseDefaults
-                );
-                const callType = callTypeResult.type;
+        const boolCallInfo = TypeEvaluatorNarrowing.getBoolCallNarrowingInfo(
+            getBoolCallNarrowingContext(evaluator),
+            reference,
+            testExpression
+        );
 
-                if (isInstantiableClass(callType) && ClassType.isBuiltIn(callType, 'bool')) {
-                    return (type: Type) => {
-                        return {
-                            type: narrowTypeForTruthiness(evaluator, type, isPositiveTest),
-                            isIncomplete: !!callTypeResult.isIncomplete,
-                        };
-                    };
-                }
-            }
+        if (boolCallInfo) {
+            return (type: Type) => {
+                return {
+                    type: narrowTypeForTruthiness(evaluator, type, isPositiveTest),
+                    isIncomplete: boolCallInfo.isIncomplete,
+                };
+            };
         }
 
         // Look for a TypeGuard function.
-        if (testExpression.d.args.length >= 1) {
-            const arg0Expr = testExpression.d.args[0].d.valueExpr;
-            if (
-                ParseTreeUtils.isMatchingExpression(reference, arg0Expr, (ref, expr) =>
-                    isNameSameScope(evaluator, ref, expr)
-                )
-            ) {
-                // Does this look like it's a custom type guard function?
-                let isPossiblyTypeGuard = false;
+        const typeGuardInfo = TypeEvaluatorNarrowing.getTypeGuardCallNarrowingInfo(
+            getTypeGuardCallNarrowingContext(evaluator),
+            reference,
+            testExpression
+        );
 
-                const isFunctionReturnTypeGuard = (type: FunctionType) => {
-                    return (
-                        type.shared.declaredReturnType &&
-                        isClassInstance(type.shared.declaredReturnType) &&
-                        ClassType.isBuiltIn(type.shared.declaredReturnType, ['TypeGuard', 'TypeIs'])
-                    );
+        if (typeGuardInfo) {
+            return (type: Type) => {
+                return {
+                    type: narrowTypeForUserDefinedTypeGuard(
+                        evaluator,
+                        type,
+                        typeGuardInfo.typeGuardType,
+                        isPositiveTest,
+                        typeGuardInfo.isStrictTypeGuard,
+                        testExpression
+                    ),
+                    isIncomplete: typeGuardInfo.isIncomplete,
                 };
-
-                const callTypeResult = evaluator.getTypeOfExpression(
-                    testExpression.d.leftExpr,
-                    EvalFlags.CallBaseDefaults
-                );
-                const callType = callTypeResult.type;
-
-                if (isFunction(callType) && isFunctionReturnTypeGuard(callType)) {
-                    isPossiblyTypeGuard = true;
-                } else if (
-                    isOverloaded(callType) &&
-                    OverloadedType.getOverloads(callType).some((o) => isFunctionReturnTypeGuard(o))
-                ) {
-                    isPossiblyTypeGuard = true;
-                } else if (isClassInstance(callType)) {
-                    isPossiblyTypeGuard = true;
-                }
-
-                if (isPossiblyTypeGuard) {
-                    // Evaluate the type guard call expression.
-                    const functionReturnTypeResult = evaluator.getTypeOfExpression(testExpression);
-                    const functionReturnType = functionReturnTypeResult.type;
-
-                    if (
-                        isClassInstance(functionReturnType) &&
-                        ClassType.isBuiltIn(functionReturnType, ['TypeGuard', 'TypeIs']) &&
-                        functionReturnType.priv.typeArgs &&
-                        functionReturnType.priv.typeArgs.length > 0
-                    ) {
-                        const isStrictTypeGuard = ClassType.isBuiltIn(functionReturnType, 'TypeIs');
-                        const typeGuardType = functionReturnType.priv.typeArgs[0];
-                        const isIncomplete = !!callTypeResult.isIncomplete || !!functionReturnTypeResult.isIncomplete;
-
-                        return (type: Type) => {
-                            return {
-                                type: narrowTypeForUserDefinedTypeGuard(
-                                    evaluator,
-                                    type,
-                                    typeGuardType,
-                                    isPositiveTest,
-                                    isStrictTypeGuard,
-                                    testExpression
-                                ),
-                                isIncomplete,
-                            };
-                        };
-                    }
-                }
-            }
+            };
         }
     }
 
