@@ -195,16 +195,19 @@ export function getFlowTypeOfReference(
     startNode?: ClassNode | FunctionNode | LambdaNode,
     options?: FlowNodeTypeOptions
 ): FlowNodeTypeResult {
+    const emptyFlowResult = FlowNodeTypeResult.create(/* type */ undefined, /* isIncomplete */ false);
+
     // Step 1: Determine whether code flow is needed for this reference.
     const referenceKey = createKeyForReference(reference);
     const executionNode = ParseTreeUtils.getExecutionScopeNode(startNode?.parent ?? reference);
     const codeFlowExpressions = AnalyzerNodeInfo.getCodeFlowExpressions(executionNode);
 
-    if (
-        !codeFlowExpressions ||
-        (!codeFlowExpressions.has(referenceKey) && !codeFlowExpressions.has(wildcardImportReferenceKey))
-    ) {
-        return FlowNodeTypeResult.create(/* type */ undefined, /* isIncomplete */ false);
+    if (!codeFlowExpressions) {
+        return emptyFlowResult;
+    }
+
+    if (!codeFlowExpressions.has(referenceKey) && !codeFlowExpressions.has(wildcardImportReferenceKey)) {
+        return emptyFlowResult;
     }
 
     // Step 2: If code flow is too complex, we still return a conservative answer.
@@ -230,7 +233,7 @@ export function getFlowTypeOfReference(
     // Step 4: Ask the analyzer for the type at the flow node.
     const flowNode = AnalyzerNodeInfo.getFlowNode(startNode ?? reference);
     if (flowNode === undefined) {
-        return FlowNodeTypeResult.create(/* type */ undefined, /* isIncomplete */ false);
+        return emptyFlowResult;
     }
 
     // The analyzer performs backward traversal and applies narrowing rules as it walks.
