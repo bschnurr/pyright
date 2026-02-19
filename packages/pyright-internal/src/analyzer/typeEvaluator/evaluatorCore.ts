@@ -16,8 +16,8 @@ import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
 import { ArgWithExpression, AssignTypeFlags, EvaluatorUsage } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { ClassType, FunctionParam, FunctionType, isClass, isFunction, isTypeVar, isTypeSame, isUnknown, Type, TypeBase, TypeVarType } from '../types';
-import { doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTypeAliasPlaceholder } from '../typeUtils';
+import { ClassType, FunctionParam, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnknown, Type, TypeBase, TypeVarType } from '../types';
+import { doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder } from '../typeUtils';
 
 export interface ReturnTypeInferenceContextFrame {
     functionNode: ParseNode;
@@ -457,4 +457,36 @@ export function getUnknownExemptTypeVarsForReturnTypeCheck(functionType: Functio
     }
 
     return [];
+}
+
+export function applyUnpackToTupleLikeType(type: Type): Type | undefined {
+    if (isTypeVarTuple(type)) {
+        if (!type.priv.isUnpacked) {
+            return TypeVarType.cloneForUnpacked(type);
+        }
+
+        return undefined;
+    }
+
+    if (isParamSpec(type)) {
+        return undefined;
+    }
+
+    if (isTypeVar(type)) {
+        const upperBound = type.shared.boundType;
+
+        if (upperBound && isClassInstance(upperBound) && isTupleClass(upperBound)) {
+            return TypeVarType.cloneForUnpacked(type);
+        }
+
+        return undefined;
+    }
+
+    if (isInstantiableClass(type) && !type.priv.includeSubclasses) {
+        if (isTupleClass(type)) {
+            return ClassType.cloneForUnpacked(type);
+        }
+    }
+
+    return undefined;
 }
