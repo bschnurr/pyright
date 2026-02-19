@@ -192,3 +192,23 @@ Narrowing and code flow analysis already have dedicated subsystems:
 The evaluator should treat these as core dependencies and provide thin, well-documented hooks.
 When adding explanatory placeholder logic (for learning/architecture documentation), prefer comments
 near these hooks rather than re-implementing the narrowing or flow engine in the evaluator.
+
+## Future performance improvement ideas
+
+Observations captured during the refactoring process. All items should be profiled and benchmarked before implementation — no premature optimization.
+
+### Type evaluator / caching
+
+- **`writeTypeCache` / `readTypeCache` hot path**: The most heavily called closure functions. Profile whether the current `Map`-based cache has significant overhead for very large projects; consider whether a `WeakMap` keyed on parse nodes could reduce GC pressure.
+- **Speculative evaluation cost**: `useSpeculativeMode` / `isSpeculativeModeInUse` wrap many call sites. Investigate whether speculative evaluation is triggered unnecessarily in cases where the result is never used (e.g., abandoned overload candidates).
+- **`makeTopLevelTypeVarsConcrete` redundant calls**: Called repeatedly on the same type in many code paths. Consider memoizing results or adding an "already concretized" flag to `TypeBase`.
+- **`assignType` recursion depth**: Deep class hierarchies and generic types can cause deep recursion. Profile whether iterative approaches or early bailouts for common cases (e.g., same-class assignment) would help.
+- **`typePromotions` map lookups**: Currently a small static map (3 entries), checked on every `expandPromotionTypes` call. If this ever becomes a bottleneck, could be replaced with a flag on `ClassType.shared`.
+
+### Broader Pyright performance
+
+- **Incremental re-analysis granularity**: Currently file-level. Investigate whether function-level or scope-level incremental analysis is feasible for large files.
+- **Import resolution caching**: Profile whether import resolution (`importResolver`) is doing redundant work across files in the same package.
+- **Diagnostic string formatting**: `LocMessage.*.format()` allocates strings eagerly. Consider lazy formatting (only format when the diagnostic is actually emitted/displayed).
+- **`doForEachSubtype` / `mapSubtypes` allocation**: These create closures and intermediate arrays on every call. For hot paths, consider providing a reusable-buffer variant.
+- **Parse tree node allocation**: Large files create millions of parse nodes. Investigate whether a flyweight or arena-based allocator would reduce GC overhead.
