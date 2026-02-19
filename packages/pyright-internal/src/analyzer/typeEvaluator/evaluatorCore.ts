@@ -11,7 +11,7 @@ import { PythonVersion, pythonVersion3_9 } from '../../common/pythonVersion';
 import { Diagnostic, DiagnosticAddendum } from '../../common/diagnostic';
 import { DiagnosticRule } from '../../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../../localization/localize';
-import { ArgCategory, ArgumentNode, AssignmentNode, CallNode, ExpressionNode, FunctionNode, ImportAsNode, ImportFromAsNode, ImportFromNode, IndexNode, NameNode, ParamCategory, ParseNode, ParseNodeType, SliceNode, StringListNode, StringNode, TypeParameterNode, UnpackNode, YieldFromNode } from '../../parser/parseNodes';
+import { ArgCategory, ArgumentNode, AssignmentNode, CallNode, ComprehensionForIfNode, ExpressionNode, FunctionNode, ImportAsNode, ImportFromAsNode, ImportFromNode, IndexNode, NameNode, ParamCategory, ParseNode, ParseNodeType, SliceNode, StringListNode, StringNode, TypeParameterNode, UnpackNode, YieldFromNode, YieldNode } from '../../parser/parseNodes';
 import { KeywordType, OperatorType, StringTokenFlags } from '../../parser/tokenizerTypes';
 import { Parser, ParseOptions, ParseTextMode } from '../../parser/parser';
 import { TextRange } from '../../common/textRange';
@@ -22,15 +22,15 @@ import { appendArray } from '../../common/collectionUtils';
 import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { isAnnotationEvaluationPostponed } from '../analyzerFileInfo';
-import { Declaration, DeclarationType } from '../declaration';
+import { Declaration, DeclarationType, FunctionDeclaration } from '../declaration';
 import { Arg, ArgWithExpression, AssignTypeFlags, CallResult, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, MagicMethodDeprecationInfo, PrefetchedTypes, PrintTypeOptions, Reachability, SymbolDeclInfo, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
 import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, InheritanceChain, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isOverloaded, isParamSpec, isPositionOnlySeparator, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, maxTypeRecursionCount, ModuleType, NeverType, OverloadedType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeCategory, TypeCondition, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnionType, UnknownType, Variance } from '../types';
-import { addConditionToType, combineSameSizedTuples, combineVariances, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromAnyOrUnknown, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, explodeGenericClass, getGeneratorTypeArgs, getSpecializedTupleType, getTypeCondition, getTypeVarArgsRecursive, getTypeVarScopeIds, getUnknownTypeForCallable, InferenceContext, invertVariance, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralLikeType, isLiteralType, isMetaclassInstance, isNoneInstance, isNoneTypeClass, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTupleIndexUnambiguous, isTypeAliasPlaceholder, isUnboundedTupleClass, isVarianceOfTypeArgCompatible, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeInferenceContext, makeTypeVarsBound, mapSignatures, mapSubtypes, MemberAccessFlags, partiallySpecializeType, removeNoneFromUnion, requiresSpecialization, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeForBaseClass, specializeWithDefaultTypeArgs, specializeTupleClass, stripTypeForm, synthesizeTypeVarForSelfCls, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
+import { addConditionToType, areTypesSame, combineSameSizedTuples, combineVariances, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromAnyOrUnknown, derivesFromClassRecursive, derivesFromStdlibClass, doForEachSubtype, addTypeVarsToListIfUnique, explodeGenericClass, getGeneratorTypeArgs, getGeneratorYieldType, getSpecializedTupleType, getTypeCondition, getTypeVarArgsRecursive, getTypeVarScopeIds, getUnknownTypeForCallable, InferenceContext, invertVariance, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralLikeType, isLiteralType, isMetaclassInstance, isNoneInstance, isNoneTypeClass, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTupleIndexUnambiguous, isTypeAliasPlaceholder, isUnboundedTupleClass, isVarianceOfTypeArgCompatible, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeInferenceContext, makeTypeVarsBound, mapSignatures, mapSubtypes, MemberAccessFlags, partiallySpecializeType, removeNoneFromUnion, requiresSpecialization, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeForBaseClass, specializeWithDefaultTypeArgs, specializeTupleClass, stripTypeForm, synthesizeTypeVarForSelfCls, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails, ParamKind, ParamListDetails, VirtualParamDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 import { assignTupleTypeArgs, getSlicedTupleType, makeTupleObject } from '../tuples';
-import { ScopeType, SymbolWithScope } from '../scope';
+import { Scope, ScopeType, SymbolWithScope } from '../scope';
 import { CodeFlowEngine } from '../codeFlowEngine';
 import { Symbol, SynthesizedTypeInfo } from '../symbol';
 import { getDeclarationsWithUsesLocalNameRemoved, synthesizeAliasDeclaration } from '../declarationUtils';
@@ -8895,4 +8895,317 @@ export function assignClassWithTypeArgsWithEvaluator(
     }
 
     return true;
+}
+
+export function isAsymmetricDescriptorClassWithEvaluator(
+    evaluator: TypeEvaluator,
+    classType: ClassType
+): boolean {
+    // If the value has already been cached in this type, return the cached value.
+    if (classType.priv.isAsymmetricDescriptor !== undefined) {
+        return classType.priv.isAsymmetricDescriptor;
+    }
+
+    let isAsymmetric = false;
+
+    const getterSymbolResult = lookUpClassMember(classType, '__get__', MemberAccessFlags.SkipBaseClasses);
+    const setterSymbolResult = lookUpClassMember(classType, '__set__', MemberAccessFlags.SkipBaseClasses);
+
+    if (!getterSymbolResult || !setterSymbolResult) {
+        isAsymmetric = false;
+    } else {
+        let getterType = evaluator.getTypeOfMember(getterSymbolResult);
+        const setterType = evaluator.getTypeOfMember(setterSymbolResult);
+
+        // If this is an overload, find the appropriate overload.
+        if (isOverloaded(getterType)) {
+            const getOverloads = OverloadedType.getOverloads(getterType).filter((overload) => {
+                if (overload.shared.parameters.length < 2) {
+                    return false;
+                }
+                const param1Type = FunctionType.getParamType(overload, 1);
+                return !isNoneInstance(param1Type);
+            });
+
+            if (getOverloads.length === 1) {
+                getterType = getOverloads[0];
+            } else {
+                isAsymmetric = true;
+            }
+        }
+
+        // If this is an overload, find the appropriate overload.
+        if (isOverloaded(setterType)) {
+            isAsymmetric = true;
+        }
+
+        // If either the setter or getter is an overload (or some other non-function type),
+        // conservatively assume that it's not asymmetric.
+        if (isFunction(getterType) && isFunction(setterType)) {
+            // If there's no declared return type on the getter, assume it's symmetric.
+            if (setterType.shared.parameters.length >= 3 && getterType.shared.declaredReturnType) {
+                const setterValueType = FunctionType.getParamType(setterType, 2);
+                const getterReturnType = FunctionType.getEffectiveReturnType(getterType) ?? UnknownType.create();
+
+                if (!isTypeSame(setterValueType, getterReturnType)) {
+                    isAsymmetric = true;
+                }
+            }
+        }
+    }
+
+    // Cache the value for next time.
+    classType.priv.isAsymmetricDescriptor = isAsymmetric;
+    return isAsymmetric;
+}
+
+export function isClassWithAsymmetricAttributeAccessorWithEvaluator(
+    evaluator: TypeEvaluator,
+    classType: ClassType
+): boolean {
+    // If the value has already been cached in this type, return the cached value.
+    if (classType.priv.isAsymmetricAttributeAccessor !== undefined) {
+        return classType.priv.isAsymmetricAttributeAccessor;
+    }
+
+    let isAsymmetric = false;
+
+    const getterSymbolResult = lookUpClassMember(classType, '__getattr__', MemberAccessFlags.SkipBaseClasses);
+    const setterSymbolResult = lookUpClassMember(classType, '__setattr__', MemberAccessFlags.SkipBaseClasses);
+
+    if (!getterSymbolResult || !setterSymbolResult) {
+        isAsymmetric = false;
+    } else {
+        const getterType = evaluator.getEffectiveTypeOfSymbol(getterSymbolResult.symbol);
+        const setterType = evaluator.getEffectiveTypeOfSymbol(setterSymbolResult.symbol);
+
+        // If either the setter or getter is an overload (or some other non-function type),
+        // conservatively assume that it's not asymmetric.
+        if (isFunction(getterType) && isFunction(setterType)) {
+            // If there's no declared return type on the getter, assume it's symmetric.
+            if (setterType.shared.parameters.length >= 3 && getterType.shared.declaredReturnType) {
+                const setterValueType = FunctionType.getParamType(setterType, 2);
+                const getterReturnType = FunctionType.getEffectiveReturnType(getterType) ?? UnknownType.create();
+
+                if (!isTypeSame(setterValueType, getterReturnType)) {
+                    isAsymmetric = true;
+                }
+            }
+        }
+    }
+
+    // Cache the value for next time.
+    classType.priv.isAsymmetricAttributeAccessor = isAsymmetric;
+    return isAsymmetric;
+}
+
+export function verifyTypeVarDefaultIsCompatibleWithEvaluator(
+    evaluator: TypeEvaluator,
+    typeVar: TypeVarType,
+    defaultValueNode: ExpressionNode
+) {
+    assert(typeVar.shared.isDefaultExplicit);
+
+    const constraints = new ConstraintTracker();
+    const concreteDefaultType = evaluator.makeTopLevelTypeVarsConcrete(
+        evaluator.solveAndApplyConstraints(typeVar.shared.defaultType, constraints, {
+            replaceUnsolved: {
+                scopeIds: getTypeVarScopeIds(typeVar),
+                tupleClassType: evaluator.getTupleClassType(),
+            },
+        })
+    );
+
+    if (typeVar.shared.boundType) {
+        if (!evaluator.assignType(typeVar.shared.boundType, concreteDefaultType)) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.typeVarDefaultBoundMismatch(),
+                defaultValueNode
+            );
+        }
+    } else if (TypeVarType.hasConstraints(typeVar)) {
+        let isConstraintCompatible = true;
+
+        // If the default type is a constrained TypeVar, make sure all of its constraints
+        // are also constraints in typeVar. If the default type is not a constrained TypeVar,
+        // use its concrete type to compare against the constraints.
+        if (isTypeVar(typeVar.shared.defaultType) && TypeVarType.hasConstraints(typeVar.shared.defaultType)) {
+            for (const constraint of typeVar.shared.defaultType.shared.constraints) {
+                if (!typeVar.shared.constraints.some((c) => isTypeSame(c, constraint))) {
+                    isConstraintCompatible = false;
+                }
+            }
+        } else if (
+            !typeVar.shared.constraints.some((constraint) =>
+                isTypeSame(constraint, concreteDefaultType, { ignoreConditions: true })
+            )
+        ) {
+            isConstraintCompatible = false;
+        }
+
+        if (!isConstraintCompatible) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.typeVarDefaultConstraintMismatch(),
+                defaultValueNode
+            );
+        }
+    }
+}
+
+export function methodAlwaysRaisesNotImplementedWithEvaluator(
+    evaluator: TypeEvaluator,
+    functionDecl?: FunctionDeclaration
+): boolean {
+    if (
+        !functionDecl ||
+        !functionDecl.isMethod ||
+        functionDecl.returnStatements ||
+        functionDecl.yieldStatements ||
+        !functionDecl.raiseStatements
+    ) {
+        return false;
+    }
+
+    const statements = functionDecl.node.d.suite.d.statements;
+    if (statements.some((statement) => statement.nodeType !== ParseNodeType.StatementList)) {
+        return false;
+    }
+
+    for (const raiseStatement of functionDecl.raiseStatements) {
+        if (!raiseStatement.d.expr || raiseStatement.d.fromExpr) {
+            return false;
+        }
+        const raiseType = evaluator.getTypeOfExpression(raiseStatement.d.expr).type;
+        const classType = isInstantiableClass(raiseType)
+            ? raiseType
+            : isClassInstance(raiseType)
+            ? raiseType
+            : undefined;
+        if (!classType || !derivesFromStdlibClass(classType, 'NotImplementedError')) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+export function evaluateComprehensionForIfWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: ComprehensionForIfNode
+) {
+    let isIncomplete = false;
+
+    if (node.nodeType === ParseNodeType.ComprehensionFor) {
+        const iterableTypeResult = evaluator.getTypeOfExpression(node.d.iterableExpr);
+        if (iterableTypeResult.isIncomplete) {
+            isIncomplete = true;
+        }
+        const iterableType = evaluator.stripLiteralValue(iterableTypeResult.type);
+        const itemTypeResult = evaluator.getTypeOfIterator(
+            { type: iterableType, isIncomplete: iterableTypeResult.isIncomplete },
+            !!node.d.isAsync,
+            node.d.iterableExpr
+        ) ?? { type: UnknownType.create(), isIncomplete: iterableTypeResult.isIncomplete };
+
+        const targetExpr = node.d.targetExpr;
+        evaluator.assignTypeToExpression(targetExpr, itemTypeResult, node.d.iterableExpr);
+    } else {
+        assert(node.nodeType === ParseNodeType.ComprehensionIf);
+
+        // Evaluate the test expression to validate it and mark symbols
+        // as referenced. This doesn't affect the type of the evaluated
+        // comprehension, but it is important for evaluating intermediate
+        // expressions such as assignment expressions that can affect other
+        // subexpressions.
+        evaluator.getTypeOfExpression(node.d.testExpr);
+    }
+
+    return isIncomplete;
+}
+
+export function getTypeOfYieldWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: YieldNode
+): TypeResult {
+    let expectedYieldType: Type | undefined;
+    let sentType: Type | undefined;
+    let isIncomplete = false;
+
+    const enclosingFunction = ParseTreeUtils.getEnclosingFunction(node);
+    if (enclosingFunction) {
+        const functionTypeInfo = evaluator.getTypeOfFunction(enclosingFunction);
+        if (functionTypeInfo) {
+            let returnType = FunctionType.getEffectiveReturnType(functionTypeInfo.functionType);
+            if (returnType) {
+                const liveScopeIds = ParseTreeUtils.getTypeVarScopesForNode(node);
+                returnType = makeTypeVarsBound(returnType, liveScopeIds);
+
+                expectedYieldType = getGeneratorYieldType(returnType, !!enclosingFunction.d.isAsync);
+
+                const generatorTypeArgs = getGeneratorTypeArgs(returnType);
+                if (generatorTypeArgs && generatorTypeArgs.length >= 2) {
+                    sentType = makeTypeVarsBound(generatorTypeArgs[1], liveScopeIds);
+                }
+            }
+        }
+    }
+
+    if (node.d.expr) {
+        const exprResult = evaluator.getTypeOfExpression(
+            node.d.expr,
+            /* flags */ undefined,
+            makeInferenceContext(expectedYieldType)
+        );
+        if (exprResult.isIncomplete) {
+            isIncomplete = true;
+        }
+    }
+
+    return { type: sentType || UnknownType.create(), isIncomplete };
+}
+
+export function getTypeOfRevealLocalsWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: CallNode
+) {
+    let curNode: ParseNode | undefined = node;
+    let scope: Scope | undefined;
+
+    while (curNode) {
+        scope = ScopeUtils.getScopeForNode(curNode);
+
+        // Stop when we get a valid scope that's not a list comprehension
+        // scope. That includes lambdas, functions, classes, and modules.
+        if (scope && scope.type !== ScopeType.Comprehension) {
+            break;
+        }
+
+        curNode = curNode.parent;
+    }
+
+    const infoMessages: string[] = [];
+
+    if (scope) {
+        scope.symbolTable.forEach((symbol, name) => {
+            if (!symbol.isIgnoredForProtocolMatch()) {
+                const typeOfSymbol = evaluator.getEffectiveTypeOfSymbol(symbol);
+                infoMessages.push(
+                    LocAddendum.typeOfSymbol().format({
+                        name,
+                        type: evaluator.printType(typeOfSymbol, { expandTypeAlias: true }),
+                    })
+                );
+            }
+        });
+    }
+
+    if (infoMessages.length > 0) {
+        evaluator.addInformation(infoMessages.join('\n'), node);
+    } else {
+        evaluator.addInformation(LocMessage.revealLocalsNone(), node);
+    }
+
+    return evaluator.getNoneType();
 }
