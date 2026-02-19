@@ -21,10 +21,10 @@ import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { isAnnotationEvaluationPostponed } from '../analyzerFileInfo';
 import { Declaration, DeclarationType } from '../declaration';
-import { ArgWithExpression, AssignTypeFlags, CallResult, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, PrefetchedTypes, Reachability, SymbolDeclInfo, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
+import { ArgWithExpression, AssignTypeFlags, CallResult, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, PrefetchedTypes, PrintTypeOptions, Reachability, SymbolDeclInfo, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isOverloaded, isParamSpec, isPositionOnlySeparator, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, ModuleType, NeverType, OverloadedType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnionType, UnknownType, Variance } from '../types';
-import { addConditionToType, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, getGeneratorTypeArgs, getTypeCondition, getTypeVarArgsRecursive, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralType, isNoneInstance, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeTypeVarsBound, mapSignatures, mapSubtypes, MemberAccessFlags, requiresSpecialization, sortTypes, specializeWithDefaultTypeArgs, specializeTupleClass, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
+import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isOverloaded, isParamSpec, isPositionOnlySeparator, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, ModuleType, NeverType, OverloadedType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeCondition, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnionType, UnknownType, Variance } from '../types';
+import { addConditionToType, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, getGeneratorTypeArgs, getTypeCondition, getTypeVarArgsRecursive, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralType, isNoneInstance, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeTypeVarsBound, mapSignatures, mapSubtypes, MemberAccessFlags, requiresSpecialization, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeWithDefaultTypeArgs, specializeTupleClass, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails, ParamKind, ParamListDetails, VirtualParamDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 import { makeTupleObject } from '../tuples';
@@ -581,6 +581,134 @@ export function getTypeClassTypeFromPrefetched(prefetched: Partial<PrefetchedTyp
         return prefetched.typeClass;
     }
     return undefined;
+}
+
+export function makeTopLevelTypeVarsConcreteWithPrefetched(
+    type: Type,
+    prefetched: Partial<PrefetchedTypes> | undefined,
+    evaluator: TypeEvaluator,
+    makeParamSpecsConcrete = false,
+    conditionFilter?: TypeCondition[]
+): Type {
+    type = transformPossibleRecursiveTypeAlias(type);
+
+    return mapSubtypes(type, (subtype) => {
+        if (isParamSpec(subtype)) {
+            if (subtype.priv.paramSpecAccess === 'args') {
+                return makeTupleObject(evaluator, [{ type: getObjectTypeFromPrefetched(prefetched), isUnbounded: true }]);
+            } else if (subtype.priv.paramSpecAccess === 'kwargs') {
+                if (
+                    prefetched?.dictClass &&
+                    isInstantiableClass(prefetched.dictClass) &&
+                    prefetched?.strClass &&
+                    isInstantiableClass(prefetched.strClass)
+                ) {
+                    return ClassType.cloneAsInstance(
+                        ClassType.specialize(prefetched.dictClass, [
+                            convertToInstance(prefetched.strClass),
+                            getObjectTypeFromPrefetched(prefetched),
+                        ])
+                    );
+                }
+
+                return UnknownType.create();
+            }
+        }
+
+        // If this is a function that contains only a ParamSpec (no additional
+        // parameters), convert it to a concrete type of (*args: Unknown, **kwargs: Unknown).
+        if (makeParamSpecsConcrete && isFunction(subtype)) {
+            const convertedType = simplifyFunctionToParamSpec(subtype);
+            if (isParamSpec(convertedType)) {
+                return ParamSpecType.getUnknown();
+            }
+        }
+
+        if (isTypeVarTuple(subtype)) {
+            // If it's in a union, convert to type or object.
+            if (subtype.priv.isInUnion) {
+                if (TypeBase.isInstantiable(subtype)) {
+                    if (prefetched?.typeClass && isInstantiableClass(prefetched.typeClass)) {
+                        return prefetched.typeClass;
+                    }
+                } else {
+                    return getObjectTypeFromPrefetched(prefetched);
+                }
+
+                return AnyType.create();
+            }
+
+            // Fall back to "*tuple[object, ...]".
+            return makeTupleObject(
+                evaluator,
+                [{ type: getObjectTypeFromPrefetched(prefetched), isUnbounded: true }],
+                /* isUnpacked */ true
+            );
+        }
+
+        if (isTypeVar(subtype)) {
+            // If this is a recursive type alias placeholder
+            // that hasn't yet been resolved, return it as is.
+            if (subtype.shared.recursiveAlias) {
+                return subtype;
+            }
+
+            if (TypeVarType.hasConstraints(subtype)) {
+                const typesToCombine: Type[] = [];
+
+                // Expand the list of constrained subtypes, filtering out any that are
+                // disallowed by the conditionFilter.
+                subtype.shared.constraints.forEach((constraintType, constraintIndex) => {
+                    if (conditionFilter) {
+                        const typeVarName = TypeVarType.getNameWithScope(subtype);
+                        const applicableConstraint = conditionFilter.find(
+                            (filter) => filter.typeVar.priv.nameWithScope === typeVarName
+                        );
+
+                        // If this type variable is being constrained to a single index,
+                        // don't include the other indices.
+                        if (applicableConstraint && applicableConstraint.constraintIndex !== constraintIndex) {
+                            return;
+                        }
+                    }
+
+                    if (TypeBase.isInstantiable(subtype)) {
+                        constraintType = convertToInstantiable(constraintType);
+                    }
+
+                    typesToCombine.push(
+                        addConditionToType(constraintType, [{ typeVar: subtype, constraintIndex }])
+                    );
+                });
+
+                return combineTypes(typesToCombine);
+            }
+
+            if (subtype.shared.isExemptFromBoundCheck) {
+                return AnyType.create();
+            }
+
+            // Fall back to a bound of "object" if no bound is provided.
+            let boundType = subtype.shared.boundType ?? getObjectTypeFromPrefetched(prefetched);
+
+            // If this is a synthesized self/cls type var, self-specialize its type arguments.
+            if (TypeVarType.isSelf(subtype) && isClass(boundType) && !ClassType.isPseudoGenericClass(boundType)) {
+                boundType = selfSpecializeClass(boundType, {
+                    useBoundTypeVars: TypeVarType.isBound(subtype),
+                });
+            }
+
+            if (subtype.priv.isUnpacked && isClass(boundType)) {
+                boundType = ClassType.cloneForUnpacked(boundType);
+            }
+
+            boundType = TypeBase.isInstantiable(subtype) ? convertToInstantiable(boundType) : boundType;
+
+            return addConditionToType(boundType, [{ typeVar: subtype, constraintIndex: 0 }]);
+        }
+
+        return subtype;
+    });
 }
 
 export function parseStringAsTypeAnnotationNode(node: StringListNode, reportErrors: boolean): ExpressionNode | undefined {
@@ -4296,6 +4424,29 @@ export function partiallySpecializeBoundMethodWithEvaluator(
     }
 
     return undefined;
+}
+
+export function printSrcDestTypesWithEvaluator(
+    srcType: Type,
+    destType: Type,
+    evaluator: TypeEvaluator,
+    options?: PrintTypeOptions
+): { sourceType: string; destType: string } {
+    const simpleSrcType = evaluator.printType(srcType, options);
+    const simpleDestType = evaluator.printType(destType, options);
+
+    if (simpleSrcType !== simpleDestType) {
+        return { sourceType: simpleSrcType, destType: simpleDestType };
+    }
+
+    const fullSrcType = evaluator.printType(srcType, { ...(options ?? {}), useFullyQualifiedNames: true });
+    const fullDestType = evaluator.printType(destType, { ...(options ?? {}), useFullyQualifiedNames: true });
+
+    if (fullSrcType !== fullDestType) {
+        return { sourceType: fullSrcType, destType: fullDestType };
+    }
+
+    return { sourceType: simpleSrcType, destType: simpleDestType };
 }
 
 export function applyTypeArgToTypeVarWithEvaluator(
