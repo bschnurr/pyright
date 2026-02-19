@@ -23,8 +23,8 @@ import { isAnnotationEvaluationPostponed } from '../analyzerFileInfo';
 import { Declaration, DeclarationType } from '../declaration';
 import { ArgWithExpression, AssignTypeFlags, CallResult, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, PrefetchedTypes, PrintTypeOptions, Reachability, SymbolDeclInfo, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isOverloaded, isParamSpec, isPositionOnlySeparator, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, ModuleType, NeverType, OverloadedType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeCondition, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnionType, UnknownType, Variance } from '../types';
-import { addConditionToType, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, getGeneratorTypeArgs, getTypeCondition, getTypeVarArgsRecursive, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralType, isNoneInstance, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeTypeVarsBound, mapSignatures, mapSubtypes, MemberAccessFlags, requiresSpecialization, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeWithDefaultTypeArgs, specializeTupleClass, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
+import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isOverloaded, isParamSpec, isPositionOnlySeparator, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, maxTypeRecursionCount, ModuleType, NeverType, OverloadedType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeCategory, TypeCondition, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnionType, UnknownType, Variance } from '../types';
+import { addConditionToType, combineVariances, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, getGeneratorTypeArgs, getTypeCondition, getTypeVarArgsRecursive, invertVariance, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralType, isNoneInstance, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeTypeVarsBound, mapSignatures, mapSubtypes, MemberAccessFlags, requiresSpecialization, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeWithDefaultTypeArgs, specializeTupleClass, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails, ParamKind, ParamListDetails, VirtualParamDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 import { makeTupleObject } from '../tuples';
@@ -709,6 +709,137 @@ export function makeTopLevelTypeVarsConcreteWithPrefetched(
 
         return subtype;
     });
+}
+
+export function inferVarianceForTypeAliasWithEvaluator(
+    type: Type,
+    evaluator: TypeEvaluator
+): Variance[] | undefined {
+    const aliasInfo = type.props?.typeAliasInfo;
+
+    // If this isn't a generic type alias, there's nothing to do.
+    if (!aliasInfo || !aliasInfo.shared.typeParams) {
+        return undefined;
+    }
+
+    // Is the computed variance info already cached?
+    if (aliasInfo.shared.computedVariance) {
+        return aliasInfo.shared.computedVariance;
+    }
+
+    const typeParams = aliasInfo.shared.typeParams;
+
+    // Start with all of the usage variances unknown.
+    const usageVariances: Variance[] = typeParams.map(() => Variance.Unknown);
+
+    // Prepopulate the cached value for the type alias to handle
+    // recursive type aliases.
+    aliasInfo.shared.computedVariance = usageVariances;
+
+    // Traverse the type alias type definition and adjust the usage
+    // variances accordingly.
+    updateUsageVariancesRecursiveWithEvaluator(type, typeParams, usageVariances, Variance.Covariant, evaluator);
+
+    return usageVariances;
+}
+
+function updateUsageVariancesRecursiveWithEvaluator(
+    type: Type,
+    typeAliasTypeParams: TypeVarType[],
+    usageVariances: Variance[],
+    varianceContext: Variance,
+    evaluator: TypeEvaluator,
+    pendingTypes: Type[] = [],
+    recursionCount = 0
+) {
+    if (recursionCount > maxTypeRecursionCount) {
+        return;
+    }
+
+    const transformedType = transformPossibleRecursiveTypeAlias(type);
+    const isRecursiveTypeAlias = transformedType !== type;
+
+    // If this is a recursive type alias, see if we've already recursed
+    // seen it once before in the recursion stack. If so, don't recurse
+    // further.
+    if (isRecursiveTypeAlias) {
+        const pendingOverlaps = pendingTypes.filter((pendingType) => isTypeSame(pendingType, type));
+        if (pendingOverlaps.length > 1) {
+            return;
+        }
+
+        pendingTypes.push(type);
+    }
+
+    recursionCount++;
+
+    // Define a helper function that performs the actual usage variant update.
+    function updateUsageVarianceForType(type: Type, variance: Variance) {
+        doForEachSubtype(type, (subtype) => {
+            const typeParamIndex = typeAliasTypeParams.findIndex((param) => isTypeSame(param, subtype));
+            if (typeParamIndex >= 0) {
+                usageVariances[typeParamIndex] = combineVariances(usageVariances[typeParamIndex], variance);
+            } else {
+                updateUsageVariancesRecursiveWithEvaluator(
+                    subtype,
+                    typeAliasTypeParams,
+                    usageVariances,
+                    variance,
+                    evaluator,
+                    pendingTypes,
+                    recursionCount
+                );
+            }
+        });
+    }
+
+    doForEachSubtype(transformedType, (subtype) => {
+        if (subtype.category === TypeCategory.Function) {
+            subtype.shared.parameters.forEach((param, index) => {
+                const paramType = FunctionType.getParamType(subtype, index);
+                updateUsageVarianceForType(paramType, invertVariance(varianceContext));
+            });
+
+            const returnType = FunctionType.getEffectiveReturnType(subtype);
+            if (returnType) {
+                updateUsageVarianceForType(returnType, varianceContext);
+            }
+        } else if (subtype.category === TypeCategory.Class) {
+            if (subtype.priv.typeArgs) {
+                // If the class includes type parameters that uses auto variance,
+                // compute the calculated variance.
+                evaluator.inferVarianceForClass(subtype);
+
+                // Is the class specialized using any type arguments that correspond to
+                // the type alias' type parameters?
+                subtype.priv.typeArgs.forEach((typeArg, classParamIndex) => {
+                    if (isTupleClass(subtype)) {
+                        updateUsageVarianceForType(typeArg, varianceContext);
+                    } else if (classParamIndex < subtype.shared.typeParams.length) {
+                        const classTypeParam = subtype.shared.typeParams[classParamIndex];
+                        if (isUnpackedClass(typeArg) && typeArg.priv.tupleTypeArgs) {
+                            typeArg.priv.tupleTypeArgs.forEach((tupleTypeArg) => {
+                                updateUsageVarianceForType(tupleTypeArg.type, Variance.Invariant);
+                            });
+                        } else {
+                            const effectiveVariance =
+                                classTypeParam.priv.computedVariance ?? classTypeParam.shared.declaredVariance;
+                            updateUsageVarianceForType(
+                                typeArg,
+                                varianceContext === Variance.Contravariant
+                                    ? invertVariance(effectiveVariance)
+                                    : effectiveVariance
+                            );
+                        }
+                    }
+                });
+            }
+        }
+    });
+
+    if (isRecursiveTypeAlias) {
+        pendingTypes.pop();
+    }
 }
 
 export function parseStringAsTypeAnnotationNode(node: StringListNode, reportErrors: boolean): ExpressionNode | undefined {
