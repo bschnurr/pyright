@@ -23272,94 +23272,94 @@ export function createTypeEvaluator(
             // this function so we can analyze it separately without polluting
             // the main type cache.
             const prevTypeCache = returnTypeInferenceTypeCache;
-            TypeEvaluatorCore.pushReturnTypeInferenceContextFrame(
+            TypeEvaluatorCore.runWithReturnTypeInferenceContextFrame(
                 returnTypeInferenceContextStack,
                 TypeEvaluatorCore.createReturnTypeInferenceContextFrame(
                     functionNode,
                     codeFlowEngine.createCodeFlowAnalyzer()
-                )
-            );
+                ),
+                () => {
+                    try {
+                        returnTypeInferenceTypeCache = new Map<number, TypeCacheEntry>();
 
-            try {
-                returnTypeInferenceTypeCache = new Map<number, TypeCacheEntry>();
+                        let allArgTypesAreUnknown = true;
+                        functionNode.d.params.forEach((param, index) => {
+                            if (param.d.name) {
+                                let paramType: Type | undefined;
+                                const arg = args.find((arg) => param.d.name!.d.value === arg.paramName);
 
-                let allArgTypesAreUnknown = true;
-                functionNode.d.params.forEach((param, index) => {
-                    if (param.d.name) {
-                        let paramType: Type | undefined;
-                        const arg = args.find((arg) => param.d.name!.d.value === arg.paramName);
-
-                        if (arg && arg.argument.valueExpression) {
-                            paramType = getTypeOfExpression(arg.argument.valueExpression).type;
-                            if (!isUnknown(paramType)) {
-                                allArgTypesAreUnknown = false;
-                            }
-                        } else if (param.d.defaultValue) {
-                            paramType = getTypeOfExpression(param.d.defaultValue).type;
-                            if (!isUnknown(paramType)) {
-                                allArgTypesAreUnknown = false;
-                            }
-                        } else if (index === 0) {
-                            // If this is an instance or class method, use the implied
-                            // parameter type for the "self" or "cls" parameter.
-                            if (
-                                FunctionType.isInstanceMethod(functionTypeResult.functionType) ||
-                                FunctionType.isClassMethod(functionTypeResult.functionType)
-                            ) {
-                                if (functionTypeResult.functionType.shared.parameters.length > 0) {
-                                    if (functionNode.d.params[0].d.name) {
-                                        paramType = FunctionType.getParamType(functionTypeResult.functionType, 0);
+                                if (arg && arg.argument.valueExpression) {
+                                    paramType = getTypeOfExpression(arg.argument.valueExpression).type;
+                                    if (!isUnknown(paramType)) {
+                                        allArgTypesAreUnknown = false;
+                                    }
+                                } else if (param.d.defaultValue) {
+                                    paramType = getTypeOfExpression(param.d.defaultValue).type;
+                                    if (!isUnknown(paramType)) {
+                                        allArgTypesAreUnknown = false;
+                                    }
+                                } else if (index === 0) {
+                                    // If this is an instance or class method, use the implied
+                                    // parameter type for the "self" or "cls" parameter.
+                                    if (
+                                        FunctionType.isInstanceMethod(functionTypeResult.functionType) ||
+                                        FunctionType.isClassMethod(functionTypeResult.functionType)
+                                    ) {
+                                        if (functionTypeResult.functionType.shared.parameters.length > 0) {
+                                            if (functionNode.d.params[0].d.name) {
+                                                paramType = FunctionType.getParamType(functionTypeResult.functionType, 0);
+                                            }
+                                        }
                                     }
                                 }
+
+                                if (!paramType) {
+                                    paramType = UnknownType.create();
+                                }
+
+                                if (stripLiteralArgTypes) {
+                                    paramType = stripTypeForm(
+                                        convertSpecialFormToRuntimeValue(
+                                            stripLiteralValue(paramType),
+                                            EvalFlags.None,
+                                            /* convertModule */ true
+                                        )
+                                    );
+                                }
+
+                                paramTypes.push(paramType);
+                                writeTypeCache(param.d.name, { type: paramType }, EvalFlags.None);
+                            }
+                        });
+
+                        // Don't bother trying to determine the contextual return
+                        // type if none of the argument types are known.
+                        if (!allArgTypesAreUnknown) {
+                            // See if the return type is already cached. If so, skip the
+                            // inference step, which is potentially very expensive.
+                            const cacheEntry = functionTypeResult.functionType.priv.callSiteReturnTypeCache?.find((entry) => {
+                                return (
+                                    entry.paramTypes.length === paramTypes.length &&
+                                    entry.paramTypes.every((t, i) => isTypeSame(t, paramTypes[i]))
+                                );
+                            });
+
+                            if (cacheEntry) {
+                                contextualReturnType = cacheEntry.returnType;
+                                isResultFromCache = true;
+                            } else {
+                                contextualReturnType = inferFunctionReturnType(
+                                    functionNode,
+                                    FunctionType.isAbstractMethod(type),
+                                    callSiteInfo?.errorNode
+                                )?.type;
                             }
                         }
-
-                        if (!paramType) {
-                            paramType = UnknownType.create();
-                        }
-
-                        if (stripLiteralArgTypes) {
-                            paramType = stripTypeForm(
-                                convertSpecialFormToRuntimeValue(
-                                    stripLiteralValue(paramType),
-                                    EvalFlags.None,
-                                    /* convertModule */ true
-                                )
-                            );
-                        }
-
-                        paramTypes.push(paramType);
-                        writeTypeCache(param.d.name, { type: paramType }, EvalFlags.None);
-                    }
-                });
-
-                // Don't bother trying to determine the contextual return
-                // type if none of the argument types are known.
-                if (!allArgTypesAreUnknown) {
-                    // See if the return type is already cached. If so, skip the
-                    // inference step, which is potentially very expensive.
-                    const cacheEntry = functionTypeResult.functionType.priv.callSiteReturnTypeCache?.find((entry) => {
-                        return (
-                            entry.paramTypes.length === paramTypes.length &&
-                            entry.paramTypes.every((t, i) => isTypeSame(t, paramTypes[i]))
-                        );
-                    });
-
-                    if (cacheEntry) {
-                        contextualReturnType = cacheEntry.returnType;
-                        isResultFromCache = true;
-                    } else {
-                        contextualReturnType = inferFunctionReturnType(
-                            functionNode,
-                            FunctionType.isAbstractMethod(type),
-                            callSiteInfo?.errorNode
-                        )?.type;
+                    } finally {
+                        returnTypeInferenceTypeCache = prevTypeCache;
                     }
                 }
-            } finally {
-                TypeEvaluatorCore.popReturnTypeInferenceContextFrame(returnTypeInferenceContextStack);
-                returnTypeInferenceTypeCache = prevTypeCache;
-            }
+            );
         });
 
         if (contextualReturnType) {

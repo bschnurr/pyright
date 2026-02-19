@@ -82,3 +82,16 @@ export function popReturnTypeInferenceContextFrame<T extends ReturnTypeInference
 ) {
     return returnTypeInferenceContextStack.pop();
 }
+
+export function runWithReturnTypeInferenceContextFrame<T extends ReturnTypeInferenceContextFrame, TResult>(
+    returnTypeInferenceContextStack: T[],
+    frame: T,
+    callback: () => TResult
+) {
+    pushReturnTypeInferenceContextFrame(returnTypeInferenceContextStack, frame);
+    try {
+        return callback();
+    } finally {
+        popReturnTypeInferenceContextFrame(returnTypeInferenceContextStack);
+    }
+}
