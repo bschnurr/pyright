@@ -65,12 +65,14 @@ This module accepts a `DiagnosticsContext` so it can operate without importing t
   - `diagnostics.ts` extraction.
   - `flowAnalysis.ts` helpers (flow graph delegators, constrained typevar narrowing, `printControlFlowGraph`).
   - `narrowing.ts` helpers for assignment-based narrowing, literal/type-guard stripping, truthiness handling (including direct-reference and `not` matching), `None`/ellipsis comparisons, class/literal equality comparisons (including equality matchers), discriminated equality helpers (tuple/dict/member), tuple length/containment/TypedDict-key narrowing, len(x) and `in`-operator comparison matching, call-expression matching for isinstance/issubclass, bool, and TypeGuard/TypeIs, literal enumeration, `type(x) is y` matching/narrowing, `X is <literal/class>` matching, indexed-literal and member-access discriminated matching, isinstance/issubclass narrowing (including class-type parsing and name-scope checks), aliased-condition and assignment-expression narrowing, and user-defined TypeGuard/TypeIs narrowing.
-  - `evaluatorCore.ts` extraction (60 exported functions, ~1,376 lines):
+  - `evaluatorCore.ts` extraction (66 exported functions, ~1,453 lines):
     - **Phase 2** (pure helpers, no closure deps): Return-type-inference context stack (7), symbol resolution stack (5), declaration helpers (3), type alias helpers (4), type checking helpers (3), utility helpers (12), `expandTypedKwargsForFunction`, `setConstraintsForFreeTypeVarsInType`.
     - **Phase 3a** (prefetched context injection): Prefetched type accessors (8), `parseStringAsTypeAnnotationNode`, `convertSpecialFormToRuntimeValueWithPrefetched`.
-    - **Phase 3b** (`AddDiagnosticFn` callback injection): `validateTypeVarTupleIsUnpackedCheck`, `getBooleanValueFromNode`, `reportUseOfTypeCheckOnlySymbol`, `enforceClassTypeVarScopeCheck`, `createClassVarTypeFromArgs`, `createFinalTypeFromArgs`, `verifyGenericTypeParamsCheck`, `validateTypeParamDefaultCheck`, `transformTypeArgsForParamSpecCheck`, `validateTypeArgCheck`, `createUnpackTypeFromArgs`, `createSpecialTypeFromArgs` (137 lines), `createConcatenateTypeFromArgs`, `createGenericTypeFromArgs`.
-- In progress:
-  - Scanning for additional functions unlocked by cascading extractions.
+    - **Phase 3b** (`AddDiagnosticFn` callback injection): `validateTypeVarTupleIsUnpackedCheck`, `getBooleanValueFromNode`, `reportUseOfTypeCheckOnlySymbol`, `enforceClassTypeVarScopeCheck`, `createClassVarTypeFromArgs`, `createFinalTypeFromArgs`, `verifyGenericTypeParamsCheck`, `validateTypeParamDefaultCheck`, `transformTypeArgsForParamSpecCheck`, `validateTypeArgCheck`, `createUnpackTypeFromArgs`, `createSpecialTypeFromArgs` (137 lines), `createConcatenateTypeFromArgs`, `createGenericTypeFromArgs`, `createAnnotatedTypeFromArgs`, `validateAnnotatedMetadataCheck`, `createCallableTypeFromArgs` (153 lines), `createOptionalTypeFromArgs`, `createTypeFormTypeFromArgs`, `createTypeGuardTypeFromArgs`.
+- Current state:
+  - `typeEvaluator.ts` reduced from ~28,000 to ~23,549 lines (~4,451 lines extracted or removed).
+  - All remaining functions in `typeEvaluator.ts` depend on deep closure state (`getTypeOfExpression`, `assignType`, `writeTypeCache`, `evaluatorInterface`, etc.) and cannot be extracted without broader architectural changes.
+  - Phase 3 extraction is effectively complete for the `AddDiagnosticFn` and `prefetched` context-injection patterns.
 
 ## Planned breakdown (future slices)
 
