@@ -23272,10 +23272,13 @@ export function createTypeEvaluator(
             // this function so we can analyze it separately without polluting
             // the main type cache.
             const prevTypeCache = returnTypeInferenceTypeCache;
-            TypeEvaluatorCore.pushReturnTypeInferenceContextFrame(returnTypeInferenceContextStack, {
-                functionNode,
-                codeFlowAnalyzer: codeFlowEngine.createCodeFlowAnalyzer(),
-            });
+            TypeEvaluatorCore.pushReturnTypeInferenceContextFrame(
+                returnTypeInferenceContextStack,
+                TypeEvaluatorCore.createReturnTypeInferenceContextFrame(
+                    functionNode,
+                    codeFlowEngine.createCodeFlowAnalyzer()
+                )
+            );
 
             try {
                 returnTypeInferenceTypeCache = new Map<number, TypeCacheEntry>();

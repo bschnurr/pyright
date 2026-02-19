@@ -67,6 +67,16 @@ export function pushReturnTypeInferenceContextFrame<T extends ReturnTypeInferenc
     returnTypeInferenceContextStack.push(frame);
 }
 
+export function createReturnTypeInferenceContextFrame(
+    functionNode: ParseNode,
+    codeFlowAnalyzer: unknown
+): ReturnTypeInferenceContextFrame {
+    return {
+        functionNode,
+        codeFlowAnalyzer,
+    };
+}
+
 export function popReturnTypeInferenceContextFrame<T extends ReturnTypeInferenceContextFrame>(
     returnTypeInferenceContextStack: T[]
 ) {
