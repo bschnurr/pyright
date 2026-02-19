@@ -858,25 +858,11 @@ export function createTypeEvaluator(
     }
 
     function pushSymbolResolution(symbol: Symbol, declaration: Declaration) {
-        const index = getIndexOfSymbolResolution(symbol, declaration);
-        if (index >= 0) {
-            // Mark all of the entries between these two as invalid.
-            for (let i = index + 1; i < symbolResolutionStack.length; i++) {
-                symbolResolutionStack[i].isResultValid = false;
-            }
-            return false;
-        }
-
-        symbolResolutionStack.push({
-            symbolId: symbol.id,
-            declaration,
-            isResultValid: true,
-        });
-        return true;
+        return TypeEvaluatorCore.tryPushSymbolResolutionEntry(symbolResolutionStack, symbol.id, declaration);
     }
 
     function popSymbolResolution(symbol: Symbol) {
-        const poppedEntry = symbolResolutionStack.pop()!;
+        const poppedEntry = TypeEvaluatorCore.popSymbolResolutionEntry(symbolResolutionStack)!;
         assert(poppedEntry.symbolId === symbol.id);
         return poppedEntry.isResultValid;
     }

@@ -18,6 +18,11 @@ export interface SymbolResolutionStackEntryLike {
     declaration: unknown;
 }
 
+export interface MutableSymbolResolutionStackEntryLike extends SymbolResolutionStackEntryLike {
+    isResultValid: boolean;
+    partialType?: unknown;
+}
+
 export function isNodeInReturnTypeInferenceContext(
     node: ParseNode,
     returnTypeInferenceContextStack: readonly ReturnTypeInferenceContextFrame[]
@@ -107,4 +112,29 @@ export function getSymbolResolutionIndex(
     declaration: unknown
 ) {
     return symbolResolutionStack.findIndex((entry) => entry.symbolId === symbolId && entry.declaration === declaration);
+}
+
+export function tryPushSymbolResolutionEntry(
+    symbolResolutionStack: MutableSymbolResolutionStackEntryLike[],
+    symbolId: number,
+    declaration: unknown
+) {
+    const index = getSymbolResolutionIndex(symbolResolutionStack, symbolId, declaration);
+    if (index >= 0) {
+        for (let i = index + 1; i < symbolResolutionStack.length; i++) {
+            symbolResolutionStack[i].isResultValid = false;
+        }
+        return false;
+    }
+
+    symbolResolutionStack.push({
+        symbolId,
+        declaration,
+        isResultValid: true,
+    });
+    return true;
+}
+
+export function popSymbolResolutionEntry<T extends MutableSymbolResolutionStackEntryLike>(symbolResolutionStack: T[]) {
+    return symbolResolutionStack.pop();
 }
