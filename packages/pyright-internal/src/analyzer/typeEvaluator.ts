@@ -485,11 +485,7 @@ const nonSubscriptableBuiltinTypes: Map<string, PythonVersion> = new Map([
 // Some types that do not inherit from others are still considered
 // "compatible" based on the Python spec. These are sometimes referred
 // to as "type promotions".
-const typePromotions: Map<string, string[]> = new Map([
-    ['builtins.float', ['builtins.int']],
-    ['builtins.complex', ['builtins.float', 'builtins.int']],
-    ['builtins.bytes', ['builtins.bytearray', 'builtins.memoryview']],
-]);
+const typePromotions = TypeEvaluatorCore.typePromotions;
 
 interface SymbolResolutionStackEntry {
     // The symbol ID and declaration being resolved.
@@ -3481,38 +3477,7 @@ export function createTypeEvaluator(
 
     // If the type includes promotion types, expand these to their constituent types.
     function expandPromotionTypes(node: ParseNode, type: Type, excludeBytes = false): Type {
-        return mapSubtypes(type, (subtype) => {
-            if (!isClass(subtype) || !subtype.priv.includePromotions || subtype.priv.literalValue !== undefined) {
-                return subtype;
-            }
-
-            if (excludeBytes && ClassType.isBuiltIn(subtype, 'bytes')) {
-                return subtype;
-            }
-
-            const typesToCombine: Type[] = [ClassType.cloneRemoveTypePromotions(subtype)];
-
-            const promotionTypeNames = typePromotions.get(subtype.shared.fullName);
-            if (promotionTypeNames) {
-                for (const promotionTypeName of promotionTypeNames) {
-                    const nameSplit = promotionTypeName.split('.');
-                    let promotionSubtype = getBuiltInType(node, nameSplit[nameSplit.length - 1]);
-
-                    if (promotionSubtype && isInstantiableClass(promotionSubtype)) {
-                        promotionSubtype = ClassType.cloneRemoveTypePromotions(promotionSubtype);
-
-                        if (isClassInstance(subtype)) {
-                            promotionSubtype = ClassType.cloneAsInstance(promotionSubtype);
-                        }
-
-                        promotionSubtype = addConditionToType(promotionSubtype, subtype.props?.condition);
-                        typesToCombine.push(promotionSubtype);
-                    }
-                }
-            }
-
-            return combineTypes(typesToCombine);
-        });
+        return TypeEvaluatorCore.expandPromotionTypesWithEvaluator(evaluatorInterface, node, type, excludeBytes);
     }
 
     // Replaces all of the top-level TypeVars (as opposed to TypeVars
@@ -19479,86 +19444,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfExpressionExpectingType(node: ExpressionNode, options?: ExpectedTypeOptions): TypeResult {
-        let flags = EvalFlags.InstantiableType | EvalFlags.StrLiteralAsType;
-
-        if (options?.allowTypeVarsWithoutScopeId) {
-            flags |= EvalFlags.AllowTypeVarWithoutScopeId;
-        }
-
-        if (options?.typeVarGetsCurScope) {
-            flags |= EvalFlags.TypeVarGetsCurScope;
-        }
-
-        if (options?.enforceClassTypeVarScope) {
-            flags |= EvalFlags.EnforceClassTypeVarScope;
-        }
-
-        const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-        if ((isAnnotationEvaluationPostponed(fileInfo) || options?.forwardRefs) && !options?.runtimeTypeExpression) {
-            flags |= EvalFlags.ForwardRefs;
-        } else if (options?.parsesStringLiteral) {
-            flags |= EvalFlags.ParsesStringLiteral;
-        }
-
-        if (!options?.allowFinal) {
-            flags |= EvalFlags.NoFinal;
-        }
-
-        if (options?.allowRequired) {
-            flags |= EvalFlags.AllowRequired | EvalFlags.TypeExpression;
-        }
-
-        if (options?.allowReadOnly) {
-            flags |= EvalFlags.AllowReadOnly | EvalFlags.TypeExpression;
-        }
-
-        if (options?.allowUnpackedTuple) {
-            flags |= EvalFlags.AllowUnpackedTuple;
-        } else {
-            flags |= EvalFlags.NoTypeVarTuple;
-        }
-
-        if (options?.allowUnpackedTypedDict) {
-            flags |= EvalFlags.AllowUnpackedTypedDict;
-        }
-
-        if (!options?.allowParamSpec) {
-            flags |= EvalFlags.NoParamSpec;
-        }
-
-        if (options?.typeExpression) {
-            flags |= EvalFlags.TypeExpression;
-        }
-
-        if (options?.convertEllipsisToAny) {
-            flags |= EvalFlags.ConvertEllipsisToAny;
-        }
-
-        if (options?.allowEllipsis) {
-            flags |= EvalFlags.AllowEllipsis;
-        }
-
-        if (options?.noNonTypeSpecialForms) {
-            flags |= EvalFlags.NoNonTypeSpecialForms;
-        }
-
-        if (!options?.allowClassVar) {
-            flags |= EvalFlags.NoClassVar;
-        }
-
-        if (options?.varTypeAnnotation) {
-            flags |= EvalFlags.VarTypeAnnotation;
-        }
-
-        if (options?.notParsed) {
-            flags |= EvalFlags.NotParsed;
-        }
-
-        if (options?.typeFormArg) {
-            flags |= EvalFlags.TypeFormArg;
-        }
-
-        return getTypeOfExpression(node, flags);
+        return TypeEvaluatorCore.getTypeOfExpressionExpectingTypeWithEvaluator(evaluatorInterface, node, options);
     }
 
     function getBuiltInType(node: ParseNode, name: string): Type {

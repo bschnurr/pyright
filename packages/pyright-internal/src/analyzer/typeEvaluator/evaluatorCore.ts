@@ -19,11 +19,12 @@ import { assert } from '../../common/debug';
 import { appendArray } from '../../common/collectionUtils';
 import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
+import { isAnnotationEvaluationPostponed } from '../analyzerFileInfo';
 import { Declaration, DeclarationType } from '../declaration';
-import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
+import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, PrefetchedTypes, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
 import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, NeverType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnknownType, Variance } from '../types';
-import { addConditionToType, computeMroLinearization, convertToInstance, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, getTypeCondition, getTypeVarArgsRecursive, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isNoneInstance, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, MemberAccessFlags, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
+import { addConditionToType, computeMroLinearization, convertToInstance, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, getTypeCondition, getTypeVarArgsRecursive, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isNoneInstance, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, mapSubtypes, MemberAccessFlags, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails, ParamKind, ParamListDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 import { makeTupleObject } from '../tuples';
@@ -2906,4 +2907,137 @@ export function computeEffectiveMetaclassWithEvaluator(
     classType.shared.effectiveMetaclass = effectiveMetaclass;
 
     return effectiveMetaclass;
+}
+
+export const typePromotions: Map<string, string[]> = new Map([
+    ['builtins.float', ['builtins.int']],
+    ['builtins.complex', ['builtins.float', 'builtins.int']],
+    ['builtins.bytes', ['builtins.bytearray', 'builtins.memoryview']],
+]);
+
+export function expandPromotionTypesWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: ParseNode,
+    type: Type,
+    excludeBytes = false
+): Type {
+    return mapSubtypes(type, (subtype) => {
+        if (!isClass(subtype) || !subtype.priv.includePromotions || subtype.priv.literalValue !== undefined) {
+            return subtype;
+        }
+
+        if (excludeBytes && ClassType.isBuiltIn(subtype, 'bytes')) {
+            return subtype;
+        }
+
+        const typesToCombine: Type[] = [ClassType.cloneRemoveTypePromotions(subtype)];
+
+        const promotionTypeNames = typePromotions.get(subtype.shared.fullName);
+        if (promotionTypeNames) {
+            for (const promotionTypeName of promotionTypeNames) {
+                const nameSplit = promotionTypeName.split('.');
+                let promotionSubtype = evaluator.getBuiltInType(node, nameSplit[nameSplit.length - 1]);
+
+                if (promotionSubtype && isInstantiableClass(promotionSubtype)) {
+                    promotionSubtype = ClassType.cloneRemoveTypePromotions(promotionSubtype);
+
+                    if (isClassInstance(subtype)) {
+                        promotionSubtype = ClassType.cloneAsInstance(promotionSubtype);
+                    }
+
+                    promotionSubtype = addConditionToType(promotionSubtype, subtype.props?.condition);
+                    typesToCombine.push(promotionSubtype);
+                }
+            }
+        }
+
+        return combineTypes(typesToCombine);
+    });
+}
+
+export function getTypeOfExpressionExpectingTypeWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: ExpressionNode,
+    options?: ExpectedTypeOptions
+): TypeResult {
+    let flags = EvalFlags.InstantiableType | EvalFlags.StrLiteralAsType;
+
+    if (options?.allowTypeVarsWithoutScopeId) {
+        flags |= EvalFlags.AllowTypeVarWithoutScopeId;
+    }
+
+    if (options?.typeVarGetsCurScope) {
+        flags |= EvalFlags.TypeVarGetsCurScope;
+    }
+
+    if (options?.enforceClassTypeVarScope) {
+        flags |= EvalFlags.EnforceClassTypeVarScope;
+    }
+
+    const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
+    if ((isAnnotationEvaluationPostponed(fileInfo) || options?.forwardRefs) && !options?.runtimeTypeExpression) {
+        flags |= EvalFlags.ForwardRefs;
+    } else if (options?.parsesStringLiteral) {
+        flags |= EvalFlags.ParsesStringLiteral;
+    }
+
+    if (!options?.allowFinal) {
+        flags |= EvalFlags.NoFinal;
+    }
+
+    if (options?.allowRequired) {
+        flags |= EvalFlags.AllowRequired | EvalFlags.TypeExpression;
+    }
+
+    if (options?.allowReadOnly) {
+        flags |= EvalFlags.AllowReadOnly | EvalFlags.TypeExpression;
+    }
+
+    if (options?.allowUnpackedTuple) {
+        flags |= EvalFlags.AllowUnpackedTuple;
+    } else {
+        flags |= EvalFlags.NoTypeVarTuple;
+    }
+
+    if (options?.allowUnpackedTypedDict) {
+        flags |= EvalFlags.AllowUnpackedTypedDict;
+    }
+
+    if (!options?.allowParamSpec) {
+        flags |= EvalFlags.NoParamSpec;
+    }
+
+    if (options?.typeExpression) {
+        flags |= EvalFlags.TypeExpression;
+    }
+
+    if (options?.convertEllipsisToAny) {
+        flags |= EvalFlags.ConvertEllipsisToAny;
+    }
+
+    if (options?.allowEllipsis) {
+        flags |= EvalFlags.AllowEllipsis;
+    }
+
+    if (options?.noNonTypeSpecialForms) {
+        flags |= EvalFlags.NoNonTypeSpecialForms;
+    }
+
+    if (!options?.allowClassVar) {
+        flags |= EvalFlags.NoClassVar;
+    }
+
+    if (options?.varTypeAnnotation) {
+        flags |= EvalFlags.VarTypeAnnotation;
+    }
+
+    if (options?.notParsed) {
+        flags |= EvalFlags.NotParsed;
+    }
+
+    if (options?.typeFormArg) {
+        flags |= EvalFlags.TypeFormArg;
+    }
+
+    return evaluator.getTypeOfExpression(node, flags);
 }
