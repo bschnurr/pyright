@@ -13941,34 +13941,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfYieldFrom(node: YieldFromNode): TypeResult {
-        const yieldFromTypeResult = getTypeOfExpression(node.d.expr);
-        const yieldFromType = yieldFromTypeResult.type;
-
-        const returnedType = mapSubtypes(yieldFromType, (yieldFromSubtype) => {
-            // Is the expression a Generator type?
-            let generatorTypeArgs = getGeneratorTypeArgs(yieldFromSubtype);
-            if (generatorTypeArgs) {
-                return generatorTypeArgs.length >= 2 ? generatorTypeArgs[2] : UnknownType.create();
-            }
-
-            // Handle old-style (pre-await) Coroutines as a special case.
-            if (
-                isClassInstance(yieldFromSubtype) &&
-                ClassType.isBuiltIn(yieldFromSubtype, ['Coroutine', 'CoroutineType'])
-            ) {
-                return UnknownType.create();
-            }
-
-            // Handle simple iterables.
-            const iterableType =
-                getTypeOfIterable(yieldFromTypeResult, /* isAsync */ false, node)?.type ?? UnknownType.create();
-
-            // Does the iterable return a Generator?
-            generatorTypeArgs = getGeneratorTypeArgs(iterableType);
-            return generatorTypeArgs && generatorTypeArgs.length >= 2 ? generatorTypeArgs[2] : UnknownType.create();
-        });
-
-        return { type: returnedType };
+        return TypeEvaluatorCore.getTypeOfYieldFromWithEvaluator(evaluatorInterface, node);
     }
 
     function getTypeOfLambda(node: LambdaNode, inferenceContext: InferenceContext | undefined): TypeResult {
@@ -20561,63 +20534,7 @@ export function createTypeEvaluator(
     // Applies some heuristics to determine whether it's likely that all Python
     // type checkers will infer the same type.
     function isUnambiguousInference(symbol: Symbol, decl: Declaration, inferredType: Type): boolean {
-        const nonSlotsDecls = symbol.getDeclarations().filter((decl) => {
-            return decl.type !== DeclarationType.Variable || !decl.isInferenceAllowedInPyTyped;
-        });
-
-        // Any symbol with more than one assignment is considered ambiguous.
-        if (nonSlotsDecls.length > 1) {
-            return false;
-        }
-
-        if (decl.type !== DeclarationType.Variable) {
-            return false;
-        }
-
-        // If there are no non-slots declarations, don't mark the inferred type as ambiguous.
-        if (nonSlotsDecls.length === 0) {
-            return true;
-        }
-
-        // TypeVar definitions don't require a declaration.
-        if (isTypeVar(inferredType)) {
-            return true;
-        }
-
-        let assignmentNode: AssignmentNode | undefined;
-
-        const parentNode = decl.node.parent;
-        if (parentNode) {
-            // Is this a simple assignment (x = y) or an assignment of an instance variable (self.x = y)?
-            if (parentNode.nodeType === ParseNodeType.Assignment) {
-                assignmentNode = parentNode;
-            } else if (
-                parentNode.nodeType === ParseNodeType.MemberAccess &&
-                parentNode.parent?.nodeType === ParseNodeType.Assignment
-            ) {
-                assignmentNode = parentNode.parent;
-            }
-        }
-
-        if (!assignmentNode) {
-            return false;
-        }
-
-        const assignedType = getTypeOfExpression(assignmentNode.d.rightExpr).type;
-
-        // Assume that literal values will always result in the same inferred type.
-        if (isClassInstance(assignedType) && isLiteralType(assignedType)) {
-            return true;
-        }
-
-        // If the assignment is a simple name corresponding to an unambiguous
-        // type, we'll assume the resulting variable will receive the same
-        // unambiguous type.
-        if (assignmentNode.d.rightExpr.nodeType === ParseNodeType.Name && !TypeBase.isAmbiguous(assignedType)) {
-            return true;
-        }
-
-        return false;
+        return TypeEvaluatorCore.isUnambiguousInferenceWithEvaluator(evaluatorInterface, symbol, decl, inferredType);
     }
 
     // If the specified declaration is an alias declaration that points to a symbol,
@@ -25512,36 +25429,7 @@ export function createTypeEvaluator(
     }
 
     function isPossibleTypeDictFactoryCall(decl: Declaration) {
-        if (
-            decl.type !== DeclarationType.Variable ||
-            !decl.node.parent ||
-            decl.node.parent.nodeType !== ParseNodeType.Assignment ||
-            decl.node.parent.d.rightExpr?.nodeType !== ParseNodeType.Call
-        ) {
-            return false;
-        }
-
-        const callLeftNode = decl.node.parent.d.rightExpr.d.leftExpr;
-
-        // Use a simple heuristic to determine whether this is potentially
-        // a call to the TypedDict call. This avoids the expensive (and potentially
-        // recursive) call to getTypeOfExpression in cases where it's not needed.
-        if (
-            (callLeftNode.nodeType === ParseNodeType.Name && callLeftNode.d.value) === 'TypedDict' ||
-            (callLeftNode.nodeType === ParseNodeType.MemberAccess &&
-                callLeftNode.d.member.d.value === 'TypedDict' &&
-                callLeftNode.d.leftExpr.nodeType === ParseNodeType.Name)
-        ) {
-            // See if this is a call to TypedDict. We want to support
-            // recursive type references in a TypedDict call.
-            const callType = getTypeOfExpression(callLeftNode, EvalFlags.CallBaseDefaults).type;
-
-            if (isInstantiableClass(callType) && ClassType.isBuiltIn(callType, 'TypedDict')) {
-                return true;
-            }
-        }
-
-        return false;
+        return TypeEvaluatorCore.isPossibleTypeDictFactoryCallWithEvaluator(evaluatorInterface, decl);
     }
 
     function printObjectTypeForClass(type: ClassType): string {

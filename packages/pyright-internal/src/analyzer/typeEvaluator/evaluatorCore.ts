@@ -10,7 +10,7 @@ import { DiagnosticLevel } from '../../common/configOptions';
 import { Diagnostic, DiagnosticAddendum } from '../../common/diagnostic';
 import { DiagnosticRule } from '../../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../../localization/localize';
-import { ArgumentNode, ExpressionNode, ImportFromAsNode, NameNode, ParamCategory, ParseNode, ParseNodeType, SliceNode, StringListNode, TypeParameterNode } from '../../parser/parseNodes';
+import { ArgumentNode, AssignmentNode, ExpressionNode, ImportFromAsNode, NameNode, ParamCategory, ParseNode, ParseNodeType, SliceNode, StringListNode, TypeParameterNode, YieldFromNode } from '../../parser/parseNodes';
 import { KeywordType, OperatorType } from '../../parser/tokenizerTypes';
 import { Parser, ParseOptions, ParseTextMode } from '../../parser/parser';
 import { TextRange } from '../../common/textRange';
@@ -24,7 +24,7 @@ import { Declaration, DeclarationType } from '../declaration';
 import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, PrefetchedTypes, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
 import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, NeverType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnknownType, Variance } from '../types';
-import { addConditionToType, computeMroLinearization, convertToInstance, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, getTypeCondition, getTypeVarArgsRecursive, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isNoneInstance, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, mapSubtypes, MemberAccessFlags, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
+import { addConditionToType, computeMroLinearization, convertToInstance, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, getGeneratorTypeArgs, getTypeCondition, getTypeVarArgsRecursive, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isLiteralType, isNoneInstance, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, mapSubtypes, MemberAccessFlags, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails, ParamKind, ParamListDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 import { makeTupleObject } from '../tuples';
@@ -3040,4 +3040,130 @@ export function getTypeOfExpressionExpectingTypeWithEvaluator(
     }
 
     return evaluator.getTypeOfExpression(node, flags);
+}
+
+export function getTypeOfYieldFromWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: YieldFromNode
+): TypeResult {
+    const yieldFromTypeResult = evaluator.getTypeOfExpression(node.d.expr);
+    const yieldFromType = yieldFromTypeResult.type;
+
+    const returnedType = mapSubtypes(yieldFromType, (yieldFromSubtype) => {
+        // Is the expression a Generator type?
+        let generatorTypeArgs = getGeneratorTypeArgs(yieldFromSubtype);
+        if (generatorTypeArgs) {
+            return generatorTypeArgs.length >= 2 ? generatorTypeArgs[2] : UnknownType.create();
+        }
+
+        // Handle old-style (pre-await) Coroutines as a special case.
+        if (
+            isClassInstance(yieldFromSubtype) &&
+            ClassType.isBuiltIn(yieldFromSubtype, ['Coroutine', 'CoroutineType'])
+        ) {
+            return UnknownType.create();
+        }
+
+        // Handle simple iterables.
+        const iterableType =
+            evaluator.getTypeOfIterable(yieldFromTypeResult, /* isAsync */ false, node)?.type ?? UnknownType.create();
+
+        // Does the iterable return a Generator?
+        generatorTypeArgs = getGeneratorTypeArgs(iterableType);
+        return generatorTypeArgs && generatorTypeArgs.length >= 2 ? generatorTypeArgs[2] : UnknownType.create();
+    });
+
+    return { type: returnedType };
+}
+
+export function isPossibleTypeDictFactoryCallWithEvaluator(
+    evaluator: TypeEvaluator,
+    decl: Declaration
+) {
+    if (
+        decl.type !== DeclarationType.Variable ||
+        !decl.node.parent ||
+        decl.node.parent.nodeType !== ParseNodeType.Assignment
+    ) {
+        return false;
+    }
+
+    const assignNode = decl.node.parent as AssignmentNode;
+    if (assignNode.d.rightExpr?.nodeType !== ParseNodeType.Call) {
+        return false;
+    }
+
+    const callLeftNode = assignNode.d.rightExpr.d.leftExpr;
+
+    if (
+        (callLeftNode.nodeType === ParseNodeType.Name && callLeftNode.d.value) === 'TypedDict' ||
+        (callLeftNode.nodeType === ParseNodeType.MemberAccess &&
+            callLeftNode.d.member.d.value === 'TypedDict' &&
+            callLeftNode.d.leftExpr.nodeType === ParseNodeType.Name)
+    ) {
+        const callType = evaluator.getTypeOfExpression(callLeftNode, EvalFlags.CallBaseDefaults).type;
+
+        if (isInstantiableClass(callType) && ClassType.isBuiltIn(callType, 'TypedDict')) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+export function isUnambiguousInferenceWithEvaluator(
+    evaluator: TypeEvaluator,
+    symbol: { getDeclarations(): Declaration[] },
+    decl: Declaration,
+    inferredType: Type
+): boolean {
+    const nonSlotsDecls = symbol.getDeclarations().filter((decl) => {
+        return decl.type !== DeclarationType.Variable || !decl.isInferenceAllowedInPyTyped;
+    });
+
+    if (nonSlotsDecls.length > 1) {
+        return false;
+    }
+
+    if (decl.type !== DeclarationType.Variable) {
+        return false;
+    }
+
+    if (nonSlotsDecls.length === 0) {
+        return true;
+    }
+
+    if (isTypeVar(inferredType)) {
+        return true;
+    }
+
+    let assignmentNode: AssignmentNode | undefined;
+
+    const parentNode = decl.node.parent;
+    if (parentNode) {
+        if (parentNode.nodeType === ParseNodeType.Assignment) {
+            assignmentNode = parentNode as AssignmentNode;
+        } else if (
+            parentNode.nodeType === ParseNodeType.MemberAccess &&
+            parentNode.parent?.nodeType === ParseNodeType.Assignment
+        ) {
+            assignmentNode = parentNode.parent as AssignmentNode;
+        }
+    }
+
+    if (!assignmentNode) {
+        return false;
+    }
+
+    const assignedType = evaluator.getTypeOfExpression(assignmentNode.d.rightExpr).type;
+
+    if (isClassInstance(assignedType) && isLiteralType(assignedType)) {
+        return true;
+    }
+
+    if (assignmentNode.d.rightExpr.nodeType === ParseNodeType.Name && !TypeBase.isAmbiguous(assignedType)) {
+        return true;
+    }
+
+    return false;
 }
