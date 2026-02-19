@@ -15383,50 +15383,7 @@ export function createTypeEvaluator(
         typeArgs: TypeResultWithNode[] | undefined,
         flags: EvalFlags
     ): Type {
-        if ((flags & EvalFlags.AllowConcatenate) === 0) {
-            if ((flags & EvalFlags.TypeExpression) !== 0) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.concatenateContext(), errorNode);
-            }
-            return classType;
-        }
-
-        if (!typeArgs || typeArgs.length === 0) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.concatenateTypeArgsMissing(), errorNode);
-        } else {
-            typeArgs.forEach((typeArg, index) => {
-                if (index === typeArgs.length - 1) {
-                    if (!isParamSpec(typeArg.type) && !isEllipsisType(typeArg.type)) {
-                        addDiagnostic(
-                            DiagnosticRule.reportInvalidTypeForm,
-                            LocMessage.concatenateParamSpecMissing(),
-                            typeArg.node
-                        );
-                    }
-                } else {
-                    if (isParamSpec(typeArg.type)) {
-                        addDiagnostic(
-                            DiagnosticRule.reportInvalidTypeForm,
-                            LocMessage.paramSpecContext(),
-                            typeArg.node
-                        );
-                    } else if (isUnpackedTypeVarTuple(typeArg.type)) {
-                        addDiagnostic(
-                            DiagnosticRule.reportInvalidTypeForm,
-                            LocMessage.typeVarTupleContext(),
-                            typeArg.node
-                        );
-                    } else if (isUnpackedClass(typeArg.type)) {
-                        addDiagnostic(
-                            DiagnosticRule.reportInvalidTypeForm,
-                            LocMessage.unpackedArgInTypeArgument(),
-                            typeArg.node
-                        );
-                    }
-                }
-            });
-        }
-
-        return createSpecialType(classType, typeArgs, /* paramLimit */ undefined, /* allowParamSpec */ true);
+        return TypeEvaluatorCore.createConcatenateTypeFromArgs(classType, errorNode, typeArgs, flags, addDiagnostic);
     }
 
     function createAnnotatedType(
@@ -15600,47 +15557,7 @@ export function createTypeEvaluator(
         typeArgs: TypeResultWithNode[] | undefined,
         flags: EvalFlags
     ): Type {
-        if (!typeArgs) {
-            // If no type arguments are provided, the resulting type
-            // depends on whether we're evaluating a type annotation or
-            // we're in some other context.
-            if ((flags & (EvalFlags.TypeExpression | EvalFlags.NoNakedGeneric)) !== 0) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.genericTypeArgMissing(), errorNode);
-            }
-
-            return classType;
-        }
-
-        const uniqueTypeVars: TypeVarType[] = [];
-        if (typeArgs) {
-            // Make sure there's at least one type arg.
-            if (typeArgs.length === 0) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.genericTypeArgMissing(), errorNode);
-            }
-
-            // Make sure that all of the type args are typeVars and are unique.
-            typeArgs.forEach((typeArg) => {
-                if (!isTypeVar(typeArg.type)) {
-                    addDiagnostic(
-                        DiagnosticRule.reportInvalidTypeForm,
-                        LocMessage.genericTypeArgTypeVar(),
-                        typeArg.node
-                    );
-                } else {
-                    if (uniqueTypeVars.some((t) => isTypeSame(t, typeArg.type))) {
-                        addDiagnostic(
-                            DiagnosticRule.reportInvalidTypeForm,
-                            LocMessage.genericTypeArgUnique(),
-                            typeArg.node
-                        );
-                    }
-
-                    uniqueTypeVars.push(typeArg.type);
-                }
-            });
-        }
-
-        return createSpecialType(classType, typeArgs, /* paramLimit */ undefined, /* allowParamSpec */ true);
+        return TypeEvaluatorCore.createGenericTypeFromArgs(classType, errorNode, typeArgs, flags, addDiagnostic);
     }
 
     function transformTypeForTypeAlias(
