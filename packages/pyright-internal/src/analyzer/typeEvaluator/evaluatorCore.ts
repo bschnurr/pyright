@@ -9,7 +9,7 @@
 import { Diagnostic, DiagnosticAddendum } from '../../common/diagnostic';
 import { DiagnosticRule } from '../../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../../localization/localize';
-import { ArgumentNode, ExpressionNode, ImportFromAsNode, NameNode, ParamCategory, ParseNode, ParseNodeType, StringListNode } from '../../parser/parseNodes';
+import { ArgumentNode, ExpressionNode, ImportFromAsNode, NameNode, ParamCategory, ParseNode, ParseNodeType, StringListNode, TypeParameterNode } from '../../parser/parseNodes';
 import { KeywordType, OperatorType } from '../../parser/tokenizerTypes';
 import { Parser, ParseOptions, ParseTextMode } from '../../parser/parser';
 import { TextRange } from '../../common/textRange';
@@ -19,12 +19,13 @@ import { appendArray } from '../../common/collectionUtils';
 import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
-import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
+import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { AnyType, ClassType, combineTypes, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpackedClass, isUnpackedTypeVarTuple, ParamSpecType, TupleTypeArg, Type, TypeBase, TypeVarScopeId, TypeVarTupleType, TypeVarType, UnknownType } from '../types';
-import { convertToInstance, doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
-import { getParamListDetails } from '../parameterUtils';
+import { AnyType, ClassType, combineTypes, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, ParamSpecType, TupleTypeArg, Type, TypeBase, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnknownType } from '../types';
+import { convertToInstance, doForEachSubtype, addTypeVarsToListIfUnique, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
+import { getParamListDetails, ParamKind, ParamListDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
+import { makeTupleObject } from '../tuples';
 
 export interface ReturnTypeInferenceContextFrame {
     functionNode: ParseNode;
@@ -1694,4 +1695,339 @@ export function createTypeGuardTypeFromArgs(
     }
 
     return resultType;
+}
+
+// Phase 4: Functions receiving TypeEvaluator as context
+
+export function adjustTypeArgsForTypeVarTupleWithEvaluator(
+    evaluator: TypeEvaluator,
+    typeArgs: TypeResultWithNode[],
+    typeParams: TypeVarType[],
+    errorNode: ExpressionNode
+): TypeResultWithNode[] {
+    const variadicIndex = typeParams.findIndex((param) => isTypeVarTuple(param));
+
+    let srcUnboundedTupleType: Type | undefined;
+    const findUnboundedTupleIndex = (startArgIndex: number) => {
+        return typeArgs.findIndex((arg, index) => {
+            if (index < startArgIndex) {
+                return false;
+            }
+            if (
+                isUnpackedClass(arg.type) &&
+                arg.type.priv.tupleTypeArgs &&
+                arg.type.priv.tupleTypeArgs.length === 1 &&
+                arg.type.priv.tupleTypeArgs[0].isUnbounded
+            ) {
+                srcUnboundedTupleType = arg.type.priv.tupleTypeArgs[0].type;
+                return true;
+            }
+
+            return false;
+        });
+    };
+    let srcUnboundedTupleIndex = findUnboundedTupleIndex(0);
+
+    if (srcUnboundedTupleIndex >= 0) {
+        const secondUnboundedTupleIndex = findUnboundedTupleIndex(srcUnboundedTupleIndex + 1);
+        if (secondUnboundedTupleIndex >= 0) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportInvalidTypeForm,
+                LocMessage.variadicTypeArgsTooMany(),
+                typeArgs[secondUnboundedTupleIndex].node
+            );
+        }
+    }
+
+    if (
+        srcUnboundedTupleType &&
+        srcUnboundedTupleIndex >= 0 &&
+        variadicIndex >= 0 &&
+        typeArgs.length < typeParams.length
+    ) {
+        while (variadicIndex > srcUnboundedTupleIndex) {
+            typeArgs = [
+                ...typeArgs.slice(0, srcUnboundedTupleIndex),
+                { node: typeArgs[srcUnboundedTupleIndex].node, type: srcUnboundedTupleType },
+                ...typeArgs.slice(srcUnboundedTupleIndex),
+            ];
+            srcUnboundedTupleIndex++;
+        }
+
+        while (typeArgs.length < typeParams.length) {
+            typeArgs = [
+                ...typeArgs.slice(0, srcUnboundedTupleIndex + 1),
+                { node: typeArgs[srcUnboundedTupleIndex].node, type: srcUnboundedTupleType },
+                ...typeArgs.slice(srcUnboundedTupleIndex + 1),
+            ];
+        }
+    }
+
+    if (variadicIndex >= 0) {
+        const variadicTypeVar = typeParams[variadicIndex];
+
+        let typeParamCount = typeParams.length;
+        while (typeParamCount > 0) {
+            const lastTypeParam = typeParams[typeParamCount - 1];
+            if (!isParamSpec(lastTypeParam) || !lastTypeParam.shared.isDefaultExplicit) {
+                break;
+            }
+
+            typeParamCount--;
+        }
+
+        if (variadicIndex < typeArgs.length) {
+            let variadicEndIndex = variadicIndex + 1 + typeArgs.length - typeParamCount;
+            while (variadicEndIndex > variadicIndex) {
+                if (!typeArgs[variadicEndIndex - 1].typeList) {
+                    break;
+                }
+                variadicEndIndex--;
+            }
+            const variadicTypeResults = typeArgs.slice(variadicIndex, variadicEndIndex);
+
+            if (variadicTypeResults.length === 1 && isTypeVarTuple(variadicTypeResults[0].type)) {
+                validateTypeVarTupleIsUnpackedCheck(variadicTypeResults[0].type, variadicTypeResults[0].node, evaluator.addDiagnostic);
+            } else {
+                variadicTypeResults.forEach((arg, index) => {
+                    validateTypeArgCheck(arg, evaluator.addDiagnostic, {
+                        allowEmptyTuple: index === 0,
+                        allowTypeVarTuple: true,
+                        allowUnpackedTuples: true,
+                    });
+                });
+
+                const variadicTypes: TupleTypeArg[] = [];
+                if (variadicTypeResults.length !== 1 || !variadicTypeResults[0].isEmptyTupleShorthand) {
+                    variadicTypeResults.forEach((typeResult) => {
+                        if (isUnpackedClass(typeResult.type) && typeResult.type.priv.tupleTypeArgs) {
+                            appendArray(variadicTypes, typeResult.type.priv.tupleTypeArgs);
+                        } else {
+                            variadicTypes.push({
+                                type: convertToInstance(typeResult.type),
+                                isUnbounded: false,
+                            });
+                        }
+                    });
+                }
+
+                const tupleObject = makeTupleObject(evaluator, variadicTypes, /* isUnpacked */ true);
+
+                typeArgs = [
+                    ...typeArgs.slice(0, variadicIndex),
+                    { node: typeArgs[variadicIndex].node, type: tupleObject },
+                    ...typeArgs.slice(variadicEndIndex, typeArgs.length),
+                ];
+            }
+        } else if (!variadicTypeVar.shared.isDefaultExplicit) {
+            typeArgs.push({
+                node: errorNode,
+                type: makeTupleObject(evaluator, [], /* isUnpacked */ true),
+            });
+        }
+    }
+
+    return typeArgs;
+}
+
+export function transformTypeForTypeAliasWithEvaluator(
+    evaluator: TypeEvaluator,
+    type: Type,
+    errorNode: ExpressionNode,
+    typeAliasPlaceholder: TypeVarType,
+    isPep695TypeVarType: boolean,
+    typeParamNodes?: TypeParameterNode[]
+): Type {
+    if (isTypeAliasPlaceholder(type)) {
+        return type;
+    }
+
+    const sharedInfo = typeAliasPlaceholder.shared.recursiveAlias;
+    assert(sharedInfo !== undefined);
+
+    let typeParams: TypeVarType[] | undefined = sharedInfo.typeParams;
+    if (!typeParams) {
+        typeParams = [];
+        addTypeVarsToListIfUnique(typeParams, getTypeVarArgsRecursive(type));
+        typeParams = typeParams.filter((typeVar) => !typeVar.shared.isSynthesized);
+    }
+
+    typeParams = typeParams.map((typeVar) => {
+        if (TypeBase.isInstance(typeVar)) {
+            return typeVar;
+        }
+        return convertToInstance(typeVar);
+    });
+
+    const firstTypeVarTupleIndex = typeParams.findIndex((typeVar) => isTypeVarTuple(typeVar));
+    if (firstTypeVarTupleIndex >= 0) {
+        const typeVarWithDefaultIndex = typeParams.findIndex(
+            (typeVar, index) =>
+                index > firstTypeVarTupleIndex && !isParamSpec(typeVar) && typeVar.shared.isDefaultExplicit
+        );
+
+        if (typeVarWithDefaultIndex >= 0) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.typeVarWithDefaultFollowsVariadic().format({
+                    typeVarName: typeParams[typeVarWithDefaultIndex].shared.name,
+                    variadicName: typeParams[firstTypeVarTupleIndex].shared.name,
+                }),
+                typeParamNodes ? typeParamNodes[typeVarWithDefaultIndex].d.name : errorNode
+            );
+        }
+    }
+
+    typeParams.forEach((typeParam, index) => {
+        assert(typeParams !== undefined);
+        let bestErrorNode = errorNode;
+        if (typeParamNodes && index < typeParamNodes.length) {
+            bestErrorNode = typeParamNodes[index].d.defaultExpr ?? typeParamNodes[index].d.name;
+        }
+        validateTypeParamDefaultCheck(bestErrorNode, typeParam, typeParams.slice(0, index), sharedInfo.typeVarScopeId, evaluator.addDiagnostic);
+    });
+
+    const variadics = typeParams.filter((param) => isTypeVarTuple(param));
+    if (variadics.length > 1) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportInvalidTypeForm,
+            LocMessage.variadicTypeParamTooManyAlias().format({
+                names: variadics.map((v) => `"${v.shared.name}"`).join(', '),
+            }),
+            errorNode
+        );
+    }
+
+    if (!sharedInfo.isTypeAliasType && !isPep695TypeVarType) {
+        const boundTypeVars = typeParams.filter(
+            (typeVar) =>
+                typeVar.priv.scopeId !== sharedInfo.typeVarScopeId &&
+                typeVar.priv.scopeType === TypeVarScopeType.Class
+        );
+
+        if (boundTypeVars.length > 0) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportInvalidTypeForm,
+                LocMessage.genericTypeAliasBoundTypeVar().format({
+                    names: boundTypeVars.map((t) => `${t.shared.name}`).join(', '),
+                }),
+                errorNode
+            );
+        }
+    }
+
+    if (!TypeBase.isInstantiable(type)) {
+        return type;
+    }
+
+    sharedInfo.typeParams = typeParams.length > 0 ? typeParams : undefined;
+
+    let typeAlias = TypeBase.cloneForTypeAlias(type, {
+        shared: sharedInfo,
+        typeArgs: undefined,
+    });
+
+    if (sharedInfo.isTypeAliasType || isPep695TypeVarType) {
+        const typeAliasTypeClass = evaluator.getTypingType(errorNode, 'TypeAliasType');
+        if (typeAliasTypeClass && isInstantiableClass(typeAliasTypeClass)) {
+            typeAlias = TypeBase.cloneAsSpecialForm(typeAlias, ClassType.cloneAsInstance(typeAliasTypeClass));
+        }
+    }
+
+    if (typeAlias.props?.typeForm) {
+        typeAlias = TypeBase.cloneWithTypeForm(typeAlias, undefined);
+    }
+
+    return typeAlias;
+}
+
+export function adjustSourceParamDetailsForDestVariadicWithEvaluator(
+    evaluator: TypeEvaluator,
+    srcDetails: ParamListDetails,
+    destDetails: ParamListDetails
+) {
+    if (destDetails.argsIndex === undefined) {
+        return;
+    }
+
+    if (!isUnpacked(destDetails.params[destDetails.argsIndex].type)) {
+        return;
+    }
+
+    if (srcDetails.params.length < destDetails.argsIndex) {
+        return;
+    }
+
+    let srcLastToPackIndex = srcDetails.params.findIndex((p, i) => {
+        assert(destDetails.argsIndex !== undefined);
+        return i >= destDetails.argsIndex && p.kind === ParamKind.Keyword;
+    });
+    if (srcLastToPackIndex < 0) {
+        srcLastToPackIndex = srcDetails.params.length;
+    }
+
+    if (srcDetails.argsIndex !== undefined && destDetails.argsIndex > srcDetails.argsIndex) {
+        return;
+    }
+
+    const destFirstNonPositional = destDetails.firstKeywordOnlyIndex ?? destDetails.params.length;
+    const suffixLength = destFirstNonPositional - destDetails.argsIndex - 1;
+    const srcPositionalsToPack = srcDetails.params.slice(destDetails.argsIndex, srcLastToPackIndex - suffixLength);
+    const srcTupleTypes: TupleTypeArg[] = [];
+    srcPositionalsToPack.forEach((entry) => {
+        if (entry.param.category === ParamCategory.ArgsList) {
+            if (isUnpackedTypeVarTuple(entry.type)) {
+                srcTupleTypes.push({ type: entry.type, isUnbounded: false });
+            } else if (isUnpackedClass(entry.type) && entry.type.priv.tupleTypeArgs) {
+                appendArray(srcTupleTypes, entry.type.priv.tupleTypeArgs);
+            } else {
+                srcTupleTypes.push({ type: entry.type, isUnbounded: true });
+            }
+        } else {
+            srcTupleTypes.push({ type: entry.type, isUnbounded: false, isOptional: !!entry.defaultType });
+        }
+    });
+
+    if (srcTupleTypes.length !== 1 || !isTypeVarTuple(srcTupleTypes[0].type)) {
+        const srcPositionalsType = makeTupleObject(evaluator, srcTupleTypes, /* isUnpacked */ true);
+
+        srcDetails.params = [
+            ...srcDetails.params.slice(0, destDetails.argsIndex),
+            {
+                param: FunctionParam.create(
+                    ParamCategory.ArgsList,
+                    srcPositionalsType,
+                    FunctionParamFlags.NameSynthesized | FunctionParamFlags.TypeDeclared,
+                    '_arg_combined'
+                ),
+                type: srcPositionalsType,
+                declaredType: srcPositionalsType,
+                index: -1,
+                kind: ParamKind.Positional,
+            },
+            ...srcDetails.params.slice(
+                destDetails.argsIndex + srcPositionalsToPack.length,
+                srcDetails.params.length
+            ),
+        ];
+
+        const argsIndex = srcDetails.params.findIndex((param) => param.param.category === ParamCategory.ArgsList);
+        srcDetails.argsIndex = argsIndex >= 0 ? argsIndex : undefined;
+
+        const kwargsIndex = srcDetails.params.findIndex(
+            (param) => param.param.category === ParamCategory.KwargsDict
+        );
+        srcDetails.kwargsIndex = kwargsIndex >= 0 ? kwargsIndex : undefined;
+
+        const firstKeywordOnlyIndex = srcDetails.params.findIndex((param) => param.kind === ParamKind.Keyword);
+        srcDetails.firstKeywordOnlyIndex = firstKeywordOnlyIndex >= 0 ? firstKeywordOnlyIndex : undefined;
+
+        srcDetails.positionOnlyParamCount = Math.max(
+            0,
+            srcDetails.params.findIndex(
+                (p) =>
+                    p.kind !== ParamKind.Positional || p.param.category !== ParamCategory.Simple || !!p.defaultType
+            )
+        );
+    }
 }
