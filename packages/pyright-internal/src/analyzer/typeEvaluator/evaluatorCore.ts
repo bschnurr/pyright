@@ -259,3 +259,15 @@ export function isLegalTypeAliasExprForm(node: ExpressionNode, allowStrLiteral: 
 
     return true;
 }
+
+export function isPossibleTypeAliasDeclCheck(decl: Declaration): boolean {
+    if (decl.type !== DeclarationType.Variable || !decl.typeAliasName || decl.typeAnnotationNode) {
+        return false;
+    }
+
+    if (decl.node.parent?.nodeType !== ParseNodeType.Assignment) {
+        return false;
+    }
+
+    return isLegalTypeAliasExprForm(decl.node.parent.d.rightExpr, /* allowStrLiteral */ false);
+}

@@ -27832,17 +27832,7 @@ export function createTypeEvaluator(
     }
 
     function isPossibleTypeAliasDeclaration(decl: Declaration): boolean {
-        if (decl.type !== DeclarationType.Variable || !decl.typeAliasName || decl.typeAnnotationNode) {
-            return false;
-        }
-
-        if (decl.node.parent?.nodeType !== ParseNodeType.Assignment) {
-            return false;
-        }
-
-        // Perform a sanity check on the RHS expression. Some expression
-        // forms should never be considered legitimate for type aliases.
-        return isLegalTypeAliasExpressionForm(decl.node.parent.d.rightExpr, /* allowStrLiteral */ false);
+        return TypeEvaluatorCore.isPossibleTypeAliasDeclCheck(decl);
     }
 
     function isLegalTypeAliasExpressionForm(node: ExpressionNode, allowStrLiteral: boolean): boolean {
