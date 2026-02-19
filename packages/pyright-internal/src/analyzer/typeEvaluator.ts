@@ -13109,21 +13109,7 @@ export function createTypeEvaluator(
     }
 
     function getFunctionFullName(functionNode: ParseNode, moduleName: string, functionName: string): string {
-        const nameParts: string[] = [functionName];
-
-        let curNode: ParseNode | undefined = functionNode;
-
-        // Walk the parse tree looking for classes or functions.
-        while (curNode) {
-            curNode = ParseTreeUtils.getEnclosingClassOrFunction(curNode);
-            if (curNode) {
-                nameParts.push(curNode.d.name.d.value);
-            }
-        }
-
-        nameParts.push(moduleName);
-
-        return nameParts.reverse().join('.');
+        return TypeEvaluatorCore.getFunctionFullNameFromNode(functionNode, moduleName, functionName);
     }
 
     // Implements the semantics of the NewType call as documented
@@ -16873,7 +16859,7 @@ export function createTypeEvaluator(
     }
 
     function getPseudoGenericTypeVarName(paramName: string) {
-        return `__type_of_${paramName}`;
+        return TypeEvaluatorCore.getPseudoGenericTypeVarNameForParam(paramName);
     }
 
     // Creates a new class type that is a subclass of two other specified classes.

@@ -15,6 +15,7 @@ import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
 import { ArgWithExpression, EvaluatorUsage } from '../typeEvaluatorTypes';
+import * as ParseTreeUtils from '../parseTreeUtils';
 
 export interface ReturnTypeInferenceContextFrame {
     functionNode: ParseNode;
@@ -291,4 +292,25 @@ export function convertArgumentNodeToArg(node: ArgumentNode): ArgWithExpression 
         name: node.d.name,
         valueExpression: node.d.valueExpr,
     };
+}
+
+export function getFunctionFullNameFromNode(functionNode: ParseNode, moduleName: string, functionName: string): string {
+    const nameParts: string[] = [functionName];
+
+    let curNode: ParseNode | undefined = functionNode;
+
+    while (curNode) {
+        curNode = ParseTreeUtils.getEnclosingClassOrFunction(curNode);
+        if (curNode) {
+            nameParts.push(curNode.d.name.d.value);
+        }
+    }
+
+    nameParts.push(moduleName);
+
+    return nameParts.reverse().join('.');
+}
+
+export function getPseudoGenericTypeVarNameForParam(paramName: string) {
+    return `__type_of_${paramName}`;
 }
