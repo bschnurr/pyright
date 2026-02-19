@@ -4565,46 +4565,7 @@ export function createTypeEvaluator(
     // meaning to its runtime value. If convertModule is true, a module is
     // converted to an instance of types.ModuleType.
     function convertSpecialFormToRuntimeValue(type: Type, flags: EvalFlags, convertModule = false) {
-        const exemptFlags = EvalFlags.TypeExpression | EvalFlags.InstantiableType | EvalFlags.NoConvertSpecialForm;
-
-        if ((flags & exemptFlags) !== 0) {
-            return type;
-        }
-
-        if (
-            convertModule &&
-            isModule(type) &&
-            prefetched?.moduleTypeClass &&
-            isInstantiableClass(prefetched.moduleTypeClass)
-        ) {
-            return ClassType.cloneAsInstance(prefetched.moduleTypeClass);
-        }
-
-        // Isinstance treats traditional (non-PEP 695) type aliases that are unions
-        // as tuples of classes rather than unions.
-        if ((flags & EvalFlags.IsinstanceArg) !== 0) {
-            if (isUnion(type) && type.props?.typeAliasInfo && !type.props.typeAliasInfo.shared.isTypeAliasType) {
-                return type;
-            }
-        }
-
-        if (!type.props?.specialForm) {
-            return type;
-        }
-
-        // If this is a type alias and we are not supposed to specialize it, return it as is.
-        if ((flags & EvalFlags.NoSpecialize) !== 0 && type.props?.typeAliasInfo) {
-            // Special-case TypeAliasType which should be converted in this case.
-            if (!ClassType.isBuiltIn(type.props.specialForm, 'TypeAliasType')) {
-                return type;
-            }
-        }
-
-        if (type.props?.typeForm) {
-            return TypeBase.cloneWithTypeForm(type.props.specialForm, type.props.typeForm);
-        }
-
-        return type.props.specialForm;
+        return TypeEvaluatorCore.convertSpecialFormToRuntimeValueWithPrefetched(type, flags, prefetched, convertModule);
     }
 
     // Handles the case where a variable or parameter is defined in an outer

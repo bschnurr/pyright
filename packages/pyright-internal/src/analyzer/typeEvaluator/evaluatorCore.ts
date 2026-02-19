@@ -15,9 +15,9 @@ import { assert } from '../../common/debug';
 import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
-import { ArgWithExpression, AssignTypeFlags, EvaluatorUsage, PrefetchedTypes } from '../typeEvaluatorTypes';
+import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { ClassType, FunctionParam, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnknown, Type, TypeBase, TypeVarType, UnknownType } from '../types';
+import { ClassType, FunctionParam, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, Type, TypeBase, TypeVarType, UnknownType } from '../types';
 import { convertToInstance, doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, lookUpClassMember } from '../typeUtils';
 import { getParamListDetails } from '../parameterUtils';
 
@@ -615,4 +615,48 @@ export function parseStringAsTypeAnnotationNode(node: StringListNode, reportErro
     }
 
     return undefined;
+}
+
+export function convertSpecialFormToRuntimeValueWithPrefetched(
+    type: Type,
+    flags: EvalFlags,
+    prefetched: Partial<PrefetchedTypes> | undefined,
+    convertModule = false
+): Type {
+    const exemptFlags = EvalFlags.TypeExpression | EvalFlags.InstantiableType | EvalFlags.NoConvertSpecialForm;
+
+    if ((flags & exemptFlags) !== 0) {
+        return type;
+    }
+
+    if (
+        convertModule &&
+        isModule(type) &&
+        prefetched?.moduleTypeClass &&
+        isInstantiableClass(prefetched.moduleTypeClass)
+    ) {
+        return ClassType.cloneAsInstance(prefetched.moduleTypeClass);
+    }
+
+    if ((flags & EvalFlags.IsinstanceArg) !== 0) {
+        if (isUnion(type) && type.props?.typeAliasInfo && !type.props.typeAliasInfo.shared.isTypeAliasType) {
+            return type;
+        }
+    }
+
+    if (!type.props?.specialForm) {
+        return type;
+    }
+
+    if ((flags & EvalFlags.NoSpecialize) !== 0 && type.props?.typeAliasInfo) {
+        if (!ClassType.isBuiltIn(type.props.specialForm, 'TypeAliasType')) {
+            return type;
+        }
+    }
+
+    if (type.props?.typeForm) {
+        return TypeBase.cloneWithTypeForm(type.props.specialForm, type.props.typeForm);
+    }
+
+    return type.props.specialForm;
 }
