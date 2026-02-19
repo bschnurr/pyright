@@ -854,9 +854,7 @@ export function createTypeEvaluator(
     }
 
     function getIndexOfSymbolResolution(symbol: Symbol, declaration: Declaration) {
-        return symbolResolutionStack.findIndex(
-            (entry) => entry.symbolId === symbol.id && entry.declaration === declaration
-        );
+        return TypeEvaluatorCore.getSymbolResolutionIndex(symbolResolutionStack, symbol.id, declaration);
     }
 
     function pushSymbolResolution(symbol: Symbol, declaration: Declaration) {

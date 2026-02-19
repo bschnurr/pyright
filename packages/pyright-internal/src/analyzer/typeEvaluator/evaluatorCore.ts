@@ -13,6 +13,11 @@ export interface ReturnTypeInferenceContextFrame {
     codeFlowAnalyzer?: unknown;
 }
 
+export interface SymbolResolutionStackEntryLike {
+    symbolId: number;
+    declaration: unknown;
+}
+
 export function isNodeInReturnTypeInferenceContext(
     node: ParseNode,
     returnTypeInferenceContextStack: readonly ReturnTypeInferenceContextFrame[]
@@ -94,4 +99,12 @@ export function runWithReturnTypeInferenceContextFrame<T extends ReturnTypeInfer
     } finally {
         popReturnTypeInferenceContextFrame(returnTypeInferenceContextStack);
     }
+}
+
+export function getSymbolResolutionIndex(
+    symbolResolutionStack: readonly SymbolResolutionStackEntryLike[],
+    symbolId: number,
+    declaration: unknown
+) {
+    return symbolResolutionStack.findIndex((entry) => entry.symbolId === symbolId && entry.declaration === declaration);
 }
