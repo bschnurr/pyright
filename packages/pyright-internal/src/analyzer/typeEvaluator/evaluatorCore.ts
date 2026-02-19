@@ -14,8 +14,10 @@ import { assert } from '../../common/debug';
 import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
-import { ArgWithExpression, EvaluatorUsage } from '../typeEvaluatorTypes';
+import { ArgWithExpression, AssignTypeFlags, EvaluatorUsage } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
+import { ClassType, isClass, isTypeVar, Type, TypeVarType } from '../types';
+import { isTypeAliasPlaceholder, isSentinelLiteral } from '../typeUtils';
 
 export interface ReturnTypeInferenceContextFrame {
     functionNode: ParseNode;
@@ -330,4 +332,77 @@ export function getSpeculativeNodeForCallSite(errorNode: ExpressionNode): ParseN
     }
 
     return errorNode;
+}
+
+export function isSpecialFormClassCheck(classType: ClassType, flags: AssignTypeFlags): boolean {
+    if ((flags & AssignTypeFlags.AllowIsinstanceSpecialForms) !== 0) {
+        return false;
+    }
+
+    return ClassType.isSpecialFormClass(classType);
+}
+
+export function isSymbolValidTypeExpressionCheck(type: Type, includesVarDecl: boolean): boolean {
+    if (!includesVarDecl || type.props?.typeAliasInfo) {
+        return true;
+    }
+
+    if (isTypeAliasPlaceholder(type)) {
+        return true;
+    }
+
+    if (isTypeVar(type)) {
+        if (type.props?.specialForm || type.props?.typeAliasInfo) {
+            return true;
+        }
+    }
+
+    if (isClass(type) && !type.priv.includeSubclasses && ClassType.isValidTypeAliasClass(type)) {
+        return true;
+    }
+
+    if (isSentinelLiteral(type)) {
+        return true;
+    }
+
+    return false;
+}
+
+export function buildTypeParamsFromTypeArgsForClass(classType: ClassType): TypeVarType[] {
+    const typeParams: TypeVarType[] = [];
+    const typeArgs = classType.priv.typeArgs ?? [];
+
+    typeArgs.forEach((typeArg, index) => {
+        if (isTypeVar(typeArg)) {
+            typeParams.push(typeArg);
+            return;
+        }
+
+        const typeVar = TypeVarType.createInstance(`__P${index}`);
+        typeVar.shared.isSynthesized = true;
+        typeParams.push(typeVar);
+    });
+
+    return typeParams;
+}
+
+export function synthesizeTypeAliasPlaceholderForName(nameNode: NameNode, isTypeAliasType: boolean = false): TypeVarType {
+    const placeholder = TypeVarType.createInstantiable(`__type_alias_${nameNode.d.value}`);
+    placeholder.shared.isSynthesized = true;
+    const typeVarScopeId = ParseTreeUtils.getScopeIdForNode(nameNode);
+    const fileInfo = AnalyzerNodeInfo.getFileInfo(nameNode);
+
+    placeholder.shared.recursiveAlias = {
+        name: nameNode.d.value,
+        fullName: ParseTreeUtils.getClassFullName(nameNode, fileInfo.moduleName, nameNode.d.value),
+        moduleName: fileInfo.moduleName,
+        fileUri: fileInfo.fileUri,
+        typeVarScopeId,
+        isTypeAliasType,
+        typeParams: undefined,
+        computedVariance: undefined,
+    };
+    placeholder.priv.scopeId = typeVarScopeId;
+
+    return placeholder;
 }

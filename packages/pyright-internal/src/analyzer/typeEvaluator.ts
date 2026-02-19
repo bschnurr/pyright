@@ -4546,31 +4546,7 @@ export function createTypeEvaluator(
     }
 
     function isSymbolValidTypeExpression(type: Type, includesVarDecl: boolean): boolean {
-        // Verify that the name does not refer to a (non type alias) variable.
-        if (!includesVarDecl || type.props?.typeAliasInfo) {
-            return true;
-        }
-
-        if (isTypeAliasPlaceholder(type)) {
-            return true;
-        }
-
-        if (isTypeVar(type)) {
-            if (type.props?.specialForm || type.props?.typeAliasInfo) {
-                return true;
-            }
-        }
-
-        // Exempts class types that are created by calling NewType, NamedTuple, etc.
-        if (isClass(type) && !type.priv.includeSubclasses && ClassType.isValidTypeAliasClass(type)) {
-            return true;
-        }
-
-        if (isSentinelLiteral(type)) {
-            return true;
-        }
-
-        return false;
+        return TypeEvaluatorCore.isSymbolValidTypeExpressionCheck(type, includesVarDecl);
     }
 
     // Reports diagnostics if type isn't valid within a type expression.
@@ -16706,24 +16682,7 @@ export function createTypeEvaluator(
     // Synthesize a TypeVar that acts as a placeholder for a type alias. This allows
     // the type alias definition to refer to itself.
     function synthesizeTypeAliasPlaceholder(nameNode: NameNode, isTypeAliasType: boolean = false): TypeVarType {
-        const placeholder = TypeVarType.createInstantiable(`__type_alias_${nameNode.d.value}`);
-        placeholder.shared.isSynthesized = true;
-        const typeVarScopeId = ParseTreeUtils.getScopeIdForNode(nameNode);
-        const fileInfo = AnalyzerNodeInfo.getFileInfo(nameNode);
-
-        placeholder.shared.recursiveAlias = {
-            name: nameNode.d.value,
-            fullName: ParseTreeUtils.getClassFullName(nameNode, fileInfo.moduleName, nameNode.d.value),
-            moduleName: fileInfo.moduleName,
-            fileUri: fileInfo.fileUri,
-            typeVarScopeId,
-            isTypeAliasType,
-            typeParams: undefined,
-            computedVariance: undefined,
-        };
-        placeholder.priv.scopeId = typeVarScopeId;
-
-        return placeholder;
+        return TypeEvaluatorCore.synthesizeTypeAliasPlaceholderForName(nameNode, isTypeAliasType);
     }
 
     // Evaluates the type of a type alias (i.e. "type") statement. This code
@@ -17796,22 +17755,7 @@ export function createTypeEvaluator(
     }
 
     function buildTypeParamsFromTypeArgs(classType: ClassType): TypeVarType[] {
-        const typeParams: TypeVarType[] = [];
-        const typeArgs = classType.priv.typeArgs ?? [];
-
-        typeArgs.forEach((typeArg, index) => {
-            if (isTypeVar(typeArg)) {
-                typeParams.push(typeArg);
-                return;
-            }
-
-            // Synthesize a dummy type parameter.
-            const typeVar = TypeVarType.createInstance(`__P${index}`);
-            typeVar.shared.isSynthesized = true;
-            typeParams.push(typeVar);
-        });
-
-        return typeParams;
+        return TypeEvaluatorCore.buildTypeParamsFromTypeArgsForClass(classType);
     }
 
     // Determines whether the type parameters has a default that refers to another
@@ -25245,11 +25189,7 @@ export function createTypeEvaluator(
     }
 
     function isSpecialFormClass(classType: ClassType, flags: AssignTypeFlags): boolean {
-        if ((flags & AssignTypeFlags.AllowIsinstanceSpecialForms) !== 0) {
-            return false;
-        }
-
-        return ClassType.isSpecialFormClass(classType);
+        return TypeEvaluatorCore.isSpecialFormClassCheck(classType, flags);
     }
 
     // Finds unsolved type variables in the destType and establishes constraints
