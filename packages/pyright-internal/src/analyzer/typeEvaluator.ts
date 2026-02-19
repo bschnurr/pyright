@@ -2119,21 +2119,7 @@ export function createTypeEvaluator(
 
     // Determines whether the specified expression is an explicit TypeAlias declaration.
     function isDeclaredTypeAlias(expression: ExpressionNode): boolean {
-        if (expression.nodeType === ParseNodeType.TypeAnnotation) {
-            if (expression.d.valueExpr.nodeType === ParseNodeType.Name) {
-                const symbolWithScope = lookUpSymbolRecursive(
-                    expression,
-                    expression.d.valueExpr.d.value,
-                    /* honorCodeFlow */ false
-                );
-                if (symbolWithScope) {
-                    const symbol = symbolWithScope.symbol;
-                    return symbol.getDeclarations().find((decl) => isExplicitTypeAliasDeclaration(decl)) !== undefined;
-                }
-            }
-        }
-
-        return false;
+        return TypeEvaluatorCore.isDeclaredTypeAliasWithEvaluator(evaluatorInterface, expression);
     }
 
     // Determines whether the specified expression is a symbol with a declared type.
@@ -3449,18 +3435,7 @@ export function createTypeEvaluator(
 
     // Reports diagnostics if type isn't valid within a type expression.
     function validateSymbolIsTypeExpression(node: ExpressionNode, type: Type, includesVarDecl: boolean): Type {
-        if (isSymbolValidTypeExpression(type, includesVarDecl)) {
-            return type;
-        }
-
-        // Disable for assignments in the typings.pyi file, since it defines special forms.
-        const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-        if (fileInfo.isTypingStubFile) {
-            return type;
-        }
-
-        addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.typeAnnotationVariable(), node);
-        return UnknownType.create();
+        return TypeEvaluatorCore.validateSymbolIsTypeExpressionWithEvaluator(evaluatorInterface, node, type, includesVarDecl);
     }
 
     // If the value is a special form (like a TypeVar or `Any`) and is being
@@ -3757,37 +3732,7 @@ export function createTypeEvaluator(
     // type arguments. If so, it fills in these type arguments with Unknown
     // and optionally reports an error.
     function reportMissingTypeArgs(node: ExpressionNode, type: Type, flags: EvalFlags): Type {
-        if ((flags & EvalFlags.NoSpecialize) !== 0) {
-            return type;
-        }
-
-        // Is this a generic class that needs to be specialized?
-        if (isInstantiableClass(type)) {
-            if ((flags & EvalFlags.InstantiableType) !== 0 && (flags & EvalFlags.AllowMissingTypeArgs) === 0) {
-                if (!type.props?.typeAliasInfo && requiresTypeArgs(type)) {
-                    if (!type.priv.typeArgs || !type.priv.isTypeArgExplicit) {
-                        addDiagnostic(
-                            DiagnosticRule.reportMissingTypeArgument,
-                            LocMessage.typeArgsMissingForClass().format({
-                                name: type.priv.aliasName || type.shared.name,
-                            }),
-                            node
-                        );
-                    }
-                }
-            }
-
-            if (!type.priv.typeArgs) {
-                type = createSpecializedClassType(type, /* typeArgs */ undefined, flags, node)?.type;
-            }
-        }
-
-        // Is this a generic type alias that needs to be specialized?
-        if ((flags & EvalFlags.InstantiableType) !== 0) {
-            type = specializeTypeAliasWithDefaults(type, node);
-        }
-
-        return type;
+        return TypeEvaluatorCore.reportMissingTypeArgsWithEvaluator(evaluatorInterface, node, type, flags, prefetched);
     }
 
     // Walks up the parse tree to find a function, class, or type alias
@@ -9926,77 +9871,7 @@ export function createTypeEvaluator(
     }
 
     function createTypeVarTupleType(errorNode: ExpressionNode, classType: ClassType, argList: Arg[]): Type | undefined {
-        let typeVarName = '';
-
-        if (argList.length === 0) {
-            addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.typeVarFirstArg(), errorNode);
-            return undefined;
-        }
-
-        const firstArg = argList[0];
-        if (firstArg.valueExpression && firstArg.valueExpression.nodeType === ParseNodeType.StringList) {
-            typeVarName = firstArg.valueExpression.d.strings.map((s) => s.d.value).join('');
-        } else {
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.typeVarFirstArg(),
-                firstArg.valueExpression || errorNode
-            );
-        }
-
-        const typeVar = TypeBase.cloneAsSpecialForm(
-            TypeVarType.createInstantiable(typeVarName, TypeVarKind.TypeVarTuple),
-            ClassType.cloneAsInstance(classType)
-        );
-        typeVar.shared.defaultType = makeTupleObject(evaluatorInterface, [
-            { type: UnknownType.create(), isUnbounded: true },
-        ]);
-
-        // Parse the remaining parameters.
-        for (let i = 1; i < argList.length; i++) {
-            const paramNameNode = argList[i].name;
-            const paramName = paramNameNode ? paramNameNode.d.value : undefined;
-
-            if (paramName) {
-                if (paramName === 'default') {
-                    const expr = argList[i].valueExpression;
-                    if (expr) {
-                        const defaultType = getTypeVarTupleDefaultType(expr, /* isPep695Syntax */ false);
-                        if (defaultType) {
-                            typeVar.shared.defaultType = defaultType;
-                            typeVar.shared.isDefaultExplicit = true;
-                        }
-                    }
-
-                    const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
-                    if (
-                        !fileInfo.isStubFile &&
-                        PythonVersion.isLessThan(fileInfo.executionEnvironment.pythonVersion, pythonVersion3_13) &&
-                        classType.shared.moduleName !== 'typing_extensions'
-                    ) {
-                        addDiagnostic(
-                            DiagnosticRule.reportGeneralTypeIssues,
-                            LocMessage.typeVarDefaultIllegal(),
-                            expr!
-                        );
-                    }
-                } else {
-                    addDiagnostic(
-                        DiagnosticRule.reportGeneralTypeIssues,
-                        LocMessage.typeVarTupleUnknownParam().format({ name: argList[i].name?.d.value || '?' }),
-                        argList[i].node?.d.name || argList[i].valueExpression || errorNode
-                    );
-                }
-            } else {
-                addDiagnostic(
-                    DiagnosticRule.reportGeneralTypeIssues,
-                    LocMessage.typeVarTupleConstraints(),
-                    argList[i].valueExpression || errorNode
-                );
-            }
-        }
-
-        return typeVar;
+        return TypeEvaluatorCore.createTypeVarTupleTypeWithEvaluator(evaluatorInterface, errorNode, classType, argList, prefetched);
     }
 
     function getTypeVarTupleDefaultType(node: ExpressionNode, isPep695Syntax: boolean): Type | undefined {
@@ -10475,38 +10350,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfConstant(node: ConstantNode, flags: EvalFlags): TypeResult {
-        let type: Type | undefined;
-
-        if (node.d.constType === KeywordType.None) {
-            if (prefetched?.noneTypeClass) {
-                type =
-                    (flags & EvalFlags.InstantiableType) !== 0
-                        ? prefetched.noneTypeClass
-                        : convertToInstance(prefetched.noneTypeClass);
-
-                if (isTypeFormSupported(node)) {
-                    type = TypeBase.cloneWithTypeForm(type, convertToInstance(type));
-                }
-            }
-        } else if (
-            node.d.constType === KeywordType.True ||
-            node.d.constType === KeywordType.False ||
-            node.d.constType === KeywordType.Debug
-        ) {
-            type = getBuiltInObject(node, 'bool');
-
-            // For True and False, we can create truthy and falsy
-            // versions of 'bool'.
-            if (type && isClassInstance(type)) {
-                if (node.d.constType === KeywordType.True) {
-                    type = ClassType.cloneWithLiteral(type, /* value */ true);
-                } else if (node.d.constType === KeywordType.False) {
-                    type = ClassType.cloneWithLiteral(type, /* value */ false);
-                }
-            }
-        }
-
-        return { type: type ?? UnknownType.create() };
+        return TypeEvaluatorCore.getTypeOfConstantWithEvaluator(evaluatorInterface, node, flags, prefetched);
     }
 
     function getTypeOfMagicMethodCall(
@@ -11410,15 +11254,7 @@ export function createTypeEvaluator(
     }
 
     function verifySetEntryOrDictKeyIsHashable(entry: ExpressionNode, type: Type, isDictKey: boolean) {
-        // Verify that the type is hashable.
-        if (!isTypeHashable(type)) {
-            const diag = new DiagnosticAddendum();
-            diag.addMessage(LocAddendum.unhashableType().format({ type: printType(type) }));
-
-            const message = isDictKey ? LocMessage.unhashableDictKey() : LocMessage.unhashableSetEntry();
-
-            addDiagnostic(DiagnosticRule.reportUnhashable, message + diag.getString(), entry);
-        }
+        TypeEvaluatorCore.verifySetEntryOrDictKeyIsHashableWithEvaluator(evaluatorInterface, entry, type, isDictKey);
     }
 
     function inferTypeArgFromExpectedEntryType(
@@ -19135,24 +18971,7 @@ export function createTypeEvaluator(
 
     // Determines whether a type is "subsumed by" (i.e. is a proper subtype of) another type.
     function isTypeSubsumedByOtherType(type: Type, otherType: Type, allowAnyToSubsume: boolean, recursionCount = 0) {
-        const concreteType = makeTopLevelTypeVarsConcrete(type);
-        const otherSubtypes = isUnion(otherType) ? otherType.priv.subtypes : [otherType];
-
-        for (const otherSubtype of otherSubtypes) {
-            if (isTypeSame(otherSubtype, type)) {
-                continue;
-            }
-
-            if (isAnyOrUnknown(otherSubtype)) {
-                if (allowAnyToSubsume) {
-                    return true;
-                }
-            } else if (isProperSubtype(otherSubtype, concreteType, recursionCount)) {
-                return true;
-            }
-        }
-
-        return false;
+        return TypeEvaluatorCore.isTypeSubsumedByOtherTypeWithEvaluator(evaluatorInterface, type, otherType, allowAnyToSubsume, recursionCount);
     }
 
     // Determines whether the srcType is a subtype of destType but the converse
@@ -19295,32 +19114,7 @@ export function createTypeEvaluator(
     // Returns a list of unimplemented abstract symbols (methods or variables) for
     // the specified class.
     function getAbstractSymbols(classType: ClassType): AbstractSymbol[] {
-        const symbolTable = new Map<string, AbstractSymbol>();
-
-        ClassType.getReverseMro(classType).forEach((mroClass) => {
-            if (isInstantiableClass(mroClass)) {
-                // See if this class is introducing a new abstract symbol that has not been
-                // introduced previously or if it is overriding an abstract symbol with
-                // a non-abstract one.
-                ClassType.getSymbolTable(mroClass).forEach((symbol, symbolName) => {
-                    const abstractSymbolInfo = getAbstractSymbolInfo(mroClass, symbolName);
-
-                    if (abstractSymbolInfo) {
-                        symbolTable.set(symbolName, abstractSymbolInfo);
-                    } else {
-                        symbolTable.delete(symbolName);
-                    }
-                });
-            }
-        });
-
-        // Create a final list of symbols that are abstract.
-        const symbolList: AbstractSymbol[] = [];
-        symbolTable.forEach((method) => {
-            symbolList.push(method);
-        });
-
-        return symbolList;
+        return TypeEvaluatorCore.getAbstractSymbolsWithEvaluator(evaluatorInterface, classType);
     }
 
     // If the memberType is an instance or class method, creates a new
