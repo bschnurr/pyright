@@ -742,7 +742,12 @@ export interface TypeEvaluator {
         callback: (expandedSubtype: Type, unexpandedSubtype: Type) => Type | undefined
     ) => Type;
     isTypeSubsumedByOtherType: (type: Type, otherType: Type, allowAnyToSubsume: boolean) => boolean;
-    lookUpSymbolRecursive: (node: ParseNode, name: string, honorCodeFlow: boolean) => SymbolWithScope | undefined;
+    lookUpSymbolRecursive: (
+        node: ParseNode,
+        name: string,
+        honorCodeFlow: boolean,
+        preferGlobalScope?: boolean
+    ) => SymbolWithScope | undefined;
     getDeclaredTypeOfSymbol: (symbol: Symbol) => DeclaredSymbolTypeInfo;
     getEffectiveTypeOfSymbol: (symbol: Symbol) => Type;
     getEffectiveTypeOfSymbolForUsage: (

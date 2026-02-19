@@ -10,7 +10,7 @@ import { DiagnosticLevel } from '../../common/configOptions';
 import { Diagnostic, DiagnosticAddendum } from '../../common/diagnostic';
 import { DiagnosticRule } from '../../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../../localization/localize';
-import { ArgumentNode, AssignmentNode, ExpressionNode, ImportFromAsNode, NameNode, ParamCategory, ParseNode, ParseNodeType, SliceNode, StringListNode, TypeParameterNode, YieldFromNode } from '../../parser/parseNodes';
+import { ArgumentNode, AssignmentNode, ExpressionNode, ImportFromAsNode, NameNode, ParamCategory, ParseNode, ParseNodeType, SliceNode, StringListNode, StringNode, TypeParameterNode, YieldFromNode } from '../../parser/parseNodes';
 import { KeywordType, OperatorType } from '../../parser/tokenizerTypes';
 import { Parser, ParseOptions, ParseTextMode } from '../../parser/parser';
 import { TextRange } from '../../common/textRange';
@@ -21,13 +21,19 @@ import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { isAnnotationEvaluationPostponed } from '../analyzerFileInfo';
 import { Declaration, DeclarationType } from '../declaration';
-import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, PrefetchedTypes, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
+import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, PrefetchedTypes, Reachability, SymbolDeclInfo, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, NeverType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnknownType, Variance } from '../types';
+import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isOverloaded, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, ModuleType, NeverType, OverloadedType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnknownType, Variance } from '../types';
 import { addConditionToType, computeMroLinearization, convertToInstance, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, getGeneratorTypeArgs, getTypeCondition, getTypeVarArgsRecursive, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isLiteralType, isNoneInstance, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, mapSubtypes, MemberAccessFlags, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails, ParamKind, ParamListDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 import { makeTupleObject } from '../tuples';
+import { ScopeType, SymbolWithScope } from '../scope';
+import { CodeFlowEngine } from '../codeFlowEngine';
+import { Symbol, SynthesizedTypeInfo } from '../symbol';
+import { getDeclarationsWithUsesLocalNameRemoved, synthesizeAliasDeclaration } from '../declarationUtils';
+import { getBoundInitMethod } from '../constructors';
+import * as ScopeUtils from '../scopeUtils';
 
 export interface ReturnTypeInferenceContextFrame {
     functionNode: ParseNode;
@@ -3166,4 +3172,402 @@ export function isUnambiguousInferenceWithEvaluator(
     }
 
     return false;
+}
+
+// Phase 5: Symbol scope extraction — functions with codeFlowEngine dependency
+
+export function lookUpSymbolRecursiveWithFlowContext(
+    node: ParseNode,
+    name: string,
+    honorCodeFlow: boolean,
+    codeFlowEngine: CodeFlowEngine,
+    isFlowPathBetweenNodesFn: (sourceNode: ParseNode, sinkNode: ParseNode) => boolean,
+    preferGlobalScope = false
+): SymbolWithScope | undefined {
+    const scopeNodeInfo = ParseTreeUtils.getEvaluationScopeNode(node);
+    const scope = AnalyzerNodeInfo.getScope(scopeNodeInfo.node);
+
+    let symbolWithScope = scope?.lookUpSymbolRecursive(name, { useProxyScope: !!scopeNodeInfo.useProxyScope });
+    const scopeType = scope?.type ?? ScopeType.Module;
+
+    // Functions and list comprehensions don't allow access to implicitly
+    // aliased symbols in outer scopes if they haven't yet been assigned
+    // within the local scope.
+    let scopeTypeHonorsCodeFlow = scopeType !== ScopeType.Function && scopeType !== ScopeType.Comprehension;
+
+    // Type parameter scopes don't honor code flow.
+    if (symbolWithScope?.scope.type === ScopeType.TypeParameter) {
+        scopeTypeHonorsCodeFlow = false;
+    }
+
+    if (symbolWithScope && honorCodeFlow && scopeTypeHonorsCodeFlow) {
+        // Filter the declarations based on flow reachability.
+        const reachableDecl = symbolWithScope.symbol.getDeclarations().find((decl) => {
+            if (decl.type !== DeclarationType.Alias && decl.type !== DeclarationType.Intrinsic) {
+                // Determine if the declaration is in the same execution scope as the "usageNode" node.
+                let usageScopeNode = ParseTreeUtils.getExecutionScopeNode(node);
+                const declNode: ParseNode =
+                    decl.type === DeclarationType.Class ||
+                    decl.type === DeclarationType.Function ||
+                    decl.type === DeclarationType.TypeAlias
+                        ? decl.node.d.name
+                        : decl.node;
+                const declScopeNode = ParseTreeUtils.getExecutionScopeNode(declNode);
+
+                // If this is a type parameter scope, it will be a proxy for its
+                // containing scope, so we need to use that instead.
+                const usageScope = AnalyzerNodeInfo.getScope(usageScopeNode);
+                if (usageScope?.proxy) {
+                    const typeParamScope = AnalyzerNodeInfo.getScope(usageScopeNode);
+                    if (!typeParamScope?.symbolTable.has(name) && usageScopeNode.parent) {
+                        usageScopeNode = ParseTreeUtils.getExecutionScopeNode(usageScopeNode.parent);
+                    }
+                }
+
+                if (usageScopeNode === declScopeNode) {
+                    if (!isFlowPathBetweenNodesFn(declNode, node)) {
+                        // If there was no control flow path from the usage back
+                        // to the source, see if the usage node is reachable by
+                        // any path.
+                        const flowNode = AnalyzerNodeInfo.getFlowNode(node);
+                        const isReachable =
+                            flowNode &&
+                            codeFlowEngine.getFlowNodeReachability(
+                                flowNode,
+                                /* sourceFlowNode */ undefined,
+                                /* ignoreNoReturn */ true
+                            ) === Reachability.Reachable;
+                        return !isReachable;
+                    }
+                }
+            }
+            return true;
+        });
+
+        // If none of the declarations are reachable from the current node,
+        // search for the symbol in outer scopes.
+        if (!reachableDecl) {
+            if (symbolWithScope.scope.type !== ScopeType.Function) {
+                let nextScopeToSearch = symbolWithScope.scope.parent;
+                const isOutsideCallerModule =
+                    symbolWithScope.isOutsideCallerModule || symbolWithScope.scope.type === ScopeType.Module;
+                let isBeyondExecutionScope =
+                    symbolWithScope.isBeyondExecutionScope || symbolWithScope.scope.isIndependentlyExecutable();
+
+                if (symbolWithScope.scope.type === ScopeType.Class) {
+                    // There is an odd documented behavior for classes in that
+                    // symbol resolution skips to the global scope rather than
+                    // the next scope in the chain.
+                    const globalScopeResult = symbolWithScope.scope.getGlobalScope();
+                    nextScopeToSearch = globalScopeResult.scope;
+                    if (globalScopeResult.isBeyondExecutionScope) {
+                        isBeyondExecutionScope = true;
+                    }
+                }
+
+                if (nextScopeToSearch) {
+                    symbolWithScope = nextScopeToSearch.lookUpSymbolRecursive(name, {
+                        isOutsideCallerModule,
+                        isBeyondExecutionScope,
+                    });
+                } else {
+                    symbolWithScope = undefined;
+                }
+            } else {
+                symbolWithScope = undefined;
+            }
+        }
+    }
+
+    // PEP 563 indicates that if a forward reference can be resolved in the module
+    // scope (or, by implication, in the builtins scope), it should prefer that
+    // resolution over local resolutions.
+    if (symbolWithScope && preferGlobalScope) {
+        let curSymbolWithScope: SymbolWithScope | undefined = symbolWithScope;
+        while (
+            curSymbolWithScope.scope.type !== ScopeType.Module &&
+            curSymbolWithScope.scope.type !== ScopeType.Builtin &&
+            curSymbolWithScope.scope.type !== ScopeType.TypeParameter &&
+            curSymbolWithScope.scope.parent
+        ) {
+            curSymbolWithScope = curSymbolWithScope.scope.parent.lookUpSymbolRecursive(name, {
+                isOutsideCallerModule: curSymbolWithScope.isOutsideCallerModule,
+                isBeyondExecutionScope:
+                    curSymbolWithScope.isBeyondExecutionScope ||
+                    curSymbolWithScope.scope.isIndependentlyExecutable(),
+            });
+            if (!curSymbolWithScope) {
+                break;
+            }
+        }
+
+        if (
+            curSymbolWithScope?.scope.type === ScopeType.Module ||
+            curSymbolWithScope?.scope.type === ScopeType.Builtin
+        ) {
+            symbolWithScope = curSymbolWithScope;
+        }
+    }
+
+    return symbolWithScope;
+}
+
+export function getDeclInfoForStringNodeWithEvaluator(
+    node: StringNode,
+    evaluator: TypeEvaluator
+): SymbolDeclInfo | undefined {
+    const decls: Declaration[] = [];
+    const synthesizedTypes: SynthesizedTypeInfo[] = [];
+    const expectedType = evaluator.getExpectedType(node)?.type;
+
+    if (expectedType) {
+        doForEachSubtype(expectedType, (subtype) => {
+            // If the expected type is a TypedDict then the node is either a key expression
+            // or a single entry in a set. We then need to check that the value of the node
+            // is a valid entry in the TypedDict to avoid resolving declarations for
+            // synthesized symbols such as 'get'.
+            if (isClassInstance(subtype) && ClassType.isTypedDictClass(subtype)) {
+                const entry = subtype.shared.typedDictEntries?.knownItems.get(node.d.value);
+                if (entry) {
+                    const symbol = lookUpObjectMember(subtype, node.d.value)?.symbol;
+
+                    if (symbol) {
+                        appendArray(decls, symbol.getDeclarations());
+
+                        const synthTypeInfo = symbol.getSynthesizedType();
+                        if (synthTypeInfo) {
+                            synthesizedTypes.push(synthTypeInfo);
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    return decls.length === 0 ? undefined : { decls, synthesizedTypes };
+}
+
+export function getDeclInfoForNameNodeWithEvaluator(
+    node: NameNode,
+    evaluator: TypeEvaluator,
+    skipUnreachableCode = true
+): SymbolDeclInfo | undefined {
+    if (skipUnreachableCode && AnalyzerNodeInfo.isCodeUnreachable(node)) {
+        return undefined;
+    }
+
+    const decls: Declaration[] = [];
+    const synthesizedTypes: SynthesizedTypeInfo[] = [];
+
+    // If the node is part of a "from X import Y as Z" statement and the node
+    // is the "Y" (non-aliased) name, we need to look up the alias symbol
+    // since the non-aliased name is not in the symbol table.
+    const alias = getAliasFromImportNode(node);
+    if (alias) {
+        const scope = ScopeUtils.getScopeForNode(node);
+        if (scope) {
+            // Look up the alias symbol.
+            const symbolInScope = scope.lookUpSymbolRecursive(alias.d.value);
+            if (symbolInScope) {
+                // The alias could have more decls that don't refer to this import. Filter
+                // out the one(s) that specifically associated with this import statement.
+                const declsForThisImport = symbolInScope.symbol.getDeclarations().filter((decl) => {
+                    return decl.type === DeclarationType.Alias && decl.node === node.parent;
+                });
+
+                appendArray(decls, getDeclarationsWithUsesLocalNameRemoved(declsForThisImport));
+            }
+        }
+    } else if (
+        node.parent &&
+        node.parent.nodeType === ParseNodeType.MemberAccess &&
+        node === node.parent.d.member
+    ) {
+        let baseType = evaluator.getType(node.parent.d.leftExpr);
+        if (baseType) {
+            baseType = evaluator.makeTopLevelTypeVarsConcrete(baseType);
+            const memberName = node.parent.d.member.d.value;
+            doForEachSubtype(baseType, (subtype) => {
+                let symbol: Symbol | undefined;
+
+                subtype = evaluator.makeTopLevelTypeVarsConcrete(subtype);
+
+                if (isInstantiableClass(subtype)) {
+                    // Try to find a member that has a declared type. If so, that
+                    // overrides any inferred types.
+                    let member = lookUpClassMember(subtype, memberName, MemberAccessFlags.DeclaredTypesOnly);
+                    if (!member) {
+                        member = lookUpClassMember(subtype, memberName);
+                    }
+
+                    if (!member) {
+                        const metaclass = subtype.shared.effectiveMetaclass;
+                        if (metaclass && isInstantiableClass(metaclass)) {
+                            member = lookUpClassMember(metaclass, memberName);
+                        }
+                    }
+
+                    if (member) {
+                        symbol = member.symbol;
+                    }
+                } else if (isClassInstance(subtype)) {
+                    // Try to find a member that has a declared type. If so, that
+                    // overrides any inferred types.
+                    let member = lookUpObjectMember(subtype, memberName, MemberAccessFlags.DeclaredTypesOnly);
+                    if (!member) {
+                        member = lookUpObjectMember(subtype, memberName);
+                    }
+                    if (member) {
+                        symbol = member.symbol;
+                    }
+                } else if (isModule(subtype)) {
+                    symbol = ModuleType.getField(subtype, memberName);
+                }
+
+                if (symbol) {
+                    // By default, report only the declarations that have type annotations.
+                    // If there are none, then report all of the unannotated declarations,
+                    // which includes every assignment of that symbol.
+                    const typedDecls = symbol.getTypedDeclarations();
+                    if (typedDecls.length > 0) {
+                        appendArray(decls, typedDecls);
+                    } else {
+                        appendArray(decls, symbol.getDeclarations());
+                    }
+
+                    const synthTypeInfo = symbol.getSynthesizedType();
+                    if (synthTypeInfo) {
+                        synthesizedTypes.push(synthTypeInfo);
+                    }
+                }
+            });
+        }
+    } else if (node.parent && node.parent.nodeType === ParseNodeType.ModuleName) {
+        const namePartIndex = node.parent.d.nameParts.findIndex((part) => part === node);
+        const importInfo = AnalyzerNodeInfo.getImportInfo(node.parent);
+        if (
+            namePartIndex >= 0 &&
+            importInfo &&
+            !importInfo.isNativeLib &&
+            namePartIndex < importInfo.resolvedUris.length
+        ) {
+            if (importInfo.resolvedUris[namePartIndex]) {
+                evaluator.evaluateTypesForStatement(node);
+
+                // Synthesize an alias declaration for this name part. The only
+                // time this case is used is for IDE services such as
+                // the find all references, hover provider and etc.
+                decls.push(synthesizeAliasDeclaration(importInfo.resolvedUris[namePartIndex]));
+            }
+        }
+    } else if (node.parent && node.parent.nodeType === ParseNodeType.Argument && node === node.parent.d.name) {
+        // The target node is the name in a keyword argument. We need to determine whether
+        // the corresponding keyword parameter can be determined from the context.
+        const argNode = node.parent;
+        const paramName = node.d.value;
+        if (argNode.parent?.nodeType === ParseNodeType.Call) {
+            const baseType = evaluator.getType(argNode.parent.d.leftExpr);
+
+            if (baseType) {
+                if (isFunction(baseType) && baseType.shared.declaration) {
+                    const paramDecl = getDeclarationFromKeywordParamForFunction(baseType, paramName);
+                    if (paramDecl) {
+                        decls.push(paramDecl);
+                    }
+                } else if (isOverloaded(baseType)) {
+                    OverloadedType.getOverloads(baseType).forEach((f) => {
+                        const paramDecl = getDeclarationFromKeywordParamForFunction(f, paramName);
+                        if (paramDecl) {
+                            decls.push(paramDecl);
+                        }
+                    });
+                } else if (isInstantiableClass(baseType)) {
+                    const initMethodType = getBoundInitMethod(
+                        evaluator,
+                        argNode.parent.d.leftExpr,
+                        ClassType.cloneAsInstance(baseType)
+                    )?.type;
+
+                    if (initMethodType && isFunction(initMethodType)) {
+                        const paramDecl = getDeclarationFromKeywordParamForFunction(initMethodType, paramName);
+                        if (paramDecl) {
+                            decls.push(paramDecl);
+                        } else if (
+                            ClassType.isDataClass(baseType) ||
+                            ClassType.isTypedDictClass(baseType) ||
+                            ClassType.hasNamedTupleEntry(baseType, paramName)
+                        ) {
+                            const lookupResults = lookUpClassMember(baseType, paramName);
+
+                            if (lookupResults) {
+                                appendArray(decls, lookupResults.symbol.getDeclarations());
+
+                                const synthTypeInfo = lookupResults.symbol.getSynthesizedType();
+                                if (synthTypeInfo) {
+                                    synthesizedTypes.push(synthTypeInfo);
+                                }
+                            }
+                        }
+                    } else if (
+                        ClassType.isDataClass(baseType) ||
+                        ClassType.isTypedDictClass(baseType) ||
+                        ClassType.hasNamedTupleEntry(baseType, paramName)
+                    ) {
+                        // Some synthesized callables (notably TypedDict "constructors") don't have a
+                        // meaningful __init__ signature we can map keyword arguments to. In these cases,
+                        // treat the keyword as referring to the class entry so IDE features like
+                        // go-to-definition and rename can bind to the field declaration.
+                        const lookupResults = lookUpClassMember(baseType, paramName);
+
+                        if (lookupResults) {
+                            appendArray(decls, lookupResults.symbol.getDeclarations());
+
+                            const synthTypeInfo = lookupResults.symbol.getSynthesizedType();
+                            if (synthTypeInfo) {
+                                synthesizedTypes.push(synthTypeInfo);
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (argNode.parent?.nodeType === ParseNodeType.Class) {
+            const classTypeResult = evaluator.getTypeOfClass(argNode.parent);
+
+            // Validate the init subclass args for this class so we can properly
+            // evaluate its custom keyword parameters.
+            if (classTypeResult) {
+                evaluator.validateInitSubclassArgs(argNode.parent, classTypeResult.classType);
+            }
+        }
+    } else {
+        const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
+
+        // Determine if this node is within a quoted type annotation.
+        const isWithinTypeAnnotation = ParseTreeUtils.isWithinTypeAnnotation(
+            node,
+            !isAnnotationEvaluationPostponed(AnalyzerNodeInfo.getFileInfo(node))
+        );
+
+        // Determine if this is part of a "type" statement.
+        const isWithinTypeAliasStatement = !!ParseTreeUtils.getParentNodeOfType(node, ParseNodeType.TypeAlias);
+        const allowForwardReferences = isWithinTypeAnnotation || isWithinTypeAliasStatement || fileInfo.isStubFile;
+
+        const symbolWithScope = evaluator.lookUpSymbolRecursive(
+            node,
+            node.d.value,
+            !allowForwardReferences,
+            isWithinTypeAnnotation
+        );
+
+        if (symbolWithScope) {
+            appendArray(decls, symbolWithScope.symbol.getDeclarations());
+
+            const synthTypeInfo = symbolWithScope.symbol.getSynthesizedType();
+            if (synthTypeInfo) {
+                synthesizedTypes.push(synthTypeInfo);
+            }
+        }
+    }
+
+    return { decls, synthesizedTypes };
 }
