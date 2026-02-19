@@ -71,9 +71,9 @@ This module accepts a `DiagnosticsContext` so it can operate without importing t
     - **Phase 3b** (`AddDiagnosticFn` callback injection): 20 functions including `createSpecialTypeFromArgs`, `createCallableTypeFromArgs`, `createAnnotatedTypeFromArgs`, `createOptionalTypeFromArgs`, `createTypeFormTypeFromArgs`, `createTypeGuardTypeFromArgs`, `createUnionTypeFromArgs`.
     - **Phase 4** (`TypeEvaluator` param injection): 22 functions including `adjustTypeArgsForTypeVarTuple` (144), `transformTypeForTypeAlias` (125), `isTypeComparable` (129), `adjustSourceParamDetailsForDestVariadic` (97), `createRequiredOrReadOnlyType` (96), `getTypeOfExpressionExpectingType` (82), `computeEffectiveMetaclass` (63), `isUnambiguousInference` (59), `convertToTypeFormType` (51), `assignConditionalTypeToTypeVar` (66), `createSubclass` (49), `isTypeHashable` (45), `isProperSubtype` (39), `isOverrideMethodApplicable` (37), `expandPromotionTypes` (34), `assignRecursiveTypeAliasToSelf` (34), `getTypeOfSlice` (41), `transformVariadicParamType` (41), `getTypeOfYieldFrom` (30), `isPossibleTypeDictFactoryCall` (32), `validateTypeIsInstantiable` (45), `reportPossibleUnknownAssignment` (43).
 - Current state:
-  - `typeEvaluator.ts` reduced from ~28,000 to ~19,943 lines (~8,057 lines extracted or removed).
-  - `evaluatorCore.ts` now contains **~107 exported functions** (~5,346 lines).
-  - **Phase 5** (deeper extraction) in progress — established two new context-injection patterns:
+  - `typeEvaluator.ts` reduced from ~28,000 to ~19,835 lines (~8,165 lines extracted or removed).
+  - `evaluatorCore.ts` now contains **~110 exported functions** (~5,459 lines).
+  - **Phase 5** (deeper extraction) — established two new context-injection patterns:
     - `codeFlowEngine: CodeFlowEngine` + `isFlowPathBetweenNodes` callback for flow-dependent functions
     - `evaluator: TypeEvaluator` with expanded interface (added `preferGlobalScope` to `lookUpSymbolRecursive`, `recursionCount` to `isTypeSubsumedByOtherType`)
   - Phase 5 extractions:
@@ -83,9 +83,16 @@ This module accepts a `DiagnosticsContext` so it can operate without importing t
     - Batch 4: `validateOverrideMethod` (130), `validateOverrideMethodInternal` (400), `applyTypeArgToTypeVar` (125) — total ~660 lines
     - Batch 5: `bindFunctionToClassOrObject` (87), `partiallySpecializeBoundMethod` (110) — total ~200 lines
     - Batch 6: `makeTopLevelTypeVarsConcrete` (132), `printSrcDestTypes` (22) — total ~155 lines
-  - Remaining ~240 functions fall into two categories:
-    1. Functions that call `writeTypeCache`/`readTypeCache` directly (~60 call sites) — require cache access injection
-    2. Functions that call other inner functions not on the TypeEvaluator interface — require either interface expansion or deeper restructuring
+    - Batch 7: `inferVarianceForTypeAlias` (30), `updateUsageVariancesRecursive` (100) — total ~130 lines
+  - **Phase 5 extraction limit reached.** Remaining ~240 functions depend on closure variables that block extraction:
+    1. `writeTypeCache`/`readTypeCache`/`readTypeCacheEntry` (~60+ call sites) — the core cache mechanism
+    2. `getTypeOfExpression` / `evaluateTypesFor*` — the main expression evaluation entry points
+    3. `speculativeTypeTracker` / `effectiveTypeCache` / `isTypeCached` — speculative evaluation state
+    4. `addDiagnostic` (direct calls, not via `AddDiagnosticFn`) — diagnostic emission
+    5. `getBuiltInType` / `getBuiltInObject` / `getTypingType` / `getTypesType` — stdlib lookups
+    6. `getNoneType()` / `getObjectType()` / `getTypeClassType()` — prefetched type accessors used directly
+    7. `deferredClassCompletions` — mutable closure state
+  - **Next step to unblock further extraction**: Create an `InternalTypeEvaluator` interface (extending `TypeEvaluator`) that adds `writeTypeCache`, `readTypeCache`, `getTypeOfExpression`, `speculativeTypeTracker`, etc. This would allow the next ~100+ functions to be extracted.
 
 ## Planned breakdown (future slices)
 
