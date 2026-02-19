@@ -6,8 +6,9 @@
  * Small extraction helpers for type evaluator core behavior.
  */
 
-import { ArgumentNode, ExpressionNode, ImportFromAsNode, NameNode, ParseNode, ParseNodeType } from '../../parser/parseNodes';
+import { ArgumentNode, ExpressionNode, ImportFromAsNode, NameNode, ParseNode, ParseNodeType, StringListNode } from '../../parser/parseNodes';
 import { KeywordType, OperatorType } from '../../parser/tokenizerTypes';
+import { Parser, ParseOptions, ParseTextMode } from '../../parser/parser';
 import { TextRange } from '../../common/textRange';
 import { TextRangeCollection } from '../../common/textRangeCollection';
 import { assert } from '../../common/debug';
@@ -564,5 +565,54 @@ export function getTypeClassTypeFromPrefetched(prefetched: Partial<PrefetchedTyp
     if (prefetched?.typeClass && isInstantiableClass(prefetched.typeClass)) {
         return prefetched.typeClass;
     }
+    return undefined;
+}
+
+export function parseStringAsTypeAnnotationNode(node: StringListNode, reportErrors: boolean): ExpressionNode | undefined {
+    const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
+    const parser = new Parser();
+    const textValue = node.d.strings[0].d.value;
+
+    let valueOffset = node.d.strings[0].start;
+    if (node.d.strings[0].nodeType === ParseNodeType.String) {
+        valueOffset += node.d.strings[0].d.token.prefixLength + node.d.strings[0].d.token.quoteMarkLength;
+    }
+
+    const dummyFileContents = ' '.repeat(valueOffset) + textValue;
+
+    const parseOptions = new ParseOptions();
+    parseOptions.isStubFile = fileInfo.isStubFile;
+    parseOptions.pythonVersion = fileInfo.executionEnvironment.pythonVersion;
+    parseOptions.reportErrorsForParsedStringContents = true;
+
+    const parseResults = parser.parseTextExpression(
+        dummyFileContents,
+        valueOffset,
+        textValue.length,
+        parseOptions,
+        ParseTextMode.Expression,
+        /* initialParenDepth */ undefined,
+        fileInfo.typingSymbolAliases
+    );
+
+    if (parseResults.parseTree) {
+        if (!reportErrors && parseResults.diagnostics.length > 0) {
+            return undefined;
+        }
+
+        const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
+        parseResults.diagnostics.forEach((diag: { message: string; }) => {
+            fileInfo.diagnosticSink.addDiagnosticWithTextRange('error', diag.message, node);
+        });
+
+        parseResults.parseTree.parent = node;
+
+        if (reportErrors) {
+            node.d.annotation = parseResults.parseTree;
+        }
+
+        return parseResults.parseTree;
+    }
+
     return undefined;
 }

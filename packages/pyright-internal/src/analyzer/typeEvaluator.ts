@@ -27763,61 +27763,7 @@ export function createTypeEvaluator(
     // expression tree because we don't want to mutate the latter; the
     // expression tree created by this function is therefore used only temporarily.
     function parseStringAsTypeAnnotation(node: StringListNode, reportErrors: boolean): ExpressionNode | undefined {
-        const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-        const parser = new Parser();
-        const textValue = node.d.strings[0].d.value;
-
-        // Determine the offset within the file where the string
-        // literal's contents begin.
-        let valueOffset = node.d.strings[0].start;
-        if (node.d.strings[0].nodeType === ParseNodeType.String) {
-            valueOffset += node.d.strings[0].d.token.prefixLength + node.d.strings[0].d.token.quoteMarkLength;
-        }
-
-        // Construct a temporary dummy string with the text value at the appropriate
-        // offset so as to mimic the original file. This will keep all of the token
-        // and diagnostic offsets correct.
-        const dummyFileContents = ' '.repeat(valueOffset) + textValue;
-
-        const parseOptions = new ParseOptions();
-        parseOptions.isStubFile = fileInfo.isStubFile;
-        parseOptions.pythonVersion = fileInfo.executionEnvironment.pythonVersion;
-        parseOptions.reportErrorsForParsedStringContents = true;
-
-        const parseResults = parser.parseTextExpression(
-            dummyFileContents,
-            valueOffset,
-            textValue.length,
-            parseOptions,
-            ParseTextMode.Expression,
-            /* initialParenDepth */ undefined,
-            fileInfo.typingSymbolAliases
-        );
-
-        if (parseResults.parseTree) {
-            // If there are errors but we are not reporting them, return
-            // undefined to indicate that the parse failed.
-            if (!reportErrors && parseResults.diagnostics.length > 0) {
-                return undefined;
-            }
-
-            const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-            parseResults.diagnostics.forEach((diag) => {
-                fileInfo.diagnosticSink.addDiagnosticWithTextRange('error', diag.message, node);
-            });
-
-            parseResults.parseTree.parent = node;
-
-            // Optionally add the new subtree to the parse tree so it can
-            // participate in language server operations like find and replace.
-            if (reportErrors) {
-                node.d.annotation = parseResults.parseTree;
-            }
-
-            return parseResults.parseTree;
-        }
-
-        return undefined;
+        return TypeEvaluatorCore.parseStringAsTypeAnnotationNode(node, reportErrors);
     }
 
     // Given a code flow node and a constrained TypeVar, determines whether that type
