@@ -293,7 +293,7 @@ Observations captured during the refactoring process. All items should be profil
 
 - **`writeTypeCache` / `readTypeCache` hot path**: The most heavily called closure functions. Profile whether the current `Map`-based cache has significant overhead for very large projects; consider whether a `WeakMap` keyed on parse nodes could reduce GC pressure.
 - **Speculative evaluation cost**: `useSpeculativeMode` / `isSpeculativeModeInUse` wrap many call sites. Investigate whether speculative evaluation is triggered unnecessarily in cases where the result is never used (e.g., abandoned overload candidates).
-- **`makeTopLevelTypeVarsConcrete` redundant calls**: Called repeatedly on the same type in many code paths. Consider memoizing results or adding an "already concretized" flag to `TypeBase`.
+- **`makeTopLevelTypeVarsConcrete` redundant calls**: 88 call sites across the analyzer. For non-TypeVar, non-Union types (the common case), the function is a no-op but still allocates a `mapSubtypes` closure and iterates. Potential optimization: add an early-return guard (`if (type.category !== TypeCategory.TypeVar && !isUnion(type)) return type;`) after `transformPossibleRecursiveTypeAlias`. Needs benchmarking to confirm impact.
 - **`assignType` recursion depth**: Deep class hierarchies and generic types can cause deep recursion. Profile whether iterative approaches or early bailouts for common cases (e.g., same-class assignment) would help.
 - **`typePromotions` map lookups**: Currently a small static map (3 entries), checked on every `expandPromotionTypes` call. If this ever becomes a bottleneck, could be replaced with a flag on `ClassType.shared`.
 
