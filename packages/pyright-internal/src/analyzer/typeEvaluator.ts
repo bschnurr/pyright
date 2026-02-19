@@ -1472,19 +1472,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfEllipsis(flags: EvalFlags, typeResult: TypeResult | undefined, node: ExpressionNode) {
-        if ((flags & EvalFlags.ConvertEllipsisToAny) !== 0) {
-            typeResult = { type: AnyType.create(/* isEllipsis */ true) };
-        } else {
-            if ((flags & EvalFlags.TypeExpression) !== 0 && (flags & EvalFlags.AllowEllipsis) === 0) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.ellipsisContext(), node);
-                typeResult = { type: UnknownType.create() };
-            } else {
-                const ellipsisType =
-                    getBuiltInObject(node, 'EllipsisType') ?? getBuiltInObject(node, 'ellipsis') ?? AnyType.create();
-                typeResult = { type: ellipsisType };
-            }
-        }
-        return typeResult;
+        return TypeEvaluatorCore.getTypeOfEllipsisWithEvaluator(evaluatorInterface, flags, typeResult, node);
     }
 
     function getTypeOfNumber(node: NumberNode, typeResult: TypeResult | undefined) {
@@ -6358,59 +6346,7 @@ export function createTypeEvaluator(
     // to determine the lambda's type. It needs to be inferred from the argument
     // types instead.
     function getTypeOfLambdaForCall(node: CallNode, inferenceContext: InferenceContext | undefined): TypeResult {
-        assert(node.d.leftExpr.nodeType === ParseNodeType.Lambda);
-
-        const expectedType = FunctionType.createSynthesizedInstance('');
-        expectedType.shared.declaredReturnType = inferenceContext
-            ? inferenceContext.expectedType
-            : UnknownType.create();
-
-        let isArgTypeIncomplete = false;
-        node.d.args.forEach((arg, index) => {
-            const argTypeResult = getTypeOfExpression(arg.d.valueExpr);
-            if (argTypeResult.isIncomplete) {
-                isArgTypeIncomplete = true;
-            }
-
-            FunctionType.addParam(
-                expectedType,
-                FunctionParam.create(
-                    ParamCategory.Simple,
-                    argTypeResult.type,
-                    FunctionParamFlags.NameSynthesized | FunctionParamFlags.TypeDeclared,
-                    `p${index.toString()}`
-                )
-            );
-        });
-
-        // If the lambda's param list ends with a "/" positional parameter separator,
-        // add a corresponding separator to the expected type.
-        const lambdaParams = node.d.leftExpr.d.params;
-        if (lambdaParams.length > 0) {
-            const lastParam = lambdaParams[lambdaParams.length - 1];
-            if (lastParam.d.category === ParamCategory.Simple && !lastParam.d.name) {
-                FunctionType.addPositionOnlyParamSeparator(expectedType);
-            }
-        }
-
-        function getLambdaType() {
-            return getTypeOfExpression(node.d.leftExpr, EvalFlags.CallBaseDefaults, makeInferenceContext(expectedType));
-        }
-
-        // If one or more of the arguments are incomplete, use speculative mode
-        // for the lambda evaluation because it may need to be reevaluated once
-        // the arg types are complete.
-        let typeResult =
-            isArgTypeIncomplete || isSpeculativeModeInUse(node) || inferenceContext?.isTypeIncomplete
-                ? useSpeculativeMode(node.d.leftExpr, getLambdaType)
-                : getLambdaType();
-
-        // If bidirectional type inference failed, use normal type inference instead.
-        if (typeResult.typeErrors) {
-            typeResult = getTypeOfExpression(node.d.leftExpr, EvalFlags.CallBaseDefaults);
-        }
-
-        return typeResult;
+        return TypeEvaluatorCore.getTypeOfLambdaForCallWithEvaluator(evaluatorInterface, node, inferenceContext);
     }
 
     function getTypeOfTypeForm(node: CallNode, typeFormClass: ClassType): TypeResult {
@@ -10379,21 +10315,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeVarTupleDefaultType(node: ExpressionNode, isPep695Syntax: boolean): Type | undefined {
-        const argType = getTypeOfExpressionExpectingType(node, {
-            allowUnpackedTuple: true,
-            allowTypeVarsWithoutScopeId: true,
-            forwardRefs: isPep695Syntax,
-            typeExpression: true,
-        }).type;
-        const isUnpackedTuple = isClass(argType) && isTupleClass(argType) && argType.priv.isUnpacked;
-        const isUnpackedTypeVar = isUnpackedTypeVarTuple(argType);
-
-        if (!isUnpackedTuple && !isUnpackedTypeVar) {
-            addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.typeVarTupleDefaultNotUnpacked(), node);
-            return undefined;
-        }
-
-        return convertToInstance(argType);
+        return TypeEvaluatorCore.getTypeVarTupleDefaultTypeWithEvaluator(evaluatorInterface, node, isPep695Syntax);
     }
 
     function createParamSpecType(errorNode: ExpressionNode, classType: ClassType, argList: Arg[]): Type | undefined {
@@ -14894,20 +14816,7 @@ export function createTypeEvaluator(
     }
 
     function adjustParamAnnotatedType(param: ParameterNode, type: Type): Type {
-        // PEP 484 indicates that if a parameter has a default value of 'None'
-        // the type checker should assume that the type is optional (i.e. a union
-        // of the specified type and 'None'). Skip this step if the type is already
-        // optional to avoid losing alias names when combining the types.
-        if (
-            param.d.defaultValue?.nodeType === ParseNodeType.Constant &&
-            param.d.defaultValue.d.constType === KeywordType.None &&
-            !isOptionalType(type) &&
-            !AnalyzerNodeInfo.getFileInfo(param).diagnosticRuleSet.strictParameterNoneValue
-        ) {
-            return combineTypes([type, getNoneType()]);
-        }
-
-        return type;
+        return TypeEvaluatorCore.adjustParamAnnotatedTypeWithEvaluator(evaluatorInterface, param, type);
     }
 
     // Attempts to infer an unannotated parameter type from available context.
@@ -16525,19 +16434,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfArg(arg: Arg, inferenceContext: InferenceContext | undefined): TypeResult {
-        if (arg.typeResult) {
-            const type = arg.typeResult.type;
-            return { type: type?.props?.specialForm ?? type, isIncomplete: arg.typeResult.isIncomplete };
-        }
-
-        if (!arg.valueExpression) {
-            // We shouldn't ever get here, but just in case.
-            return { type: UnknownType.create() };
-        }
-
-        // If there was no defined type provided, there should always
-        // be a value expression from which we can retrieve the type.
-        return getTypeOfExpression(arg.valueExpression, /* flags */ undefined, inferenceContext);
+        return TypeEvaluatorCore.getTypeOfArgWithEvaluator(evaluatorInterface, arg, inferenceContext);
     }
 
     // This function is like getTypeOfArg except that it is
@@ -16560,30 +16457,11 @@ export function createTypeEvaluator(
     }
 
     function getBuiltInType(node: ParseNode, name: string): Type {
-        const scope = ScopeUtils.getScopeForNode(node);
-        if (scope) {
-            const builtInScope = ScopeUtils.getBuiltInScope(scope);
-            const nameType = builtInScope.lookUpSymbol(name);
-            if (nameType) {
-                return getEffectiveTypeOfSymbol(nameType);
-            }
-        }
-
-        return UnknownType.create();
+        return TypeEvaluatorCore.getBuiltInTypeWithEvaluator(evaluatorInterface, node, name);
     }
 
     function getBuiltInObject(node: ParseNode, name: string, typeArgs?: Type[]) {
-        const nameType = getBuiltInType(node, name);
-        if (isInstantiableClass(nameType)) {
-            let classType = nameType;
-            if (typeArgs) {
-                classType = ClassType.specialize(classType, typeArgs);
-            }
-
-            return ClassType.cloneAsInstance(classType);
-        }
-
-        return nameType;
+        return TypeEvaluatorCore.getBuiltInObjectWithEvaluator(evaluatorInterface, node, name, typeArgs);
     }
 
     function lookUpSymbolRecursive(
@@ -18133,30 +18011,11 @@ export function createTypeEvaluator(
     // unaltered unless the function is a generator, in which case it is
     // modified to return only the return type for the generator.
     function getDeclaredReturnType(node: FunctionNode): Type | undefined {
-        const functionTypeInfo = getTypeOfFunction(node);
-        const returnType = functionTypeInfo?.functionType.shared.declaredReturnType;
-
-        if (!returnType) {
-            return undefined;
-        }
-
-        if (FunctionType.isGenerator(functionTypeInfo.functionType)) {
-            return getDeclaredGeneratorReturnType(functionTypeInfo.functionType);
-        }
-
-        return returnType;
+        return TypeEvaluatorCore.getDeclaredReturnTypeWithEvaluator(evaluatorInterface, node);
     }
 
     function getTypeOfMember(member: ClassMember): Type {
-        if (isInstantiableClass(member.classType)) {
-            return partiallySpecializeType(
-                getEffectiveTypeOfSymbol(member.symbol),
-                member.classType,
-                getTypeClassType(),
-                /* selfClass */ undefined
-            );
-        }
-        return UnknownType.create();
+        return TypeEvaluatorCore.getTypeOfMemberWithEvaluator(evaluatorInterface, member);
     }
 
     function getTypeOfMemberInternal(
@@ -19864,20 +19723,7 @@ export function createTypeEvaluator(
     }
 
     function isExplicitTypeAliasDeclaration(decl: Declaration): boolean {
-        if (decl.type !== DeclarationType.Variable || !decl.typeAnnotationNode) {
-            return false;
-        }
-
-        if (
-            decl.typeAnnotationNode.nodeType !== ParseNodeType.Name &&
-            decl.typeAnnotationNode.nodeType !== ParseNodeType.MemberAccess &&
-            decl.typeAnnotationNode.nodeType !== ParseNodeType.StringList
-        ) {
-            return false;
-        }
-
-        const type = getTypeOfAnnotation(decl.typeAnnotationNode, { varTypeAnnotation: true, allowClassVar: true });
-        return isClassInstance(type) && ClassType.isBuiltIn(type, 'TypeAlias');
+        return TypeEvaluatorCore.isExplicitTypeAliasDeclarationWithEvaluator(evaluatorInterface, decl);
     }
 
     function isPossibleTypeAliasDeclaration(decl: Declaration): boolean {

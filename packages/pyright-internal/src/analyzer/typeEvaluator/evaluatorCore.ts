@@ -11,7 +11,7 @@ import { PythonVersion, pythonVersion3_9 } from '../../common/pythonVersion';
 import { Diagnostic, DiagnosticAddendum } from '../../common/diagnostic';
 import { DiagnosticRule } from '../../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../../localization/localize';
-import { ArgCategory, ArgumentNode, AssignmentNode, CallNode, ComprehensionForIfNode, ExpressionNode, FunctionNode, ImportAsNode, ImportFromAsNode, ImportFromNode, IndexNode, NameNode, ParamCategory, ParseNode, ParseNodeType, SliceNode, StringListNode, StringNode, TypeParameterNode, UnpackNode, YieldFromNode, YieldNode } from '../../parser/parseNodes';
+import { ArgCategory, ArgumentNode, AssignmentNode, CallNode, ComprehensionForIfNode, ExpressionNode, FunctionNode, ImportAsNode, ImportFromAsNode, ImportFromNode, IndexNode, LambdaNode, NameNode, ParamCategory, ParameterNode, ParseNode, ParseNodeType, SliceNode, StringListNode, StringNode, TypeParameterNode, UnpackNode, YieldFromNode, YieldNode } from '../../parser/parseNodes';
 import { KeywordType, OperatorType, StringTokenFlags } from '../../parser/tokenizerTypes';
 import { Parser, ParseOptions, ParseTextMode } from '../../parser/parser';
 import { TextRange } from '../../common/textRange';
@@ -26,7 +26,7 @@ import { Declaration, DeclarationType, FunctionDeclaration } from '../declaratio
 import { Arg, ArgWithExpression, AssignTypeFlags, CallResult, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, MagicMethodDeprecationInfo, PrefetchedTypes, PrintTypeOptions, Reachability, SymbolDeclInfo, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
 import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, InheritanceChain, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isOverloaded, isParamSpec, isPositionOnlySeparator, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, maxTypeRecursionCount, ModuleType, NeverType, OverloadedType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeCategory, TypeCondition, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnionType, UnknownType, Variance } from '../types';
-import { addConditionToType, areTypesSame, combineSameSizedTuples, combineVariances, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromAnyOrUnknown, derivesFromClassRecursive, derivesFromStdlibClass, doForEachSubtype, addTypeVarsToListIfUnique, explodeGenericClass, getGeneratorTypeArgs, getGeneratorYieldType, getSpecializedTupleType, getTypeCondition, getTypeVarArgsRecursive, getTypeVarScopeIds, getUnknownTypeForCallable, InferenceContext, invertVariance, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralLikeType, isLiteralType, isMetaclassInstance, isNoneInstance, isNoneTypeClass, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTupleIndexUnambiguous, isTypeAliasPlaceholder, isUnboundedTupleClass, isVarianceOfTypeArgCompatible, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeInferenceContext, makeTypeVarsBound, mapSignatures, mapSubtypes, MemberAccessFlags, partiallySpecializeType, removeNoneFromUnion, requiresSpecialization, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeForBaseClass, specializeWithDefaultTypeArgs, specializeTupleClass, stripTypeForm, synthesizeTypeVarForSelfCls, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
+import { addConditionToType, areTypesSame, ClassMember, combineSameSizedTuples, combineVariances, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromAnyOrUnknown, derivesFromClassRecursive, derivesFromStdlibClass, doForEachSubtype, addTypeVarsToListIfUnique, explodeGenericClass, getDeclaredGeneratorReturnType, getGeneratorTypeArgs, getGeneratorYieldType, getSpecializedTupleType, getTypeCondition, getTypeVarArgsRecursive, getTypeVarScopeIds, getUnknownTypeForCallable, InferenceContext, invertVariance, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralLikeType, isLiteralType, isMetaclassInstance, isNoneInstance, isNoneTypeClass, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTupleIndexUnambiguous, isTypeAliasPlaceholder, isUnboundedTupleClass, isVarianceOfTypeArgCompatible, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeInferenceContext, makeTypeVarsBound, mapSignatures, mapSubtypes, MemberAccessFlags, partiallySpecializeType, removeNoneFromUnion, requiresSpecialization, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeForBaseClass, specializeWithDefaultTypeArgs, specializeTupleClass, stripTypeForm, synthesizeTypeVarForSelfCls, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails, ParamKind, ParamListDetails, VirtualParamDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 import { assignTupleTypeArgs, getSlicedTupleType, makeTupleObject } from '../tuples';
@@ -9208,4 +9208,237 @@ export function getTypeOfRevealLocalsWithEvaluator(
     }
 
     return evaluator.getNoneType();
+}
+
+export function getTypeOfLambdaForCallWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: CallNode,
+    inferenceContext: InferenceContext | undefined
+): TypeResult {
+    assert(node.d.leftExpr.nodeType === ParseNodeType.Lambda);
+
+    const expectedType = FunctionType.createSynthesizedInstance('');
+    expectedType.shared.declaredReturnType = inferenceContext
+        ? inferenceContext.expectedType
+        : UnknownType.create();
+
+    let isArgTypeIncomplete = false;
+    node.d.args.forEach((arg, index) => {
+        const argTypeResult = evaluator.getTypeOfExpression(arg.d.valueExpr);
+        if (argTypeResult.isIncomplete) {
+            isArgTypeIncomplete = true;
+        }
+
+        FunctionType.addParam(
+            expectedType,
+            FunctionParam.create(
+                ParamCategory.Simple,
+                argTypeResult.type,
+                FunctionParamFlags.NameSynthesized | FunctionParamFlags.TypeDeclared,
+                `p${index.toString()}`
+            )
+        );
+    });
+
+    // If the lambda's param list ends with a "/" positional parameter separator,
+    // add a corresponding separator to the expected type.
+    const lambdaParams = (node.d.leftExpr as LambdaNode).d.params;
+    if (lambdaParams.length > 0) {
+        const lastParam = lambdaParams[lambdaParams.length - 1];
+        if (lastParam.d.category === ParamCategory.Simple && !lastParam.d.name) {
+            FunctionType.addPositionOnlyParamSeparator(expectedType);
+        }
+    }
+
+    function getLambdaType() {
+        return evaluator.getTypeOfExpression(node.d.leftExpr, EvalFlags.CallBaseDefaults, makeInferenceContext(expectedType));
+    }
+
+    // If one or more of the arguments are incomplete, use speculative mode
+    // for the lambda evaluation because it may need to be reevaluated once
+    // the arg types are complete.
+    let typeResult =
+        isArgTypeIncomplete || evaluator.isSpeculativeModeInUse(node) || inferenceContext?.isTypeIncomplete
+            ? evaluator.useSpeculativeMode(node.d.leftExpr, getLambdaType)
+            : getLambdaType();
+
+    // If bidirectional type inference failed, use normal type inference instead.
+    if (typeResult.typeErrors) {
+        typeResult = evaluator.getTypeOfExpression(node.d.leftExpr, EvalFlags.CallBaseDefaults);
+    }
+
+    return typeResult;
+}
+
+export function getTypeVarTupleDefaultTypeWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: ExpressionNode,
+    isPep695Syntax: boolean
+): Type | undefined {
+    const argType = evaluator.getTypeOfExpressionExpectingType(node, {
+        allowUnpackedTuple: true,
+        allowTypeVarsWithoutScopeId: true,
+        forwardRefs: isPep695Syntax,
+        typeExpression: true,
+    }).type;
+    const isUnpackedTuple = isClass(argType) && isTupleClass(argType) && argType.priv.isUnpacked;
+    const isUnpackedTypeVar = isUnpackedTypeVarTuple(argType);
+
+    if (!isUnpackedTuple && !isUnpackedTypeVar) {
+        evaluator.addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.typeVarTupleDefaultNotUnpacked(), node);
+        return undefined;
+    }
+
+    return convertToInstance(argType);
+}
+
+export function adjustParamAnnotatedTypeWithEvaluator(
+    evaluator: TypeEvaluator,
+    param: ParameterNode,
+    type: Type
+): Type {
+    // PEP 484 indicates that if a parameter has a default value of 'None'
+    // the type checker should assume that the type is optional (i.e. a union
+    // of the specified type and 'None'). Skip this step if the type is already
+    // optional to avoid losing alias names when combining the types.
+    if (
+        param.d.defaultValue?.nodeType === ParseNodeType.Constant &&
+        param.d.defaultValue.d.constType === KeywordType.None &&
+        !isOptionalType(type) &&
+        !AnalyzerNodeInfo.getFileInfo(param).diagnosticRuleSet.strictParameterNoneValue
+    ) {
+        return combineTypes([type, evaluator.getNoneType()]);
+    }
+
+    return type;
+}
+
+export function isExplicitTypeAliasDeclarationWithEvaluator(
+    evaluator: TypeEvaluator,
+    decl: Declaration
+): boolean {
+    if (decl.type !== DeclarationType.Variable || !decl.typeAnnotationNode) {
+        return false;
+    }
+
+    if (
+        decl.typeAnnotationNode.nodeType !== ParseNodeType.Name &&
+        decl.typeAnnotationNode.nodeType !== ParseNodeType.MemberAccess &&
+        decl.typeAnnotationNode.nodeType !== ParseNodeType.StringList
+    ) {
+        return false;
+    }
+
+    const type = evaluator.getTypeOfAnnotation(decl.typeAnnotationNode, { varTypeAnnotation: true, allowClassVar: true });
+    return isClassInstance(type) && ClassType.isBuiltIn(type, 'TypeAlias');
+}
+
+export function getTypeOfEllipsisWithEvaluator(
+    evaluator: TypeEvaluator,
+    flags: EvalFlags,
+    typeResult: TypeResult | undefined,
+    node: ExpressionNode
+) {
+    if ((flags & EvalFlags.ConvertEllipsisToAny) !== 0) {
+        typeResult = { type: AnyType.create(/* isEllipsis */ true) };
+    } else {
+        if ((flags & EvalFlags.TypeExpression) !== 0 && (flags & EvalFlags.AllowEllipsis) === 0) {
+            evaluator.addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.ellipsisContext(), node);
+            typeResult = { type: UnknownType.create() };
+        } else {
+            const ellipsisType =
+                evaluator.getBuiltInObject(node, 'EllipsisType') ?? evaluator.getBuiltInObject(node, 'ellipsis') ?? AnyType.create();
+            typeResult = { type: ellipsisType };
+        }
+    }
+    return typeResult;
+}
+
+export function getTypeOfArgWithEvaluator(
+    evaluator: TypeEvaluator,
+    arg: Arg,
+    inferenceContext: InferenceContext | undefined
+): TypeResult {
+    if (arg.typeResult) {
+        const type = arg.typeResult.type;
+        return { type: type?.props?.specialForm ?? type, isIncomplete: arg.typeResult.isIncomplete };
+    }
+
+    if (!arg.valueExpression) {
+        // We shouldn't ever get here, but just in case.
+        return { type: UnknownType.create() };
+    }
+
+    // If there was no defined type provided, there should always
+    // be a value expression from which we can retrieve the type.
+    return evaluator.getTypeOfExpression(arg.valueExpression, /* flags */ undefined, inferenceContext);
+}
+
+export function getDeclaredReturnTypeWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: FunctionNode
+): Type | undefined {
+    const functionTypeInfo = evaluator.getTypeOfFunction(node);
+    const returnType = functionTypeInfo?.functionType.shared.declaredReturnType;
+
+    if (!returnType) {
+        return undefined;
+    }
+
+    if (FunctionType.isGenerator(functionTypeInfo.functionType)) {
+        return getDeclaredGeneratorReturnType(functionTypeInfo.functionType);
+    }
+
+    return returnType;
+}
+
+export function getBuiltInTypeWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: ParseNode,
+    name: string
+): Type {
+    const scope = ScopeUtils.getScopeForNode(node);
+    if (scope) {
+        const builtInScope = ScopeUtils.getBuiltInScope(scope);
+        const nameType = builtInScope.lookUpSymbol(name);
+        if (nameType) {
+            return evaluator.getEffectiveTypeOfSymbol(nameType);
+        }
+    }
+
+    return UnknownType.create();
+}
+
+export function getBuiltInObjectWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: ParseNode,
+    name: string,
+    typeArgs?: Type[]
+) {
+    const nameType = evaluator.getBuiltInType(node, name);
+    if (isInstantiableClass(nameType)) {
+        let classType = nameType;
+        if (typeArgs) {
+            classType = ClassType.specialize(classType, typeArgs);
+        }
+
+        return ClassType.cloneAsInstance(classType);
+    }
+
+    return nameType;
+}
+
+export function getTypeOfMemberWithEvaluator(
+    evaluator: TypeEvaluator,
+    member: ClassMember
+): Type {
+    if (isInstantiableClass(member.classType)) {
+        return partiallySpecializeType(
+            evaluator.getEffectiveTypeOfSymbol(member.symbol),
+            member.classType,
+            evaluator.getTypeClassType(),
+            /* selfClass */ undefined
+        );
+    }
+    return UnknownType.create();
 }
