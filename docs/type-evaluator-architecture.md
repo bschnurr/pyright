@@ -71,9 +71,15 @@ This module accepts a `DiagnosticsContext` so it can operate without importing t
     - **Phase 3b** (`AddDiagnosticFn` callback injection): 20 functions including `createSpecialTypeFromArgs`, `createCallableTypeFromArgs`, `createAnnotatedTypeFromArgs`, `createOptionalTypeFromArgs`, `createTypeFormTypeFromArgs`, `createTypeGuardTypeFromArgs`, `createUnionTypeFromArgs`.
     - **Phase 4** (`TypeEvaluator` param injection): 22 functions including `adjustTypeArgsForTypeVarTuple` (144), `transformTypeForTypeAlias` (125), `isTypeComparable` (129), `adjustSourceParamDetailsForDestVariadic` (97), `createRequiredOrReadOnlyType` (96), `getTypeOfExpressionExpectingType` (82), `computeEffectiveMetaclass` (63), `isUnambiguousInference` (59), `convertToTypeFormType` (51), `assignConditionalTypeToTypeVar` (66), `createSubclass` (49), `isTypeHashable` (45), `isProperSubtype` (39), `isOverrideMethodApplicable` (37), `expandPromotionTypes` (34), `assignRecursiveTypeAliasToSelf` (34), `getTypeOfSlice` (41), `transformVariadicParamType` (41), `getTypeOfYieldFrom` (30), `isPossibleTypeDictFactoryCall` (32), `validateTypeIsInstantiable` (45), `reportPossibleUnknownAssignment` (43).
 - Current state:
-  - `typeEvaluator.ts` reduced from ~28,000 to ~22,410 lines (~5,590 lines extracted or removed).
-  - Phase 4 extraction is effectively complete — all remaining ~300 functions depend on deep closure state (`writeTypeCache`, `readTypeCache`, `speculativeTypeTracker`, `codeFlowEngine`, `evaluatorOptions`, etc.) or call multiple inner functions that themselves depend on closure state.
-  - Further extraction would require broader architectural changes (e.g., class-based refactor or extensive callback interfaces).
+  - `typeEvaluator.ts` reduced from ~28,000 to ~21,950 lines (~6,050 lines extracted or removed).
+  - `evaluatorCore.ts` now contains **93 exported functions** (~3,655 lines).
+  - **Phase 5** (deeper extraction) in progress — established two new context-injection patterns:
+    - `codeFlowEngine: CodeFlowEngine` + `isFlowPathBetweenNodes` callback for flow-dependent functions
+    - `evaluator: TypeEvaluator` with expanded interface (added `preferGlobalScope` to `lookUpSymbolRecursive`)
+  - Phase 5 extracted: `lookUpSymbolRecursive` (130 lines), `getDeclInfoForStringNode` (30 lines), `getDeclInfoForNameNode` (220 lines), `verifyRaiseExceptionType` (80 lines).
+  - Remaining ~280 functions fall into two categories:
+    1. Functions that call `writeTypeCache`/`readTypeCache` directly (~60 call sites) — require cache access injection
+    2. Functions that call other inner functions not on the TypeEvaluator interface — require either interface expansion or deeper restructuring
 
 ## Planned breakdown (future slices)
 
