@@ -16,8 +16,8 @@ import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
 import { ArgWithExpression, AssignTypeFlags, EvaluatorUsage } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { ClassType, isClass, isTypeVar, Type, TypeVarType } from '../types';
-import { isTypeAliasPlaceholder, isSentinelLiteral } from '../typeUtils';
+import { ClassType, FunctionParam, FunctionType, isClass, isFunction, isTypeVar, isTypeSame, isUnknown, Type, TypeBase, TypeVarType } from '../types';
+import { doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTypeAliasPlaceholder } from '../typeUtils';
 
 export interface ReturnTypeInferenceContextFrame {
     functionNode: ParseNode;
@@ -405,4 +405,56 @@ export function synthesizeTypeAliasPlaceholderForName(nameNode: NameNode, isType
     placeholder.priv.scopeId = typeVarScopeId;
 
     return placeholder;
+}
+
+export function isFinalVariableCheck(symbol: { getDeclarations(): Declaration[] }): boolean {
+    return symbol.getDeclarations().some((decl) => isFinalVariableDecl(decl));
+}
+
+export function isLegalImplicitTypeAliasTypeCheck(type: Type): boolean {
+    if (isEllipsisType(type)) {
+        return false;
+    }
+
+    if (isUnknown(type)) {
+        if (type.props?.specialForm && ClassType.isBuiltIn(type.props.specialForm, 'UnionType')) {
+            return true;
+        }
+        return false;
+    }
+
+    let isLegal = true;
+    doForEachSubtype(type, (subtype) => {
+        if (!TypeBase.isInstantiable(subtype) && !isNoneInstance(subtype)) {
+            isLegal = false;
+        }
+    });
+
+    return isLegal;
+}
+
+export function getUnknownExemptTypeVarsForReturnTypeCheck(functionType: FunctionType, returnType: Type): TypeVarType[] {
+    if (isFunction(returnType) && !returnType.shared.name) {
+        const returnTypeScopeId = returnType.shared.typeVarScopeId;
+
+        if (returnTypeScopeId && functionType.shared.typeVarScopeId) {
+            let typeVarsInReturnType = getTypeVarArgsRecursive(returnType);
+
+            functionType.shared.parameters.forEach((param, index) => {
+                if (FunctionParam.isTypeDeclared(param)) {
+                    const typeVarsInInputParam = getTypeVarArgsRecursive(
+                        FunctionType.getParamType(functionType, index)
+                    );
+                    typeVarsInReturnType = typeVarsInReturnType.filter(
+                        (returnTypeVar) =>
+                            !typeVarsInInputParam.some((inputTypeVar) => isTypeSame(returnTypeVar, inputTypeVar))
+                    );
+                }
+            });
+
+            return typeVarsInReturnType;
+        }
+    }
+
+    return [];
 }

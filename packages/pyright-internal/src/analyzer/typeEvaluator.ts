@@ -11864,34 +11864,7 @@ export function createTypeEvaluator(
     // we'll treat these as though they're scoped to the callable and leave them
     // unsolved.
     function getUnknownExemptTypeVarsForReturnType(functionType: FunctionType, returnType: Type): TypeVarType[] {
-        if (isFunction(returnType) && !returnType.shared.name) {
-            const returnTypeScopeId = returnType.shared.typeVarScopeId;
-
-            // If one or more type vars found within the return type are scoped to
-            // the functionType but don't appear anywhere else within the functionType's
-            // input parameters, rescope them to the return type callable so they are
-            // not replaced with Unknown.
-            if (returnTypeScopeId && functionType.shared.typeVarScopeId) {
-                let typeVarsInReturnType = getTypeVarArgsRecursive(returnType);
-
-                // Remove any type variables that appear in the function's input parameters.
-                functionType.shared.parameters.forEach((param, index) => {
-                    if (FunctionParam.isTypeDeclared(param)) {
-                        const typeVarsInInputParam = getTypeVarArgsRecursive(
-                            FunctionType.getParamType(functionType, index)
-                        );
-                        typeVarsInReturnType = typeVarsInReturnType.filter(
-                            (returnTypeVar) =>
-                                !typeVarsInInputParam.some((inputTypeVar) => isTypeSame(returnTypeVar, inputTypeVar))
-                        );
-                    }
-                });
-
-                return typeVarsInReturnType;
-            }
-        }
-
-        return [];
+        return TypeEvaluatorCore.getUnknownExemptTypeVarsForReturnTypeCheck(functionType, returnType);
     }
 
     // If the return type includes a generic Callable type, set the type var
@@ -27707,7 +27680,7 @@ export function createTypeEvaluator(
     }
 
     function isFinalVariable(symbol: Symbol): boolean {
-        return symbol.getDeclarations().some((decl) => isFinalVariableDeclaration(decl));
+        return TypeEvaluatorCore.isFinalVariableCheck(symbol);
     }
 
     function isFinalVariableDeclaration(decl: Declaration): boolean {
@@ -27740,31 +27713,7 @@ export function createTypeEvaluator(
     }
 
     function isLegalImplicitTypeAliasType(type: Type) {
-        // We explicitly exclude "..." and "Unknown".
-        if (isEllipsisType(type)) {
-            return false;
-        }
-
-        if (isUnknown(type)) {
-            // If this is a union type, we'll assume that it was meant as a type
-            // alias even though all of the union subtypes are Unknown.
-            if (type.props?.specialForm && ClassType.isBuiltIn(type.props.specialForm, 'UnionType')) {
-                return true;
-            }
-            return false;
-        }
-
-        // Look at the subtypes within the union. If any of them are not
-        // instantiable (other than "None" which is special-cased), it is
-        // not a legal type alias type.
-        let isLegal = true;
-        doForEachSubtype(type, (subtype) => {
-            if (!TypeBase.isInstantiable(subtype) && !isNoneInstance(subtype)) {
-                isLegal = false;
-            }
-        });
-
-        return isLegal;
+        return TypeEvaluatorCore.isLegalImplicitTypeAliasTypeCheck(type);
     }
 
     function isPossibleTypeAliasOrTypedDict(decl: Declaration) {
