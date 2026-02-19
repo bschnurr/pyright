@@ -65,14 +65,15 @@ This module accepts a `DiagnosticsContext` so it can operate without importing t
   - `diagnostics.ts` extraction.
   - `flowAnalysis.ts` helpers (flow graph delegators, constrained typevar narrowing, `printControlFlowGraph`).
   - `narrowing.ts` helpers for assignment-based narrowing, literal/type-guard stripping, truthiness handling (including direct-reference and `not` matching), `None`/ellipsis comparisons, class/literal equality comparisons (including equality matchers), discriminated equality helpers (tuple/dict/member), tuple length/containment/TypedDict-key narrowing, len(x) and `in`-operator comparison matching, call-expression matching for isinstance/issubclass, bool, and TypeGuard/TypeIs, literal enumeration, `type(x) is y` matching/narrowing, `X is <literal/class>` matching, indexed-literal and member-access discriminated matching, isinstance/issubclass narrowing (including class-type parsing and name-scope checks), aliased-condition and assignment-expression narrowing, and user-defined TypeGuard/TypeIs narrowing.
-  - `evaluatorCore.ts` extraction (66 exported functions, ~1,453 lines):
+  - `evaluatorCore.ts` extraction (73 exported functions, ~1,956 lines):
     - **Phase 2** (pure helpers, no closure deps): Return-type-inference context stack (7), symbol resolution stack (5), declaration helpers (3), type alias helpers (4), type checking helpers (3), utility helpers (12), `expandTypedKwargsForFunction`, `setConstraintsForFreeTypeVarsInType`.
     - **Phase 3a** (prefetched context injection): Prefetched type accessors (8), `parseStringAsTypeAnnotationNode`, `convertSpecialFormToRuntimeValueWithPrefetched`.
-    - **Phase 3b** (`AddDiagnosticFn` callback injection): `validateTypeVarTupleIsUnpackedCheck`, `getBooleanValueFromNode`, `reportUseOfTypeCheckOnlySymbol`, `enforceClassTypeVarScopeCheck`, `createClassVarTypeFromArgs`, `createFinalTypeFromArgs`, `verifyGenericTypeParamsCheck`, `validateTypeParamDefaultCheck`, `transformTypeArgsForParamSpecCheck`, `validateTypeArgCheck`, `createUnpackTypeFromArgs`, `createSpecialTypeFromArgs` (137 lines), `createConcatenateTypeFromArgs`, `createGenericTypeFromArgs`, `createAnnotatedTypeFromArgs`, `validateAnnotatedMetadataCheck`, `createCallableTypeFromArgs` (153 lines), `createOptionalTypeFromArgs`, `createTypeFormTypeFromArgs`, `createTypeGuardTypeFromArgs`.
+    - **Phase 3b** (`AddDiagnosticFn` callback injection): 20 functions including `createSpecialTypeFromArgs`, `createCallableTypeFromArgs`, `createAnnotatedTypeFromArgs`, `createOptionalTypeFromArgs`, `createTypeFormTypeFromArgs`, `createTypeGuardTypeFromArgs`, `createUnionTypeFromArgs`.
+    - **Phase 4** (`TypeEvaluator` param injection): `adjustTypeArgsForTypeVarTupleWithEvaluator` (144 lines), `transformTypeForTypeAliasWithEvaluator` (125 lines), `adjustSourceParamDetailsForDestVariadicWithEvaluator` (97 lines), `createRequiredOrReadOnlyTypeFromArgs` (96 lines), `validateTypeIsInstantiableWithEvaluator` (45 lines), `reportPossibleUnknownAssignmentWithEvaluator` (43 lines).
 - Current state:
-  - `typeEvaluator.ts` reduced from ~28,000 to ~23,549 lines (~4,451 lines extracted or removed).
-  - All remaining functions in `typeEvaluator.ts` depend on deep closure state (`getTypeOfExpression`, `assignType`, `writeTypeCache`, `evaluatorInterface`, etc.) and cannot be extracted without broader architectural changes.
-  - Phase 3 extraction is effectively complete for the `AddDiagnosticFn` and `prefetched` context-injection patterns.
+  - `typeEvaluator.ts` reduced from ~28,000 to ~23,049 lines (~4,951 lines extracted or removed).
+  - Phase 4 established: pass `TypeEvaluator` interface to unlock functions needing `getTypeOfClass`, `getTypingType`, `printType`, `makeTupleObject`, etc.
+  - ~50 additional functions identified as Phase 4 candidates (functions with deps exclusively on TypeEvaluator interface methods).
 
 ## Planned breakdown (future slices)
 
@@ -155,6 +156,31 @@ function createFinalType(...): Type {
 
 This pattern cascades: extracting one function can unlock others that call it (e.g.,
 `createSpecialType` unlocked `createConcatenateType` and `createGenericType`).
+
+### 3. `TypeEvaluator` param injection (Phase 4)
+
+For functions that need multiple closure functions (e.g., `getTypingType`, `getTypeOfClass`,
+`printType`, `addDiagnostic`), pass the `TypeEvaluator` interface directly. Since
+`evaluatorInterface` already implements `TypeEvaluator`, this is a natural fit:
+
+```ts
+// In evaluatorCore.ts
+export function adjustTypeArgsForTypeVarTupleWithEvaluator(
+    evaluator: TypeEvaluator,
+    typeArgs: TypeResultWithNode[],
+    typeParams: TypeVarType[],
+    errorNode: ExpressionNode
+): TypeResultWithNode[] { ... }
+
+// In typeEvaluator.ts (delegate)
+function adjustTypeArgsForTypeVarTuple(...): TypeResultWithNode[] {
+    return TypeEvaluatorCore.adjustTypeArgsForTypeVarTupleWithEvaluator(
+        evaluatorInterface, typeArgs, typeParams, errorNode
+    );
+}
+```
+
+This pattern unlocks ~50+ functions whose deps are entirely satisfied by `TypeEvaluator` methods.
 
 ## Notes on narrowing and code flow
 
