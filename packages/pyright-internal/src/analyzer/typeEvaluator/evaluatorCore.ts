@@ -6,7 +6,7 @@
  * Small extraction helpers for type evaluator core behavior.
  */
 
-import { ArgumentNode, ExpressionNode, ImportFromAsNode, NameNode, ParseNode, ParseNodeType, StringListNode } from '../../parser/parseNodes';
+import { ArgumentNode, ExpressionNode, ImportFromAsNode, NameNode, ParamCategory, ParseNode, ParseNodeType, StringListNode } from '../../parser/parseNodes';
 import { KeywordType, OperatorType } from '../../parser/tokenizerTypes';
 import { Parser, ParseOptions, ParseTextMode } from '../../parser/parser';
 import { TextRange } from '../../common/textRange';
@@ -17,7 +17,7 @@ import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
 import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { ClassType, FunctionParam, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, Type, TypeBase, TypeVarType, UnknownType } from '../types';
+import { ClassType, FunctionParam, FunctionParamFlags, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, Type, TypeBase, TypeVarType, UnknownType } from '../types';
 import { convertToInstance, doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, lookUpClassMember } from '../typeUtils';
 import { getParamListDetails } from '../parameterUtils';
 
@@ -659,4 +659,67 @@ export function convertSpecialFormToRuntimeValueWithPrefetched(
     }
 
     return type.props.specialForm;
+}
+
+export function expandTypedKwargsForFunction(functionType: FunctionType): FunctionType {
+    const kwargsIndex = functionType.shared.parameters.findIndex(
+        (param) => param.category === ParamCategory.KwargsDict
+    );
+    if (kwargsIndex < 0) {
+        return functionType;
+    }
+    assert(kwargsIndex === functionType.shared.parameters.length - 1);
+
+    const kwargsType = FunctionType.getParamType(functionType, kwargsIndex);
+    if (!isClassInstance(kwargsType) || !ClassType.isTypedDictClass(kwargsType) || !kwargsType.priv.isUnpacked) {
+        return functionType;
+    }
+
+    const tdEntries = kwargsType.priv.typedDictNarrowedEntries ?? kwargsType.shared.typedDictEntries?.knownItems;
+    if (!tdEntries) {
+        return functionType;
+    }
+
+    const newFunction = FunctionType.clone(functionType);
+    newFunction.shared.parameters.splice(kwargsIndex);
+    if (newFunction.priv.specializedTypes) {
+        newFunction.priv.specializedTypes.parameterTypes.splice(kwargsIndex);
+    }
+
+    const kwSeparatorIndex = functionType.shared.parameters.findIndex(
+        (param) => param.category === ParamCategory.ArgsList
+    );
+
+    if (kwSeparatorIndex < 0 && tdEntries.size > 0) {
+        FunctionType.addKeywordOnlyParamSeparator(newFunction);
+    }
+
+    tdEntries.forEach((tdEntry, name) => {
+        FunctionType.addParam(
+            newFunction,
+            FunctionParam.create(
+                ParamCategory.Simple,
+                tdEntry.valueType,
+                FunctionParamFlags.TypeDeclared,
+                name,
+                tdEntry.isRequired ? undefined : tdEntry.valueType
+            )
+        );
+    });
+
+    const extraItemsType = kwargsType.shared.typedDictEntries?.extraItems?.valueType;
+
+    if (extraItemsType && !isNever(extraItemsType)) {
+        FunctionType.addParam(
+            newFunction,
+            FunctionParam.create(
+                ParamCategory.KwargsDict,
+                extraItemsType,
+                FunctionParamFlags.TypeDeclared,
+                'kwargs'
+            )
+        );
+    }
+
+    return newFunction;
 }
