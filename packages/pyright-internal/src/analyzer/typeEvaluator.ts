@@ -15146,41 +15146,13 @@ export function createTypeEvaluator(
         return result;
     }
 
-    // Creates a ClassVar type.
     function createClassVarType(
         classType: ClassType,
         errorNode: ParseNode,
         typeArgs: TypeResultWithNode[] | undefined,
         flags: EvalFlags
     ): Type {
-        if (flags & EvalFlags.NoClassVar) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.classVarNotAllowed(), errorNode);
-            return AnyType.create();
-        }
-
-        if (!typeArgs) {
-            return classType;
-        } else if (typeArgs.length === 0) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.classVarFirstArgMissing(), errorNode);
-            return UnknownType.create();
-        } else if (typeArgs.length > 1) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.classVarTooManyArgs(), typeArgs[1].node);
-            return UnknownType.create();
-        }
-
-        const type = typeArgs[0].type;
-
-        // A ClassVar should not allow TypeVars or generic types parameterized
-        // by TypeVars.
-        if (requiresSpecialization(type, { ignorePseudoGeneric: true, ignoreSelf: true })) {
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.classVarWithTypeVar(),
-                typeArgs[0].node ?? errorNode
-            );
-        }
-
-        return type;
+        return TypeEvaluatorCore.createClassVarTypeFromArgs(classType, errorNode, typeArgs, flags, addDiagnostic);
     }
 
     function createTypeFormType(
@@ -15489,29 +15461,13 @@ export function createTypeEvaluator(
         return UnknownType.create();
     }
 
-    // Creates a "Final" type.
     function createFinalType(
         classType: ClassType,
         errorNode: ParseNode,
         typeArgs: TypeResultWithNode[] | undefined,
         flags: EvalFlags
     ): Type {
-        if (flags & EvalFlags.NoFinal) {
-            if ((flags & EvalFlags.TypeExpression) !== 0) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.finalContext(), errorNode);
-            }
-            return classType;
-        }
-
-        if ((flags & EvalFlags.TypeExpression) === 0 || !typeArgs || typeArgs.length === 0) {
-            return classType;
-        }
-
-        if (typeArgs.length > 1) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.finalTooManyArgs(), errorNode);
-        }
-
-        return TypeBase.cloneAsSpecialForm(typeArgs[0].type, classType);
+        return TypeEvaluatorCore.createFinalTypeFromArgs(classType, errorNode, typeArgs, flags, addDiagnostic);
     }
 
     function createConcatenateType(
@@ -17545,42 +17501,7 @@ export function createTypeEvaluator(
         otherLiveTypeParams: TypeVarType[],
         scopeId: TypeVarScopeId
     ) {
-        if (!typeParam.shared.isDefaultExplicit && !typeParam.shared.isSynthesized && !TypeVarType.isSelf(typeParam)) {
-            const typeVarWithDefault = otherLiveTypeParams.find(
-                (param) => param.shared.isDefaultExplicit && param.priv.scopeId === scopeId
-            );
-
-            if (typeVarWithDefault) {
-                addDiagnostic(
-                    DiagnosticRule.reportGeneralTypeIssues,
-                    LocMessage.typeVarWithoutDefault().format({
-                        name: typeParam.shared.name,
-                        other: typeVarWithDefault.shared.name,
-                    }),
-                    errorNode
-                );
-            }
-            return;
-        }
-
-        const invalidTypeVars = new Set<string>();
-        validateTypeVarDefault(typeParam, otherLiveTypeParams, invalidTypeVars);
-
-        // If we found one or more unapplied type variable, report an error.
-        if (invalidTypeVars.size > 0) {
-            const diag = new DiagnosticAddendum();
-            invalidTypeVars.forEach((name) => {
-                diag.addMessage(LocAddendum.typeVarDefaultOutOfScope().format({ name }));
-            });
-
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.typeVarDefaultInvalidTypeVar().format({
-                    name: typeParam.shared.name,
-                }) + diag.getString(),
-                errorNode
-            );
-        }
+        TypeEvaluatorCore.validateTypeParamDefaultCheck(errorNode, typeParam, otherLiveTypeParams, scopeId, addDiagnostic);
     }
 
     function inferVarianceForClass(classType: ClassType): void {
@@ -17767,23 +17688,7 @@ export function createTypeEvaluator(
         typeVars: TypeVarType[],
         genericTypeVars: TypeVarType[]
     ) {
-        const missingFromGeneric = typeVars.filter((typeVar) => {
-            return !genericTypeVars.some((genericTypeVar) => genericTypeVar.shared.name === typeVar.shared.name);
-        });
-
-        if (missingFromGeneric.length > 0) {
-            const diag = new DiagnosticAddendum();
-            diag.addMessage(
-                LocAddendum.typeVarsMissing().format({
-                    names: missingFromGeneric.map((typeVar) => `"${typeVar.shared.name}"`).join(', '),
-                })
-            );
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.typeVarsNotInGenericOrProtocol() + diag.getString(),
-                errorNode
-            );
-        }
+        TypeEvaluatorCore.verifyGenericTypeParamsCheck(errorNode, typeVars, genericTypeVars, addDiagnostic);
     }
 
     // Records the fact that the specified class requires "deferred completion" because
@@ -20828,65 +20733,7 @@ export function createTypeEvaluator(
         typeArgs: TypeResultWithNode[] | undefined,
         errorNode: ExpressionNode
     ): TypeResultWithNode[] | undefined {
-        if (typeParams.length !== 1 || !isParamSpec(typeParams[0]) || !typeArgs) {
-            return typeArgs;
-        }
-
-        if (typeArgs.length > 1) {
-            for (const typeArg of typeArgs) {
-                if (isParamSpec(typeArg.type)) {
-                    addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.paramSpecContext(), typeArg.node);
-                    return undefined;
-                }
-
-                if (isEllipsisType(typeArg.type)) {
-                    addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.ellipsisContext(), typeArg.node);
-                    return undefined;
-                }
-
-                if (isInstantiableClass(typeArg.type) && ClassType.isBuiltIn(typeArg.type, 'Concatenate')) {
-                    addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.concatenateContext(), typeArg.node);
-                    return undefined;
-                }
-
-                if (typeArg.typeList) {
-                    addDiagnostic(
-                        DiagnosticRule.reportInvalidTypeForm,
-                        LocMessage.typeArgListNotAllowed(),
-                        typeArg.node
-                    );
-                    return undefined;
-                }
-            }
-        }
-
-        if (typeArgs.length === 1) {
-            // Don't transform a type list.
-            if (typeArgs[0].typeList) {
-                return typeArgs;
-            }
-
-            const typeArgType = typeArgs[0].type;
-
-            // Don't transform a single ParamSpec or ellipsis.
-            if (isParamSpec(typeArgType) || isEllipsisType(typeArgType)) {
-                return typeArgs;
-            }
-
-            // Don't transform a Concatenate.
-            if (isInstantiableClass(typeArgType) && ClassType.isBuiltIn(typeArgType, 'Concatenate')) {
-                return typeArgs;
-            }
-        }
-
-        // Package up the type arguments into a type list.
-        return [
-            {
-                type: UnknownType.create(),
-                node: typeArgs.length > 0 ? typeArgs[0].node : errorNode,
-                typeList: typeArgs,
-            },
-        ];
+        return TypeEvaluatorCore.transformTypeArgsForParamSpecCheck(typeParams, typeArgs, errorNode, addDiagnostic);
     }
 
     function getTypeOfArg(arg: Arg, inferenceContext: InferenceContext | undefined): TypeResult {

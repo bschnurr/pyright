@@ -6,9 +6,9 @@
  * Small extraction helpers for type evaluator core behavior.
  */
 
-import { Diagnostic } from '../../common/diagnostic';
+import { Diagnostic, DiagnosticAddendum } from '../../common/diagnostic';
 import { DiagnosticRule } from '../../common/diagnosticRules';
-import { LocMessage } from '../../localization/localize';
+import { LocAddendum, LocMessage } from '../../localization/localize';
 import { ArgumentNode, ExpressionNode, ImportFromAsNode, NameNode, ParamCategory, ParseNode, ParseNodeType, StringListNode } from '../../parser/parseNodes';
 import { KeywordType, OperatorType } from '../../parser/tokenizerTypes';
 import { Parser, ParseOptions, ParseTextMode } from '../../parser/parser';
@@ -18,10 +18,10 @@ import { assert } from '../../common/debug';
 import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
-import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes } from '../typeEvaluatorTypes';
+import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes, TypeResultWithNode } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { AnyType, ClassType, FunctionParam, FunctionParamFlags, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, Type, TypeBase, TypeVarTupleType, TypeVarType, UnknownType } from '../types';
-import { convertToInstance, doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, lookUpClassMember } from '../typeUtils';
+import { AnyType, ClassType, FunctionParam, FunctionParamFlags, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, Type, TypeBase, TypeVarScopeId, TypeVarTupleType, TypeVarType, UnknownType } from '../types';
+import { convertToInstance, doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, lookUpClassMember, requiresSpecialization, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 
@@ -837,4 +837,196 @@ export function enforceClassTypeVarScopeCheck(
     }
 
     return true;
+}
+
+export function createClassVarTypeFromArgs(
+    classType: ClassType,
+    errorNode: ParseNode,
+    typeArgs: TypeResultWithNode[] | undefined,
+    flags: EvalFlags,
+    addDiagnosticFn: AddDiagnosticFn
+): Type {
+    if (flags & EvalFlags.NoClassVar) {
+        addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.classVarNotAllowed(), errorNode);
+        return AnyType.create();
+    }
+
+    if (!typeArgs) {
+        return classType;
+    } else if (typeArgs.length === 0) {
+        addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.classVarFirstArgMissing(), errorNode);
+        return UnknownType.create();
+    } else if (typeArgs.length > 1) {
+        addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.classVarTooManyArgs(), typeArgs[1].node);
+        return UnknownType.create();
+    }
+
+    const type = typeArgs[0].type;
+
+    if (requiresSpecialization(type, { ignorePseudoGeneric: true, ignoreSelf: true })) {
+        addDiagnosticFn(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.classVarWithTypeVar(),
+            typeArgs[0].node ?? errorNode
+        );
+    }
+
+    return type;
+}
+
+export function createFinalTypeFromArgs(
+    classType: ClassType,
+    errorNode: ParseNode,
+    typeArgs: TypeResultWithNode[] | undefined,
+    flags: EvalFlags,
+    addDiagnosticFn: AddDiagnosticFn
+): Type {
+    if (flags & EvalFlags.NoFinal) {
+        if ((flags & EvalFlags.TypeExpression) !== 0) {
+            addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.finalContext(), errorNode);
+        }
+        return classType;
+    }
+
+    if ((flags & EvalFlags.TypeExpression) === 0 || !typeArgs || typeArgs.length === 0) {
+        return classType;
+    }
+
+    if (typeArgs.length > 1) {
+        addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.finalTooManyArgs(), errorNode);
+    }
+
+    return TypeBase.cloneAsSpecialForm(typeArgs[0].type, classType);
+}
+
+export function verifyGenericTypeParamsCheck(
+    errorNode: ExpressionNode,
+    typeVars: TypeVarType[],
+    genericTypeVars: TypeVarType[],
+    addDiagnosticFn: AddDiagnosticFn
+) {
+    const missingFromGeneric = typeVars.filter((typeVar) => {
+        return !genericTypeVars.some((genericTypeVar) => genericTypeVar.shared.name === typeVar.shared.name);
+    });
+
+    if (missingFromGeneric.length > 0) {
+        const diag = new DiagnosticAddendum();
+        diag.addMessage(
+            LocAddendum.typeVarsMissing().format({
+                names: missingFromGeneric.map((typeVar) => `"${typeVar.shared.name}"`).join(', '),
+            })
+        );
+        addDiagnosticFn(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.typeVarsNotInGenericOrProtocol() + diag.getString(),
+            errorNode
+        );
+    }
+}
+
+export function validateTypeParamDefaultCheck(
+    errorNode: ExpressionNode,
+    typeParam: TypeVarType,
+    otherLiveTypeParams: TypeVarType[],
+    scopeId: TypeVarScopeId,
+    addDiagnosticFn: AddDiagnosticFn
+) {
+    if (!typeParam.shared.isDefaultExplicit && !typeParam.shared.isSynthesized && !TypeVarType.isSelf(typeParam)) {
+        const typeVarWithDefault = otherLiveTypeParams.find(
+            (param) => param.shared.isDefaultExplicit && param.priv.scopeId === scopeId
+        );
+
+        if (typeVarWithDefault) {
+            addDiagnosticFn(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.typeVarWithoutDefault().format({
+                    name: typeParam.shared.name,
+                    other: typeVarWithDefault.shared.name,
+                }),
+                errorNode
+            );
+        }
+        return;
+    }
+
+    const invalidTypeVars = new Set<string>();
+    validateTypeVarDefault(typeParam, otherLiveTypeParams, invalidTypeVars);
+
+    if (invalidTypeVars.size > 0) {
+        const diag = new DiagnosticAddendum();
+        invalidTypeVars.forEach((name) => {
+            diag.addMessage(LocAddendum.typeVarDefaultOutOfScope().format({ name }));
+        });
+
+        addDiagnosticFn(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.typeVarDefaultInvalidTypeVar().format({
+                name: typeParam.shared.name,
+            }) + diag.getString(),
+            errorNode
+        );
+    }
+}
+
+export function transformTypeArgsForParamSpecCheck(
+    typeParams: TypeVarType[],
+    typeArgs: TypeResultWithNode[] | undefined,
+    errorNode: ExpressionNode,
+    addDiagnosticFn: AddDiagnosticFn
+): TypeResultWithNode[] | undefined {
+    if (typeParams.length !== 1 || !isParamSpec(typeParams[0]) || !typeArgs) {
+        return typeArgs;
+    }
+
+    if (typeArgs.length > 1) {
+        for (const typeArg of typeArgs) {
+            if (isParamSpec(typeArg.type)) {
+                addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.paramSpecContext(), typeArg.node);
+                return undefined;
+            }
+
+            if (isEllipsisType(typeArg.type)) {
+                addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.ellipsisContext(), typeArg.node);
+                return undefined;
+            }
+
+            if (isInstantiableClass(typeArg.type) && ClassType.isBuiltIn(typeArg.type, 'Concatenate')) {
+                addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.concatenateContext(), typeArg.node);
+                return undefined;
+            }
+
+            if (typeArg.typeList) {
+                addDiagnosticFn(
+                    DiagnosticRule.reportInvalidTypeForm,
+                    LocMessage.typeArgListNotAllowed(),
+                    typeArg.node
+                );
+                return undefined;
+            }
+        }
+    }
+
+    if (typeArgs.length === 1) {
+        if (typeArgs[0].typeList) {
+            return typeArgs;
+        }
+
+        const typeArgType = typeArgs[0].type;
+
+        if (isParamSpec(typeArgType) || isEllipsisType(typeArgType)) {
+            return typeArgs;
+        }
+
+        if (isInstantiableClass(typeArgType) && ClassType.isBuiltIn(typeArgType, 'Concatenate')) {
+            return typeArgs;
+        }
+    }
+
+    return [
+        {
+            type: UnknownType.create(),
+            node: typeArgs.length > 0 ? typeArgs[0].node : errorNode,
+            typeList: typeArgs,
+        },
+    ];
 }
