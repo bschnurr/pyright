@@ -21663,15 +21663,7 @@ export function createTypeEvaluator(
     }
 
     function getAliasFromImport(node: NameNode): NameNode | undefined {
-        if (
-            node.parent &&
-            node.parent.nodeType === ParseNodeType.ImportFromAs &&
-            node.parent.d.alias &&
-            node === node.parent.d.name
-        ) {
-            return node.parent.d.alias;
-        }
-        return undefined;
+        return TypeEvaluatorCore.getAliasFromImportNode(node);
     }
 
     function getDeclInfoForNameNode(node: NameNode, skipUnreachableCode = true): SymbolDeclInfo | undefined {

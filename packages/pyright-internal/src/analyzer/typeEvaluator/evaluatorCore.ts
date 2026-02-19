@@ -6,7 +6,7 @@
  * Small extraction helpers for type evaluator core behavior.
  */
 
-import { ParseNode } from '../../parser/parseNodes';
+import { ImportFromAsNode, NameNode, ParseNode, ParseNodeType } from '../../parser/parseNodes';
 import { TextRange } from '../../common/textRange';
 import { TextRangeCollection } from '../../common/textRangeCollection';
 import { convertOffsetsToRange } from '../../common/positionUtils';
@@ -172,4 +172,16 @@ export function getLineNumForNode(node: ParseNode) {
     const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
     const range = convertOffsetsToRange(node.start, node.start + node.length, fileInfo.lines);
     return (range.start.line + 1).toString();
+}
+
+export function getAliasFromImportNode(node: NameNode): NameNode | undefined {
+    if (
+        node.parent &&
+        node.parent.nodeType === ParseNodeType.ImportFromAs &&
+        node.parent.d.alias &&
+        node === node.parent.d.name
+    ) {
+        return node.parent.d.alias;
+    }
+    return undefined;
 }
