@@ -6,6 +6,9 @@
  * Small extraction helpers for type evaluator core behavior.
  */
 
+import { Diagnostic } from '../../common/diagnostic';
+import { DiagnosticRule } from '../../common/diagnosticRules';
+import { LocMessage } from '../../localization/localize';
 import { ArgumentNode, ExpressionNode, ImportFromAsNode, NameNode, ParamCategory, ParseNode, ParseNodeType, StringListNode } from '../../parser/parseNodes';
 import { KeywordType, OperatorType } from '../../parser/tokenizerTypes';
 import { Parser, ParseOptions, ParseTextMode } from '../../parser/parser';
@@ -17,7 +20,7 @@ import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
 import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { AnyType, ClassType, FunctionParam, FunctionParamFlags, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, Type, TypeBase, TypeVarType, UnknownType } from '../types';
+import { AnyType, ClassType, FunctionParam, FunctionParamFlags, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, Type, TypeBase, TypeVarTupleType, TypeVarType, UnknownType } from '../types';
 import { convertToInstance, doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, lookUpClassMember } from '../typeUtils';
 import { getParamListDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
@@ -738,4 +741,100 @@ export function setConstraintsForFreeTypeVarsInType(
             }
         }
     });
+}
+
+export type AddDiagnosticFn = (rule: DiagnosticRule, message: string, node: ParseNode, range?: TextRange) => Diagnostic | undefined;
+
+export function validateTypeVarTupleIsUnpackedCheck(
+    type: TypeVarTupleType,
+    node: ParseNode,
+    addDiagnosticFn: AddDiagnosticFn
+): boolean {
+    if (!type.priv.isUnpacked) {
+        addDiagnosticFn(
+            DiagnosticRule.reportInvalidTypeForm,
+            LocMessage.unpackedTypeVarTupleExpected().format({
+                name1: type.shared.name,
+                name2: type.shared.name,
+            }),
+            node
+        );
+        return false;
+    }
+
+    return true;
+}
+
+export function getBooleanValueFromNode(
+    node: ExpressionNode,
+    addDiagnosticFn: AddDiagnosticFn
+): boolean {
+    if (node.nodeType === ParseNodeType.Constant) {
+        if (node.d.constType === KeywordType.False) {
+            return false;
+        } else if (node.d.constType === KeywordType.True) {
+            return true;
+        }
+    }
+
+    addDiagnosticFn(DiagnosticRule.reportGeneralTypeIssues, LocMessage.expectedBoolLiteral(), node);
+    return false;
+}
+
+export function reportUseOfTypeCheckOnlySymbol(
+    type: Type,
+    node: ExpressionNode,
+    addDiagnosticFn: AddDiagnosticFn
+) {
+    let isTypeCheckingOnly = false;
+    let name = '';
+
+    if (isInstantiableClass(type) && !type.priv.includeSubclasses) {
+        isTypeCheckingOnly = ClassType.isTypeCheckOnly(type);
+        name = type.shared.name;
+    } else if (isFunction(type)) {
+        isTypeCheckingOnly = FunctionType.isTypeCheckOnly(type);
+        name = type.shared.name;
+    }
+
+    if (isTypeCheckingOnly) {
+        const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
+
+        if (!fileInfo.isStubFile) {
+            addDiagnosticFn(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.typeCheckOnly().format({ name }),
+                node
+            );
+        }
+    }
+}
+
+export function enforceClassTypeVarScopeCheck(
+    node: ExpressionNode,
+    type: TypeVarType,
+    addDiagnosticFn: AddDiagnosticFn
+): boolean {
+    const scopeId = type.priv.freeTypeVar?.priv.scopeId ?? type.priv.scopeId;
+    if (!scopeId) {
+        return true;
+    }
+
+    const enclosingClass = ParseTreeUtils.getEnclosingClass(node);
+    if (enclosingClass) {
+        const liveTypeVarScopeIds = ParseTreeUtils.getTypeVarScopesForNode(enclosingClass);
+        if (!liveTypeVarScopeIds.includes(scopeId)) {
+            addDiagnosticFn(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.typeVarInvalidForMemberVariable().format({
+                    name: TypeVarType.getReadableName(type),
+                }),
+                node
+            );
+
+            return false;
+        }
+    }
+
+    return true;
 }

@@ -1439,28 +1439,7 @@ export function createTypeEvaluator(
     // Reports the case where a function or class has been decorated with
     // @type_check_only and is used in a value expression.
     function reportUseOfTypeCheckOnly(type: Type, node: ExpressionNode) {
-        let isTypeCheckingOnly = false;
-        let name = '';
-
-        if (isInstantiableClass(type) && !type.priv.includeSubclasses) {
-            isTypeCheckingOnly = ClassType.isTypeCheckOnly(type);
-            name = type.shared.name;
-        } else if (isFunction(type)) {
-            isTypeCheckingOnly = FunctionType.isTypeCheckOnly(type);
-            name = type.shared.name;
-        }
-
-        if (isTypeCheckingOnly) {
-            const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-
-            if (!fileInfo.isStubFile) {
-                addDiagnostic(
-                    DiagnosticRule.reportGeneralTypeIssues,
-                    LocMessage.typeCheckOnly().format({ name }),
-                    node
-                );
-            }
-        }
+        TypeEvaluatorCore.reportUseOfTypeCheckOnlySymbol(type, node, addDiagnostic);
     }
 
     function validateTypeIsInstantiable(typeResult: TypeResult, flags: EvalFlags, node: ExpressionNode) {
@@ -4787,28 +4766,7 @@ export function createTypeEvaluator(
     // Enforce that the type variable is scoped to the enclosing class or
     // an outer class that contains the class definition.
     function enforceClassTypeVarScope(node: ExpressionNode, type: TypeVarType): boolean {
-        const scopeId = type.priv.freeTypeVar?.priv.scopeId ?? type.priv.scopeId;
-        if (!scopeId) {
-            return true;
-        }
-
-        const enclosingClass = ParseTreeUtils.getEnclosingClass(node);
-        if (enclosingClass) {
-            const liveTypeVarScopeIds = ParseTreeUtils.getTypeVarScopesForNode(enclosingClass);
-            if (!liveTypeVarScopeIds.includes(scopeId)) {
-                addDiagnostic(
-                    DiagnosticRule.reportGeneralTypeIssues,
-                    LocMessage.typeVarInvalidForMemberVariable().format({
-                        name: TypeVarType.getReadableName(type),
-                    }),
-                    node
-                );
-
-                return false;
-            }
-        }
-
-        return true;
+        return TypeEvaluatorCore.enforceClassTypeVarScopeCheck(node, type, addDiagnostic);
     }
 
     // Determines if the type is a generic class or type alias with missing
@@ -6658,19 +6616,7 @@ export function createTypeEvaluator(
 
     // If the variadic type variable is not unpacked, report an error.
     function validateTypeVarTupleIsUnpacked(type: TypeVarTupleType, node: ParseNode) {
-        if (!type.priv.isUnpacked) {
-            addDiagnostic(
-                DiagnosticRule.reportInvalidTypeForm,
-                LocMessage.unpackedTypeVarTupleExpected().format({
-                    name1: type.shared.name,
-                    name2: type.shared.name,
-                }),
-                node
-            );
-            return false;
-        }
-
-        return true;
+        return TypeEvaluatorCore.validateTypeVarTupleIsUnpackedCheck(type, node, addDiagnostic);
     }
 
     // If the type is a generic type alias that is not specialized, provides
@@ -12897,16 +12843,7 @@ export function createTypeEvaluator(
     }
 
     function getBooleanValue(node: ExpressionNode): boolean {
-        if (node.nodeType === ParseNodeType.Constant) {
-            if (node.d.constType === KeywordType.False) {
-                return false;
-            } else if (node.d.constType === KeywordType.True) {
-                return true;
-            }
-        }
-
-        addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.expectedBoolLiteral(), node);
-        return false;
+        return TypeEvaluatorCore.getBooleanValueFromNode(node, addDiagnostic);
     }
 
     function getFunctionFullName(functionNode: ParseNode, moduleName: string, functionName: string): string {
