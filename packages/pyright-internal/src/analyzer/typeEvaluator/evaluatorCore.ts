@@ -7,6 +7,7 @@
  */
 
 import { DiagnosticLevel } from '../../common/configOptions';
+import { PythonVersion, pythonVersion3_9 } from '../../common/pythonVersion';
 import { Diagnostic, DiagnosticAddendum } from '../../common/diagnostic';
 import { DiagnosticRule } from '../../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../../localization/localize';
@@ -25,7 +26,7 @@ import { Declaration, DeclarationType } from '../declaration';
 import { Arg, ArgWithExpression, AssignTypeFlags, CallResult, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, MagicMethodDeprecationInfo, PrefetchedTypes, PrintTypeOptions, Reachability, SymbolDeclInfo, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
 import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isOverloaded, isParamSpec, isPositionOnlySeparator, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, maxTypeRecursionCount, ModuleType, NeverType, OverloadedType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeCategory, TypeCondition, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnionType, UnknownType, Variance } from '../types';
-import { addConditionToType, combineSameSizedTuples, combineVariances, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromAnyOrUnknown, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, getGeneratorTypeArgs, getSpecializedTupleType, getTypeCondition, getTypeVarArgsRecursive, InferenceContext, invertVariance, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralType, isMetaclassInstance, isNoneInstance, isNoneTypeClass, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTupleIndexUnambiguous, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeTypeVarsBound, mapSignatures, mapSubtypes, MemberAccessFlags, partiallySpecializeType, removeNoneFromUnion, requiresSpecialization, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeForBaseClass, specializeWithDefaultTypeArgs, specializeTupleClass, synthesizeTypeVarForSelfCls, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
+import { addConditionToType, combineSameSizedTuples, combineVariances, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromAnyOrUnknown, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, explodeGenericClass, getGeneratorTypeArgs, getSpecializedTupleType, getTypeCondition, getTypeVarArgsRecursive, getTypeVarScopeIds, InferenceContext, invertVariance, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralType, isMetaclassInstance, isNoneInstance, isNoneTypeClass, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTupleIndexUnambiguous, isTypeAliasPlaceholder, isUnboundedTupleClass, isVarianceOfTypeArgCompatible, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeTypeVarsBound, mapSignatures, mapSubtypes, MemberAccessFlags, partiallySpecializeType, removeNoneFromUnion, requiresSpecialization, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeForBaseClass, specializeWithDefaultTypeArgs, specializeTupleClass, synthesizeTypeVarForSelfCls, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails, ParamKind, ParamListDetails, VirtualParamDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 import { getSlicedTupleType, makeTupleObject } from '../tuples';
@@ -7856,4 +7857,521 @@ export function getTypeOfStringListAsTypeWithEvaluator(
     }
 
     return typeResult;
+}
+
+export function createSpecializedClassTypeWithEvaluator(
+    evaluator: TypeEvaluator,
+    classType: ClassType,
+    typeArgs: TypeResultWithNode[] | undefined,
+    flags: EvalFlags,
+    errorNode: ExpressionNode,
+    prefetched: Partial<PrefetchedTypes> | undefined
+): TypeResult {
+    let isValidTypeForm = true;
+
+    // Handle the special-case classes that are not defined
+    // in the type stubs.
+    if (ClassType.isSpecialBuiltIn(classType)) {
+        const aliasedName = classType.priv.aliasName || classType.shared.name;
+        switch (aliasedName) {
+            case 'Callable': {
+                return { type: createCallableTypeFromArgs(classType, typeArgs, errorNode, evaluator.addDiagnostic) };
+            }
+
+            case 'Never':
+            case 'NoReturn': {
+                if (typeArgs && typeArgs.length > 0) {
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportInvalidTypeForm,
+                        LocMessage.typeArgsExpectingNone().format({ name: aliasedName }),
+                        typeArgs[0].node
+                    );
+                }
+
+                let resultType = aliasedName === 'Never' ? NeverType.createNever() : NeverType.createNoReturn();
+                resultType = TypeBase.cloneAsSpecialForm(resultType, classType);
+                if (isTypeFormSupportedForNode(errorNode)) {
+                    resultType = TypeBase.cloneWithTypeForm(resultType, convertToInstance(resultType));
+                }
+
+                return { type: resultType };
+            }
+
+            case 'Optional': {
+                return { type: createOptionalTypeFromArgs(classType, errorNode, typeArgs, flags, prefetched, evaluator.addDiagnostic) };
+            }
+
+            case 'Type': {
+                let typeType = createSpecialTypeFromArgs(
+                    classType,
+                    typeArgs,
+                    evaluator.addDiagnostic,
+                    1,
+                    /* allowParamSpec */ undefined,
+                    /* isSpecialForm */ false
+                );
+
+                if (isInstantiableClass(typeType)) {
+                    typeType = explodeGenericClass(typeType);
+                }
+
+                if (isTypeFormSupportedForNode(errorNode)) {
+                    typeType = TypeBase.cloneWithTypeForm(typeType, convertToInstance(typeType));
+                }
+
+                return { type: typeType };
+            }
+
+            case 'ClassVar': {
+                return { type: createClassVarTypeFromArgs(classType, errorNode, typeArgs, flags, evaluator.addDiagnostic) };
+            }
+
+            case 'Protocol': {
+                if ((flags & (EvalFlags.NoNonTypeSpecialForms | EvalFlags.TypeExpression)) !== 0) {
+                    evaluator.addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.protocolNotAllowed(), errorNode);
+                }
+
+                typeArgs?.forEach((typeArg) => {
+                    if (typeArg.typeList || !isTypeVar(typeArg.type)) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportInvalidTypeForm,
+                            LocMessage.protocolTypeArgMustBeTypeParam(),
+                            typeArg.node
+                        );
+                    }
+                });
+
+                return {
+                    type: createSpecialTypeFromArgs(
+                        classType,
+                        typeArgs,
+                        evaluator.addDiagnostic,
+                        /* paramLimit */ undefined,
+                        /* allowParamSpec */ true
+                    ),
+                };
+            }
+
+            case 'TypedDict': {
+                if ((flags & (EvalFlags.NoNonTypeSpecialForms | EvalFlags.TypeExpression)) !== 0) {
+                    const isInlinedTypedDict =
+                        AnalyzerNodeInfo.getFileInfo(errorNode).diagnosticRuleSet.enableExperimentalFeatures &&
+                        !!typeArgs;
+
+                    if (!isInlinedTypedDict) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportInvalidTypeForm,
+                            LocMessage.typedDictNotAllowed(),
+                            errorNode
+                        );
+                    }
+                }
+                isValidTypeForm = false;
+                break;
+            }
+
+            case 'Literal': {
+                if ((flags & (EvalFlags.NoNonTypeSpecialForms | EvalFlags.TypeExpression)) !== 0) {
+                    evaluator.addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.literalNotAllowed(), errorNode);
+                }
+                isValidTypeForm = false;
+                break;
+            }
+
+            case 'Tuple': {
+                return {
+                    type: createSpecialTypeFromArgs(
+                        classType,
+                        typeArgs,
+                        evaluator.addDiagnostic,
+                        /* paramLimit */ undefined,
+                        /* allowParamSpec */ false,
+                        /* isSpecialForm */ false
+                    ),
+                };
+            }
+
+            case 'Union': {
+                return { type: createUnionTypeFromArgs(classType, errorNode, typeArgs, flags, prefetched, evaluator.addDiagnostic) };
+            }
+
+            case 'Generic': {
+                return { type: createGenericTypeFromArgs(classType, errorNode, typeArgs, flags, evaluator.addDiagnostic) };
+            }
+
+            case 'Final': {
+                return { type: createFinalTypeFromArgs(classType, errorNode, typeArgs, flags, evaluator.addDiagnostic) };
+            }
+
+            case 'Annotated': {
+                return createAnnotatedTypeFromArgs(classType, errorNode, typeArgs, flags, evaluator.addDiagnostic);
+            }
+
+            case 'Concatenate': {
+                return { type: createConcatenateTypeFromArgs(classType, errorNode, typeArgs, flags, evaluator.addDiagnostic) };
+            }
+
+            case 'TypeGuard':
+            case 'TypeIs': {
+                return { type: createTypeGuardTypeFromArgs(classType, errorNode, typeArgs, flags, evaluator.addDiagnostic) };
+            }
+
+            case 'Unpack': {
+                return { type: createUnpackTypeFromArgs(classType, errorNode, typeArgs, flags, evaluator.addDiagnostic) };
+            }
+
+            case 'Required':
+            case 'NotRequired': {
+                return createRequiredOrReadOnlyTypeFromArgs(evaluator, classType, errorNode, typeArgs, flags);
+            }
+
+            case 'ReadOnly': {
+                return createRequiredOrReadOnlyTypeFromArgs(evaluator, classType, errorNode, typeArgs, flags);
+            }
+
+            case 'Self': {
+                return { type: createSelfTypeWithEvaluator(evaluator, classType, errorNode, typeArgs, flags) };
+            }
+
+            case 'LiteralString': {
+                return { type: createSpecialTypeFromArgs(classType, typeArgs, evaluator.addDiagnostic, 0) };
+            }
+
+            case 'TypeForm': {
+                return { type: createTypeFormTypeFromArgs(classType, errorNode, typeArgs, evaluator.addDiagnostic) };
+            }
+        }
+    }
+
+    const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
+    if (
+        fileInfo.isStubFile ||
+        PythonVersion.isGreaterOrEqualTo(fileInfo.executionEnvironment.pythonVersion, pythonVersion3_9) ||
+        isAnnotationEvaluationPostponed(AnalyzerNodeInfo.getFileInfo(errorNode)) ||
+        (flags & EvalFlags.ForwardRefs) !== 0
+    ) {
+        // Handle "type" specially, since it needs to act like "Type"
+        // in Python 3.9 and newer.
+        if (ClassType.isBuiltIn(classType, 'type') && typeArgs) {
+            if (typeArgs.length >= 1) {
+                // Treat type[function] as illegal.
+                if (isFunctionOrOverloaded(typeArgs[0].type)) {
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportInvalidTypeForm,
+                        LocMessage.typeAnnotationWithCallable(),
+                        typeArgs[0].node
+                    );
+
+                    return { type: UnknownType.create() };
+                }
+            }
+
+            if (prefetched?.typeClass && isInstantiableClass(prefetched.typeClass)) {
+                let typeType = createSpecialTypeFromArgs(
+                    prefetched.typeClass,
+                    typeArgs,
+                    evaluator.addDiagnostic,
+                    1,
+                    /* allowParamSpec */ undefined,
+                    /* isSpecialForm */ false
+                );
+
+                if (isInstantiableClass(typeType)) {
+                    typeType = explodeGenericClass(typeType);
+                }
+
+                if (isTypeFormSupportedForNode(errorNode)) {
+                    typeType = TypeBase.cloneWithTypeForm(typeType, convertToInstance(typeType));
+                }
+
+                return { type: typeType };
+            }
+        }
+
+        // Handle "tuple" specially, since it needs to act like "Tuple"
+        // in Python 3.9 and newer.
+        if (isTupleClass(classType)) {
+            let specializedClass = createSpecialTypeFromArgs(
+                classType,
+                typeArgs,
+                evaluator.addDiagnostic,
+                /* paramLimit */ undefined,
+                /* allowParamSpec */ undefined,
+                /* isSpecialForm */ false
+            );
+
+            if (isTypeFormSupportedForNode(errorNode)) {
+                specializedClass = TypeBase.cloneWithTypeForm(
+                    specializedClass,
+                    convertToInstance(specializedClass)
+                );
+            }
+
+            return { type: specializedClass };
+        }
+    }
+
+    let typeArgCount = typeArgs ? typeArgs.length : 0;
+
+    // Make sure the argument list count is correct.
+    const typeParams = ClassType.isPseudoGenericClass(classType) ? [] : ClassType.getTypeParams(classType);
+
+    // If there are no type parameters or args, the class is already specialized.
+    // No need to do any more work.
+    if (typeParams.length === 0 && typeArgCount === 0) {
+        return { type: classType };
+    }
+
+    const variadicTypeParamIndex = typeParams.findIndex((param) => isTypeVarTuple(param));
+
+    if (typeArgs) {
+        let minTypeArgCount = typeParams.length;
+        const firstDefaultParamIndex = typeParams.findIndex((param) => !!param.shared.isDefaultExplicit);
+
+        if (firstDefaultParamIndex >= 0) {
+            minTypeArgCount = firstDefaultParamIndex;
+        }
+
+        // Classes that accept inlined type dict type args allow only one.
+        if (typeArgs.length > 0 && typeArgs[0].inlinedTypeDict) {
+            if (typeArgs.length > 1) {
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportInvalidTypeArguments,
+                    LocMessage.typeArgsTooMany().format({
+                        name: classType.priv.aliasName || classType.shared.name,
+                        expected: 1,
+                        received: typeArgCount,
+                    }),
+                    typeArgs[1].node
+                );
+            }
+
+            return { type: typeArgs[0].inlinedTypeDict };
+        } else if (typeArgCount > typeParams.length) {
+            if (!ClassType.isPartiallyEvaluated(classType) && !ClassType.isTupleClass(classType)) {
+                if (typeParams.length === 0) {
+                    isValidTypeForm = false;
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportInvalidTypeArguments,
+                        LocMessage.typeArgsExpectingNone().format({
+                            name: classType.priv.aliasName || classType.shared.name,
+                        }),
+                        typeArgs[typeParams.length].node
+                    );
+                } else if (typeParams.length !== 1 || !isParamSpec(typeParams[0])) {
+                    isValidTypeForm = false;
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportInvalidTypeArguments,
+                        LocMessage.typeArgsTooMany().format({
+                            name: classType.priv.aliasName || classType.shared.name,
+                            expected: typeParams.length,
+                            received: typeArgCount,
+                        }),
+                        typeArgs[typeParams.length].node
+                    );
+                }
+
+                typeArgCount = typeParams.length;
+            }
+        } else if (typeArgCount < minTypeArgCount) {
+            isValidTypeForm = false;
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportInvalidTypeArguments,
+                LocMessage.typeArgsTooFew().format({
+                    name: classType.priv.aliasName || classType.shared.name,
+                    expected: minTypeArgCount,
+                    received: typeArgCount,
+                }),
+                typeArgs.length > 0 ? typeArgs[0].node.parent! : errorNode
+            );
+        }
+
+        typeArgs.forEach((typeArg, index) => {
+            if (!typeArg.type.props?.typeForm) {
+                isValidTypeForm = false;
+            }
+
+            if (index === variadicTypeParamIndex) {
+                // The types that make up the tuple that maps to the
+                // TypeVarTuple have already been validated when the tuple
+                // object was created in adjustTypeArgsForTypeVarTuple.
+                if (isClassInstance(typeArg.type) && isTupleClass(typeArg.type)) {
+                    return;
+                }
+
+                if (isTypeVarTuple(typeArg.type)) {
+                    if (!validateTypeVarTupleIsUnpackedCheck(typeArg.type, typeArg.node, evaluator.addDiagnostic)) {
+                        isValidTypeForm = false;
+                    }
+                    return;
+                }
+            }
+
+            const typeParam = index < typeParams.length ? typeParams[index] : undefined;
+            const isParamSpecTarget = typeParam && isParamSpec(typeParam);
+
+            if (
+                !validateTypeArgCheck(typeArg, evaluator.addDiagnostic, {
+                    allowParamSpec: true,
+                    allowTypeArgList: isParamSpecTarget,
+                })
+            ) {
+                isValidTypeForm = false;
+            }
+        });
+    }
+
+    // Handle ParamSpec arguments and fill in any missing type arguments with Unknown.
+    let typeArgTypes: Type[] = [];
+    const fullTypeParams = ClassType.getTypeParams(classType);
+
+    typeArgs = transformTypeArgsForParamSpecCheck(fullTypeParams, typeArgs, errorNode, evaluator.addDiagnostic);
+    if (!typeArgs) {
+        isValidTypeForm = false;
+    }
+
+    const constraints = new ConstraintTracker();
+
+    fullTypeParams.forEach((typeParam, index) => {
+        if (typeArgs && index < typeArgs.length) {
+            if (isParamSpec(typeParam)) {
+                const typeArg = typeArgs[index];
+                const functionType = FunctionType.createSynthesizedInstance('', FunctionTypeFlags.ParamSpecValue);
+
+                if (isEllipsisType(typeArg.type)) {
+                    FunctionType.addDefaultParams(functionType);
+                    functionType.shared.flags |= FunctionTypeFlags.GradualCallableForm;
+                    typeArgTypes.push(functionType);
+                    constraints.setBounds(typeParam, functionType);
+                    return;
+                }
+
+                if (typeArg.typeList) {
+                    typeArg.typeList!.forEach((paramType, paramIndex) => {
+                        FunctionType.addParam(
+                            functionType,
+                            FunctionParam.create(
+                                ParamCategory.Simple,
+                                convertToInstance(paramType.type),
+                                FunctionParamFlags.NameSynthesized | FunctionParamFlags.TypeDeclared,
+                                `__p${paramIndex}`
+                            )
+                        );
+                    });
+
+                    if (typeArg.typeList.length > 0) {
+                        FunctionType.addPositionOnlyParamSeparator(functionType);
+                    }
+
+                    typeArgTypes.push(functionType);
+                    constraints.setBounds(typeParam, functionType);
+                    return;
+                }
+
+                if (isInstantiableClass(typeArg.type) && ClassType.isBuiltIn(typeArg.type, 'Concatenate')) {
+                    const concatTypeArgs = typeArg.type.priv.typeArgs;
+                    if (concatTypeArgs && concatTypeArgs.length > 0) {
+                        concatTypeArgs.forEach((typeArg, index) => {
+                            if (index === concatTypeArgs.length - 1) {
+                                if (isParamSpec(typeArg)) {
+                                    FunctionType.addParamSpecVariadics(functionType, typeArg);
+                                } else if (isEllipsisType(typeArg)) {
+                                    FunctionType.addDefaultParams(functionType);
+                                    functionType.shared.flags |= FunctionTypeFlags.GradualCallableForm;
+                                }
+                            } else {
+                                FunctionType.addParam(
+                                    functionType,
+                                    FunctionParam.create(
+                                        ParamCategory.Simple,
+                                        typeArg,
+                                        FunctionParamFlags.NameSynthesized | FunctionParamFlags.TypeDeclared,
+                                        `__p${index}`
+                                    )
+                                );
+                            }
+                        });
+                    }
+
+                    typeArgTypes.push(functionType);
+                    return;
+                }
+            }
+
+            const typeArgType = convertToInstance(typeArgs[index].type);
+            typeArgTypes.push(typeArgType);
+            constraints.setBounds(typeParam, typeArgType);
+            return;
+        }
+
+        const solvedDefaultType = evaluator.solveAndApplyConstraints(typeParam, constraints, {
+            replaceUnsolved: {
+                scopeIds: getTypeVarScopeIds(classType),
+                tupleClassType: getTupleClassTypeFromPrefetched(prefetched),
+            },
+        });
+        typeArgTypes.push(solvedDefaultType);
+        constraints.setBounds(typeParam, solvedDefaultType);
+    });
+
+    typeArgTypes = typeArgTypes.map((typeArgType, index) => {
+        if (index < typeArgCount) {
+            const diag = new DiagnosticAddendum();
+            let adjustedTypeArgType = applyTypeArgToTypeVarWithEvaluator(typeParams[index], typeArgType, diag, evaluator);
+
+            // Determine if the variance must match.
+            if (adjustedTypeArgType && (flags & EvalFlags.EnforceVarianceConsistency) !== 0) {
+                const destType = typeParams[index];
+                const declaredVariance = destType.shared.declaredVariance;
+
+                if (!isVarianceOfTypeArgCompatible(adjustedTypeArgType, declaredVariance)) {
+                    diag.addMessage(
+                        LocAddendum.varianceMismatchForClass().format({
+                            typeVarName: evaluator.printType(adjustedTypeArgType),
+                            className: classType.shared.name,
+                        })
+                    );
+                    adjustedTypeArgType = undefined;
+                }
+            }
+
+            if (adjustedTypeArgType) {
+                typeArgType = adjustedTypeArgType;
+            } else {
+                // Avoid emitting this error for a partially-constructed class.
+                if (!isClassInstance(typeArgType) || !ClassType.isPartiallyEvaluated(typeArgType)) {
+                    assert(typeArgs !== undefined);
+                    isValidTypeForm = false;
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportInvalidTypeArguments,
+                        LocMessage.typeVarAssignmentMismatch().format({
+                            type: evaluator.printType(typeArgType),
+                            name: TypeVarType.getReadableName(typeParams[index]),
+                        }) + diag.getString(),
+                        typeArgs[index].node
+                    );
+                }
+            }
+        }
+
+        return typeArgType;
+    });
+
+    // If the class is partially constructed and doesn't yet have
+    // type parameters, assume that the number and types of supplied type
+    // arguments are correct.
+    if (typeArgs && classType.shared.typeParams.length === 0 && ClassType.isPartiallyEvaluated(classType)) {
+        typeArgTypes = typeArgs.map((t) => convertToInstance(t.type));
+    }
+
+    let specializedClass = ClassType.specialize(classType, typeArgTypes, typeArgs !== undefined);
+
+    if (isTypeFormSupportedForNode(errorNode)) {
+        specializedClass = TypeBase.cloneWithTypeForm(
+            specializedClass,
+            isValidTypeForm ? convertToInstance(specializedClass) : undefined
+        );
+    }
+
+    return { type: specializedClass };
 }
