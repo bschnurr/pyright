@@ -7,7 +7,7 @@
  */
 
 import { DiagnosticLevel } from '../../common/configOptions';
-import { PythonVersion, pythonVersion3_9 } from '../../common/pythonVersion';
+import { PythonVersion, pythonVersion3_9, pythonVersion3_13 } from '../../common/pythonVersion';
 import { Diagnostic, DiagnosticAddendum } from '../../common/diagnostic';
 import { DiagnosticRule } from '../../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../../localization/localize';
@@ -23,7 +23,7 @@ import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { isAnnotationEvaluationPostponed } from '../analyzerFileInfo';
 import { Declaration, DeclarationType, FunctionDeclaration } from '../declaration';
-import { Arg, ArgWithExpression, AssignTypeFlags, CallResult, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, MagicMethodDeprecationInfo, PrefetchedTypes, PrintTypeOptions, Reachability, SymbolDeclInfo, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
+import { AbstractSymbol, Arg, ArgWithExpression, AssignTypeFlags, CallResult, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, MagicMethodDeprecationInfo, PrefetchedTypes, PrintTypeOptions, Reachability, SymbolDeclInfo, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
 import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, InheritanceChain, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isOverloaded, isParamSpec, isPositionOnlySeparator, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, maxTypeRecursionCount, ModuleType, NeverType, OverloadedType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeCategory, TypeCondition, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnionType, UnknownType, Variance } from '../types';
 import { addConditionToType, areTypesSame, ClassMember, combineSameSizedTuples, combineVariances, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromAnyOrUnknown, derivesFromClassRecursive, derivesFromStdlibClass, doForEachSubtype, addTypeVarsToListIfUnique, explodeGenericClass, getDeclaredGeneratorReturnType, getGeneratorTypeArgs, getGeneratorYieldType, getSpecializedTupleType, getTypeCondition, getTypeVarArgsRecursive, getTypeVarScopeIds, getUnknownTypeForCallable, InferenceContext, invertVariance, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralLikeType, isLiteralType, isMetaclassInstance, isNoneInstance, isNoneTypeClass, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTupleIndexUnambiguous, isTypeAliasPlaceholder, isUnboundedTupleClass, isVarianceOfTypeArgCompatible, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeInferenceContext, makeTypeVarsBound, mapSignatures, mapSubtypes, MemberAccessFlags, partiallySpecializeType, removeNoneFromUnion, requiresSpecialization, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeForBaseClass, specializeWithDefaultTypeArgs, specializeTupleClass, stripTypeForm, synthesizeTypeVarForSelfCls, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
@@ -36,8 +36,9 @@ import { Symbol, SynthesizedTypeInfo } from '../symbol';
 import { getDeclarationsWithUsesLocalNameRemoved, synthesizeAliasDeclaration } from '../declarationUtils';
 import { getBoundInitMethod, validateConstructorArgs } from '../constructors';
 import { isPrivateOrProtectedName } from '../symbolNameUtils';
+import { getLastTypedDeclarationForSymbol } from '../symbolUtils';
 import * as ScopeUtils from '../scopeUtils';
-import { getFunctionInfoFromDecorators } from '../decorators';
+import { FunctionDecoratorInfo, getFunctionInfoFromDecorators } from '../decorators';
 import { createTypedDictTypeInlined, getTypeOfIndexedTypedDict } from '../typedDicts';
 
 export interface ReturnTypeInferenceContextFrame {
@@ -9441,4 +9442,371 @@ export function getTypeOfMemberWithEvaluator(
         );
     }
     return UnknownType.create();
+}
+
+export function createTypeVarTypeWithEvaluator(
+    evaluator: TypeEvaluator,
+    errorNode: ExpressionNode,
+    classType: ClassType,
+    argList: Arg[]
+): Type | undefined {
+    let typeVarName = '';
+    let firstConstraintArg: Arg | undefined;
+    let defaultValueNode: ExpressionNode | undefined;
+
+    if (argList.length === 0) {
+        evaluator.addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.typeVarFirstArg(), errorNode);
+        return undefined;
+    }
+
+    const firstArg = argList[0];
+    if (firstArg.valueExpression && firstArg.valueExpression.nodeType === ParseNodeType.StringList) {
+        typeVarName = firstArg.valueExpression.d.strings.map((s) => s.d.value).join('');
+    } else {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.typeVarFirstArg(),
+            firstArg.valueExpression || errorNode
+        );
+    }
+
+    const typeVar = TypeBase.cloneAsSpecialForm(
+        TypeVarType.createInstantiable(typeVarName),
+        ClassType.cloneAsInstance(classType)
+    );
+
+    // Parse the remaining parameters.
+    const paramNameMap = new Map<string, string>();
+    for (let i = 1; i < argList.length; i++) {
+        const paramNameNode = argList[i].name;
+        const paramName = paramNameNode ? paramNameNode.d.value : undefined;
+
+        if (paramName) {
+            if (paramNameMap.get(paramName)) {
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportCallIssue,
+                    LocMessage.duplicateParam().format({ name: paramName }),
+                    argList[i].valueExpression || errorNode
+                );
+            }
+
+            if (paramName === 'bound') {
+                if (TypeVarType.hasConstraints(typeVar)) {
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportGeneralTypeIssues,
+                        LocMessage.typeVarBoundAndConstrained(),
+                        argList[i].valueExpression || errorNode
+                    );
+                } else {
+                    const argType =
+                        argList[i].typeResult?.type ??
+                        evaluator.getTypeOfExpressionExpectingType(argList[i].valueExpression!, {
+                            noNonTypeSpecialForms: true,
+                            typeExpression: true,
+                            parsesStringLiteral: true,
+                        }).type;
+                    if (
+                        requiresSpecialization(argType, { ignorePseudoGeneric: true, ignoreImplicitTypeArgs: true })
+                    ) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportGeneralTypeIssues,
+                            LocMessage.typeVarBoundGeneric(),
+                            argList[i].valueExpression || errorNode
+                        );
+                    }
+                    typeVar.shared.boundType = convertToInstance(argType);
+                }
+            } else if (paramName === 'covariant') {
+                if (argList[i].valueExpression && getBooleanValueFromNode(argList[i].valueExpression!, evaluator.addDiagnostic)) {
+                    if (
+                        typeVar.shared.declaredVariance === Variance.Contravariant ||
+                        typeVar.shared.declaredVariance === Variance.Auto
+                    ) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportGeneralTypeIssues,
+                            LocMessage.typeVarVariance(),
+                            argList[i].valueExpression!
+                        );
+                    } else {
+                        typeVar.shared.declaredVariance = Variance.Covariant;
+                    }
+                }
+            } else if (paramName === 'contravariant') {
+                if (argList[i].valueExpression && getBooleanValueFromNode(argList[i].valueExpression!, evaluator.addDiagnostic)) {
+                    if (
+                        typeVar.shared.declaredVariance === Variance.Covariant ||
+                        typeVar.shared.declaredVariance === Variance.Auto
+                    ) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportGeneralTypeIssues,
+                            LocMessage.typeVarVariance(),
+                            argList[i].valueExpression!
+                        );
+                    } else {
+                        typeVar.shared.declaredVariance = Variance.Contravariant;
+                    }
+                }
+            } else if (paramName === 'infer_variance') {
+                if (argList[i].valueExpression && getBooleanValueFromNode(argList[i].valueExpression!, evaluator.addDiagnostic)) {
+                    if (
+                        typeVar.shared.declaredVariance === Variance.Covariant ||
+                        typeVar.shared.declaredVariance === Variance.Contravariant
+                    ) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportGeneralTypeIssues,
+                            LocMessage.typeVarVariance(),
+                            argList[i].valueExpression!
+                        );
+                    } else {
+                        typeVar.shared.declaredVariance = Variance.Auto;
+                    }
+                }
+            } else if (paramName === 'default') {
+                defaultValueNode = argList[i].valueExpression;
+                const argType =
+                    argList[i].typeResult?.type ??
+                    evaluator.getTypeOfExpressionExpectingType(defaultValueNode!, {
+                        allowTypeVarsWithoutScopeId: true,
+                        typeExpression: true,
+                    }).type;
+                typeVar.shared.defaultType = convertToInstance(argType);
+                typeVar.shared.isDefaultExplicit = true;
+
+                const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
+                if (
+                    !fileInfo.isStubFile &&
+                    PythonVersion.isLessThan(fileInfo.executionEnvironment.pythonVersion, pythonVersion3_13) &&
+                    classType.shared.moduleName !== 'typing_extensions'
+                ) {
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportGeneralTypeIssues,
+                        LocMessage.typeVarDefaultIllegal(),
+                        defaultValueNode!
+                    );
+                }
+            } else {
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportCallIssue,
+                    LocMessage.typeVarUnknownParam().format({ name: paramName }),
+                    argList[i].node?.d.name || argList[i].valueExpression || errorNode
+                );
+            }
+
+            paramNameMap.set(paramName, paramName);
+        } else {
+            if (TypeVarType.hasBound(typeVar)) {
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportGeneralTypeIssues,
+                    LocMessage.typeVarBoundAndConstrained(),
+                    argList[i].valueExpression || errorNode
+                );
+            } else {
+                const argType =
+                    argList[i].typeResult?.type ??
+                    evaluator.getTypeOfExpressionExpectingType(argList[i].valueExpression!, {
+                        typeExpression: true,
+                    }).type;
+
+                if (requiresSpecialization(argType, { ignorePseudoGeneric: true })) {
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportGeneralTypeIssues,
+                        LocMessage.typeVarConstraintGeneric(),
+                        argList[i].valueExpression || errorNode
+                    );
+                }
+                TypeVarType.addConstraint(typeVar, convertToInstance(argType));
+                if (firstConstraintArg === undefined) {
+                    firstConstraintArg = argList[i];
+                }
+            }
+        }
+    }
+
+    if (typeVar.shared.constraints.length === 1 && firstConstraintArg) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.typeVarSingleConstraint(),
+            firstConstraintArg.valueExpression || errorNode
+        );
+    }
+
+    // If a default is provided, make sure it is compatible with the bound
+    // or constraint.
+    if (typeVar.shared.isDefaultExplicit && defaultValueNode) {
+        verifyTypeVarDefaultIsCompatibleWithEvaluator(evaluator, typeVar, defaultValueNode);
+    }
+
+    return typeVar;
+}
+
+export function getAbstractSymbolInfoWithEvaluator(
+    evaluator: TypeEvaluator,
+    classType: ClassType,
+    symbolName: string
+): AbstractSymbol | undefined {
+    const isProtocolClass = ClassType.isProtocolClass(classType);
+
+    const symbol = ClassType.getSymbolTable(classType).get(symbolName);
+    if (!symbol) {
+        return undefined;
+    }
+
+    if (!symbol.isClassMember() && !symbol.isNamedTupleMemberMember()) {
+        return undefined;
+    }
+
+    const lastDecl = getLastTypedDeclarationForSymbol(symbol);
+    if (!lastDecl) {
+        return undefined;
+    }
+
+    if (isProtocolClass && lastDecl.type === DeclarationType.Variable) {
+        const allDecls = symbol.getDeclarations();
+        if (!allDecls.some((decl) => decl.type === DeclarationType.Variable && !!decl.inferredTypeSource)) {
+            return { symbol, symbolName, classType, hasImplementation: false };
+        }
+    }
+
+    if (lastDecl.type !== DeclarationType.Function) {
+        return undefined;
+    }
+
+    let isAbstract = false;
+    const lastFunctionInfo = getFunctionInfoFromDecorators(evaluator, lastDecl.node, /* isInClass */ true);
+    if ((lastFunctionInfo.flags & FunctionTypeFlags.AbstractMethod) !== 0) {
+        isAbstract = true;
+    }
+
+    const isStubFile = AnalyzerNodeInfo.getFileInfo(lastDecl.node).isStubFile;
+
+    const firstDecl = symbol.getDeclarations()[0];
+    let firstFunctionInfo: FunctionDecoratorInfo | undefined;
+
+    if (firstDecl !== lastDecl && firstDecl.type === DeclarationType.Function) {
+        firstFunctionInfo = getFunctionInfoFromDecorators(evaluator, firstDecl.node, /* isInClass */ true);
+        if ((firstFunctionInfo.flags & FunctionTypeFlags.AbstractMethod) !== 0) {
+            isAbstract = true;
+        }
+
+        if (isProtocolClass && (lastFunctionInfo.flags & FunctionTypeFlags.Overloaded) !== 0) {
+            if (isProtocolClass && !isAbstract && isStubFile) {
+                return undefined;
+            }
+
+            return { symbol, symbolName, classType, hasImplementation: false };
+        }
+    }
+
+    if (!isProtocolClass && !isAbstract) {
+        return undefined;
+    }
+
+    const hasImplementation =
+        !ParseTreeUtils.isSuiteEmpty(lastDecl.node.d.suite) && !methodAlwaysRaisesNotImplementedWithEvaluator(evaluator, lastDecl);
+
+    if (isProtocolClass && !isAbstract) {
+        if (hasImplementation || isStubFile) {
+            return undefined;
+        }
+    }
+
+    return { symbol, symbolName, classType, hasImplementation };
+}
+
+export function inferParamTypeFromDefaultValueWithEvaluator(
+    evaluator: TypeEvaluator,
+    paramValueExpr: ExpressionNode,
+    prefetched: Partial<PrefetchedTypes> | undefined
+) {
+    const defaultValueType = evaluator.getTypeOfExpression(paramValueExpr, EvalFlags.ConvertEllipsisToAny).type;
+
+    let inferredParamType: Type | undefined;
+
+    if (
+        isNoneInstance(defaultValueType) ||
+        isSentinelLiteral(defaultValueType) ||
+        (isClassInstance(defaultValueType) && isPrivateOrProtectedName(defaultValueType.shared.name))
+    ) {
+        inferredParamType = combineTypes([defaultValueType, UnknownType.create()]);
+    } else {
+        let skipInference = false;
+
+        if (isFunctionOrOverloaded(defaultValueType)) {
+            skipInference = true;
+        } else if (
+            isClassInstance(defaultValueType) &&
+            ClassType.isBuiltIn(defaultValueType, ['tuple', 'list', 'set', 'dict'])
+        ) {
+            skipInference = true;
+        }
+
+        if (!skipInference) {
+            inferredParamType = convertSpecialFormToRuntimeValueWithPrefetched(
+                defaultValueType,
+                EvalFlags.None,
+                prefetched,
+                /* convertModule */ true
+            );
+            inferredParamType = stripTypeForm(inferredParamType);
+            inferredParamType = evaluator.stripLiteralValue(inferredParamType);
+        }
+    }
+
+    if (inferredParamType) {
+        const fileInfo = AnalyzerNodeInfo.getFileInfo(paramValueExpr);
+        if (fileInfo.isInPyTypedPackage && !fileInfo.isStubFile) {
+            inferredParamType = TypeBase.cloneForAmbiguousType(inferredParamType);
+        }
+    }
+
+    return inferredParamType;
+}
+
+export function addTypeFormForSymbolWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: ExpressionNode,
+    type: Type,
+    flags: EvalFlags,
+    includesVarDecl: boolean
+): Type {
+    if (!isTypeFormSupportedForNode(node)) {
+        return type;
+    }
+
+    const isValid = isSymbolValidTypeExpressionCheck(type, includesVarDecl);
+
+    if (type.props?.typeForm) {
+        if ((flags & EvalFlags.NoConvertSpecialForm) !== 0 && !isValid) {
+            type = TypeBase.cloneWithTypeForm(type, undefined);
+        }
+        return type;
+    }
+
+    if (!isValid) {
+        return type;
+    }
+
+    if (isTypeVar(type) && type.priv.scopeId && !type.shared.isSynthesized) {
+        if (!isTypeVarTuple(type) || !type.priv.isInUnion) {
+            const liveScopeIds = ParseTreeUtils.getTypeVarScopesForNode(node);
+            type = TypeBase.cloneWithTypeForm(type, convertToInstance(makeTypeVarsBound(type, liveScopeIds)));
+        }
+    } else if (isInstantiableClass(type) && !type.priv.includeSubclasses && !ClassType.isSpecialBuiltIn(type)) {
+        if (ClassType.isBuiltIn(type, 'Any')) {
+            type = TypeBase.cloneWithTypeForm(type, AnyType.create());
+        } else {
+            type = TypeBase.cloneWithTypeForm(type, ClassType.cloneAsInstance(specializeWithDefaultTypeArgs(type)));
+        }
+    }
+
+    if (type.props?.typeAliasInfo && TypeBase.isInstantiable(type)) {
+        let typeFormType = type;
+        if ((flags & EvalFlags.NoSpecialize) === 0) {
+            typeFormType = specializeTypeAliasWithDefaultsWithEvaluator(evaluator, typeFormType, /* errorNode */ undefined, /* prefetched */ undefined);
+        }
+
+        type = TypeBase.cloneWithTypeForm(type, convertToInstance(typeFormType));
+    }
+
+    return type;
 }
