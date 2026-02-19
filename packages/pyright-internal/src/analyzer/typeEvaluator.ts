@@ -2778,49 +2778,7 @@ export function createTypeEvaluator(
     }
 
     function isTypeHashable(type: Type): boolean {
-        let isTypeHashable = true;
-
-        doForEachSubtype(makeTopLevelTypeVarsConcrete(type), (subtype) => {
-            if (isClassInstance(subtype)) {
-                // Assume the class is hashable.
-                let isObjectHashable = true;
-
-                // Have we already computed and cached the hashability?
-                if (subtype.shared.isInstanceHashable !== undefined) {
-                    isObjectHashable = subtype.shared.isInstanceHashable;
-                } else {
-                    const hashMember = lookUpObjectMember(subtype, '__hash__', MemberAccessFlags.SkipObjectBaseClass);
-
-                    if (hashMember && hashMember.isTypeDeclared) {
-                        const decls = hashMember.symbol.getTypedDeclarations();
-                        const synthesizedType = hashMember.symbol.getSynthesizedType();
-
-                        // Handle the case where the type is synthesized (used for
-                        // dataclasses).
-                        if (synthesizedType) {
-                            isObjectHashable = !isNoneInstance(synthesizedType.type);
-                        } else {
-                            // Assume that if '__hash__' is declared as a variable, it is
-                            // not hashable. If it's declared as a function, it is. We'll
-                            // skip evaluating its full type because that's not needed in
-                            // this case.
-                            if (decls.every((decl) => decl.type === DeclarationType.Variable)) {
-                                isObjectHashable = false;
-                            }
-                        }
-                    }
-
-                    // Cache the hashability for next time.
-                    subtype.shared.isInstanceHashable = isObjectHashable;
-                }
-
-                if (!isObjectHashable) {
-                    isTypeHashable = false;
-                }
-            }
-        });
-
-        return isTypeHashable;
+        return TypeEvaluatorCore.isTypeHashableWithEvaluator(evaluatorInterface, type);
     }
 
     function getTypedDictClassType(): ClassType | undefined {
@@ -15474,53 +15432,7 @@ export function createTypeEvaluator(
 
     // Creates a new class type that is a subclass of two other specified classes.
     function createSubclass(errorNode: ExpressionNode, type1: ClassType, type2: ClassType): ClassType {
-        assert(isInstantiableClass(type1) && isInstantiableClass(type2));
-
-        // If both classes are class objects (type[A] and type[B]), create a new
-        // class object (type[A & B]) rather than "type[A] & type[B]".
-        let createClassObject = false;
-        if (TypeBase.getInstantiableDepth(type1) > 0 && TypeBase.getInstantiableDepth(type2) > 0) {
-            type1 = ClassType.cloneAsInstance(type1);
-            type2 = ClassType.cloneAsInstance(type2);
-            createClassObject = true;
-        }
-
-        const className = `<subclass of ${printType(convertToInstance(type1), {
-            omitTypeArgsIfUnknown: true,
-        })} and ${printType(convertToInstance(type2), { omitTypeArgsIfUnknown: true })}>`;
-        const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
-
-        // The effective metaclass of the intersection is the narrower of the two metaclasses.
-        let effectiveMetaclass = type1.shared.effectiveMetaclass;
-        if (type2.shared.effectiveMetaclass) {
-            if (!effectiveMetaclass || assignType(effectiveMetaclass, type2.shared.effectiveMetaclass)) {
-                effectiveMetaclass = type2.shared.effectiveMetaclass;
-            }
-        }
-
-        let newClassType = ClassType.createInstantiable(
-            className,
-            ParseTreeUtils.getClassFullName(errorNode, fileInfo.moduleName, className),
-            fileInfo.moduleName,
-            fileInfo.fileUri,
-            ClassTypeFlags.None,
-            ParseTreeUtils.getTypeSourceId(errorNode),
-            /* declaredMetaclass */ undefined,
-            effectiveMetaclass,
-            type1.shared.docString
-        );
-
-        newClassType.shared.baseClasses = [type1, type2];
-        computeMroLinearization(newClassType);
-
-        newClassType = addConditionToType(newClassType, type1.props?.condition);
-        newClassType = addConditionToType(newClassType, type2.props?.condition);
-
-        if (createClassObject) {
-            newClassType = ClassType.cloneAsInstantiable(newClassType);
-        }
-
-        return newClassType;
+        return TypeEvaluatorCore.createSubclassWithEvaluator(evaluatorInterface, errorNode, type1, type2);
     }
 
     function getTypeOfClass(node: ClassNode): ClassTypeResult | undefined {
@@ -23361,86 +23273,16 @@ export function createTypeEvaluator(
         flags = AssignTypeFlags.Default,
         recursionCount = 0
     ) {
-        assert(destAliasInfo.typeArgs !== undefined);
-        assert(srcAliasInfo.typeArgs !== undefined);
-
-        let isAssignable = true;
-        const srcTypeArgs = srcAliasInfo.typeArgs;
-        const variances = destAliasInfo.shared.computedVariance;
-
-        destAliasInfo.typeArgs.forEach((destTypeArg, index) => {
-            const srcTypeArg = index < srcTypeArgs.length ? srcTypeArgs[index] : UnknownType.create();
-
-            let adjFlags = flags;
-            const variance = variances && index < variances.length ? variances[index] : Variance.Covariant;
-
-            if (variance === Variance.Invariant) {
-                adjFlags |= AssignTypeFlags.Invariant;
-            } else if (variance === Variance.Contravariant) {
-                adjFlags ^= AssignTypeFlags.Contravariant;
-            }
-
-            if (!assignType(destTypeArg, srcTypeArg, diag, constraints, adjFlags, recursionCount)) {
-                isAssignable = false;
-            }
-        });
-
-        return isAssignable;
+        return TypeEvaluatorCore.assignRecursiveTypeAliasToSelfWithEvaluator(
+            evaluatorInterface, destAliasInfo, srcAliasInfo, diag, constraints, flags, recursionCount
+        );
     }
 
     // If the expected type is an explicit TypeForm type, see if the source
     // type has an implicit TypeForm type that can be assigned to it. If so,
     // convert to an explicit TypeForm type.
     function convertToTypeFormType(expectedType: Type, srcType: Type): Type {
-        // Is the source is a TypeForm type?
-        if (!srcType.props?.typeForm) {
-            return srcType;
-        }
-
-        let srcTypeFormType: Type | undefined;
-
-        // Is the source is a TypeForm type?
-        if (srcType.props?.typeForm) {
-            srcTypeFormType = srcType.props.typeForm;
-        } else if (isClass(srcType)) {
-            if (TypeBase.isInstantiable(srcType)) {
-                if (!ClassType.isSpecialBuiltIn(srcType)) {
-                    srcTypeFormType = ClassType.cloneAsInstance(srcType);
-                }
-            } else if (ClassType.isBuiltIn(srcType, 'type')) {
-                srcTypeFormType =
-                    srcType.priv.typeArgs?.length && srcType.priv.typeArgs.length > 0
-                        ? srcType.priv.typeArgs[0]
-                        : UnknownType.create();
-            }
-        } else if (isTypeVar(srcType) && TypeBase.isInstantiable(srcType)) {
-            if (!isTypeVarTuple(srcType) || !srcType.priv.isInUnion) {
-                srcTypeFormType = convertToInstance(srcType);
-            }
-        }
-
-        if (!srcTypeFormType) {
-            return srcType;
-        }
-
-        let resultType: Type | undefined;
-
-        doForEachSubtype(expectedType, (subtype) => {
-            if (resultType || !isClassInstance(subtype) || !ClassType.isBuiltIn(subtype, 'TypeForm')) {
-                return;
-            }
-
-            const destTypeFormType =
-                subtype.priv.typeArgs && subtype.priv.typeArgs.length > 0
-                    ? subtype.priv.typeArgs[0]
-                    : UnknownType.create();
-
-            if (assignType(destTypeFormType, srcTypeFormType)) {
-                resultType = ClassType.specialize(subtype, [srcTypeFormType]);
-            }
-        });
-
-        return resultType ?? srcType;
+        return TypeEvaluatorCore.convertToTypeFormTypeWithEvaluator(evaluatorInterface, expectedType, srcType);
     }
 
     function assignFromUnionType(
@@ -23757,43 +23599,7 @@ export function createTypeEvaluator(
     // matches for types like `tuple[Any]` and `tuple[int]` from being considered
     // proper subtypes of each other.
     function isProperSubtype(destType: Type, srcType: Type, recursionCount: number) {
-        // If the destType has a condition, don't consider the srcType a proper subtype.
-        if (destType.props?.condition) {
-            return false;
-        }
-
-        // Shortcut the check if either type is Any or Unknown.
-        if (isAnyOrUnknown(destType) || isAnyOrUnknown(srcType)) {
-            return true;
-        }
-
-        // Shortcut the check if either type is a class whose hierarchy contains an unknown type.
-        if (isClass(destType) && destType.shared.mro.some((mro) => isAnyOrUnknown(mro))) {
-            return true;
-        }
-
-        if (isClass(srcType) && srcType.shared.mro.some((mro) => isAnyOrUnknown(mro))) {
-            return true;
-        }
-
-        return (
-            assignType(
-                destType,
-                srcType,
-                /* diag */ undefined,
-                /* constraints */ undefined,
-                AssignTypeFlags.Default,
-                recursionCount
-            ) &&
-            !assignType(
-                srcType,
-                destType,
-                /* diag */ undefined,
-                /* constraints */ undefined,
-                AssignTypeFlags.Default,
-                recursionCount
-            )
-        );
+        return TypeEvaluatorCore.isProperSubtypeWithEvaluator(evaluatorInterface, destType, srcType, recursionCount);
     }
 
     // Determines whether the two types are potentially comparable -- i.e.
@@ -23802,133 +23608,7 @@ export function createTypeEvaluator(
     // a special variant that can be used for the "is" and "is not" operator.
     // This variant can be less conservative in some cases.
     function isTypeComparable(leftType: Type, rightType: Type, assumeIsOperator = false) {
-        if (isAnyOrUnknown(leftType) || isAnyOrUnknown(rightType)) {
-            return true;
-        }
-
-        if (isNever(leftType) || isNever(rightType)) {
-            return false;
-        }
-
-        if (isModule(leftType) || isModule(rightType)) {
-            return isTypeSame(leftType, rightType, { ignoreConditions: true });
-        }
-
-        const isLeftCallable = isFunctionOrOverloaded(leftType);
-        const isRightCallable = isFunctionOrOverloaded(rightType);
-
-        // If either type is a function, assume that it may be comparable. The other
-        // operand might be a callable object, an 'object' instance, etc. We could
-        // make this more precise for specific cases (e.g. if the other operand is
-        // None or a literal or an instance of a nominal class that doesn't override
-        // __call__ and is marked final, etc.), but coming up with a comprehensive
-        // list is probably not feasible.
-        if (isLeftCallable || isRightCallable) {
-            return true;
-        }
-
-        if (isInstantiableClass(leftType) || (isClassInstance(leftType) && ClassType.isBuiltIn(leftType, 'type'))) {
-            if (
-                isInstantiableClass(rightType) ||
-                (isClassInstance(rightType) && ClassType.isBuiltIn(rightType, 'type'))
-            ) {
-                const genericLeftType = ClassType.specialize(leftType, /* typeArgs */ undefined);
-                const genericRightType = ClassType.specialize(rightType, /* typeArgs */ undefined);
-
-                if (assignType(genericLeftType, genericRightType) || assignType(genericRightType, genericLeftType)) {
-                    return true;
-                }
-            }
-
-            // Does the class have an operator overload for eq?
-            const metaclass = leftType.shared.effectiveMetaclass;
-            if (metaclass && isClass(metaclass)) {
-                if (lookUpClassMember(metaclass, '__eq__', MemberAccessFlags.SkipObjectBaseClass)) {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        if (isClassInstance(leftType)) {
-            if (isClass(rightType)) {
-                const genericLeftType = ClassType.specialize(leftType, /* typeArgs */ undefined);
-                const genericRightType = ClassType.specialize(rightType, /* typeArgs */ undefined);
-
-                if (assignType(genericLeftType, genericRightType) || assignType(genericRightType, genericLeftType)) {
-                    return true;
-                }
-
-                // Check for the "is None" or "is not None" case.
-                if (assumeIsOperator && isNoneInstance(rightType)) {
-                    if (isNoneInstance(leftType)) {
-                        return true;
-                    }
-
-                    // The LHS could be a protocol or 'object', in which case None is
-                    // potentially comparable to it. In other cases, None is not comparable
-                    // because the types are disjoint.
-                    return assignType(leftType, rightType);
-                }
-
-                // Assume that if the types are disjoint and built-in classes that they
-                // will never be comparable.
-                if (ClassType.isBuiltIn(leftType) && ClassType.isBuiltIn(rightType) && TypeBase.isInstance(rightType)) {
-                    // We need to be careful with bool and int literals because
-                    // they are comparable under certain circumstances.
-                    let boolType: ClassType | undefined;
-                    let intType: ClassType | undefined;
-                    if (ClassType.isBuiltIn(leftType, 'bool') && ClassType.isBuiltIn(rightType, 'int')) {
-                        boolType = leftType;
-                        intType = rightType;
-                    } else if (ClassType.isBuiltIn(rightType, 'bool') && ClassType.isBuiltIn(leftType, 'int')) {
-                        boolType = rightType;
-                        intType = leftType;
-                    }
-
-                    if (boolType && intType) {
-                        const intVal = intType.priv?.literalValue as number | BigInt | undefined;
-                        if (intVal === undefined) {
-                            return true;
-                        }
-                        if (intVal !== 0 && intVal !== 1) {
-                            return false;
-                        }
-
-                        const boolVal = boolType.priv?.literalValue as boolean | undefined;
-                        if (boolVal === undefined) {
-                            return true;
-                        }
-
-                        return boolVal === (intVal === 1);
-                    }
-
-                    return false;
-                }
-            }
-
-            // Does the class have an operator overload for eq?
-            const eqMethod = lookUpClassMember(
-                ClassType.cloneAsInstantiable(leftType),
-                '__eq__',
-                MemberAccessFlags.SkipObjectBaseClass
-            );
-
-            if (eqMethod) {
-                // If this is a synthesized method for a dataclass, we can assume
-                // that other dataclass types will not be comparable.
-                if (ClassType.isDataClass(leftType) && eqMethod.symbol.getSynthesizedType()) {
-                    return false;
-                }
-
-                return true;
-            }
-
-            return false;
-        }
-
-        return true;
+        return TypeEvaluatorCore.isTypeComparableWithEvaluator(evaluatorInterface, leftType, rightType, assumeIsOperator);
     }
 
     function assignToUnionType(
@@ -24122,70 +23802,9 @@ export function createTypeEvaluator(
     }
 
     function assignConditionalTypeToTypeVar(destType: TypeVarType, srcType: Type, recursionCount: number): boolean {
-        // The srcType is assignable only if all of its subtypes are assignable.
-        return !findSubtype(srcType, (srcSubtype) => {
-            if (isTypeSame(destType, srcSubtype, { ignorePseudoGeneric: true }, recursionCount)) {
-                return false;
-            }
-
-            if (isIncompleteUnknown(srcSubtype)) {
-                return false;
-            }
-
-            const destTypeVarName = TypeVarType.getNameWithScope(destType);
-
-            // Determine which conditions on this type apply to this type variable.
-            // There might be more than one of them.
-            const applicableConditions = (getTypeCondition(srcSubtype) ?? []).filter(
-                (constraint) => constraint.typeVar.priv.nameWithScope === destTypeVarName
-            );
-
-            // If there are no applicable conditions, it's not assignable.
-            if (applicableConditions.length === 0) {
-                return true;
-            }
-
-            return !applicableConditions.some((condition) => {
-                if (condition.typeVar.priv.nameWithScope === TypeVarType.getNameWithScope(destType)) {
-                    if (destType.shared.boundType) {
-                        assert(
-                            condition.constraintIndex === 0,
-                            'Expected constraint for bound TypeVar to have index of 0'
-                        );
-
-                        return assignType(
-                            destType.shared.boundType,
-                            srcSubtype,
-                            /* diag */ undefined,
-                            /* constraints */ undefined,
-                            AssignTypeFlags.Default,
-                            recursionCount
-                        );
-                    }
-
-                    if (TypeVarType.hasConstraints(destType)) {
-                        assert(
-                            condition.constraintIndex < destType.shared.constraints.length,
-                            'Constraint for constrained TypeVar is out of bounds'
-                        );
-
-                        return assignType(
-                            destType.shared.constraints[condition.constraintIndex],
-                            srcSubtype,
-                            /* diag */ undefined,
-                            /* constraints */ undefined,
-                            AssignTypeFlags.Default,
-                            recursionCount
-                        );
-                    }
-
-                    // This is a non-bound and non-constrained type variable with a matching condition.
-                    return true;
-                }
-
-                return false;
-            });
-        });
+        return TypeEvaluatorCore.assignConditionalTypeToTypeVarWithEvaluator(
+            evaluatorInterface, destType, srcType, recursionCount
+        );
     }
 
     // If the class is a protocol and it has a `__call__` method but no other methods
@@ -25327,41 +24946,7 @@ export function createTypeEvaluator(
     // explicit type annotations for the "self" or "cls" parameter and some
     // of these do not apply to the child class.
     function isOverrideMethodApplicable(baseMethod: FunctionType, childClass: ClassType): boolean {
-        if (
-            !FunctionType.isInstanceMethod(baseMethod) &&
-            !FunctionType.isClassMethod(baseMethod) &&
-            !FunctionType.isConstructorMethod(baseMethod)
-        ) {
-            return true;
-        }
-
-        const baseParamDetails = getParamListDetails(baseMethod);
-        if (baseParamDetails.params.length === 0) {
-            return true;
-        }
-
-        const baseParamType = baseParamDetails.params[0].param;
-
-        if (baseParamType.category !== ParamCategory.Simple || !FunctionParam.isTypeDeclared(baseParamType)) {
-            return true;
-        }
-
-        // If this is a self or cls parameter, determine whether the override
-        // class can be assigned to the base parameter type. If not, then this
-        // override doesn't apply. This is important for overloads where the
-        // base class contains some overload signatures that are not applicable
-        // to the child class.
-        const childSelfOrClsType = FunctionType.isInstanceMethod(baseMethod)
-            ? ClassType.cloneAsInstance(childClass)
-            : childClass;
-
-        return assignType(
-            baseParamDetails.params[0].type,
-            childSelfOrClsType,
-            /* diag */ undefined,
-            /* constraints */ undefined,
-            AssignTypeFlags.Default
-        );
+        return TypeEvaluatorCore.isOverrideMethodApplicableWithEvaluator(evaluatorInterface, baseMethod, childClass);
     }
 
     // Determines whether the override method is compatible with the overridden method.

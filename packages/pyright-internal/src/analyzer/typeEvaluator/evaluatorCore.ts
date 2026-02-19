@@ -22,8 +22,8 @@ import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
 import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { AnyType, ClassType, combineTypes, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, NeverType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeBase, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnknownType } from '../types';
-import { convertToInstance, doForEachSubtype, addTypeVarsToListIfUnique, getTypeVarArgsRecursive, isEffectivelyInstantiable, isEllipsisType, isNoneInstance, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
+import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, NeverType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnknownType, Variance } from '../types';
+import { addConditionToType, computeMroLinearization, convertToInstance, doForEachSubtype, addTypeVarsToListIfUnique, getTypeCondition, getTypeVarArgsRecursive, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isNoneInstance, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, MemberAccessFlags, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails, ParamKind, ParamListDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 import { makeTupleObject } from '../tuples';
@@ -2280,4 +2280,480 @@ export function reportPossibleUnknownAssignmentWithEvaluator(
             );
         }
     }
+}
+
+export function isProperSubtypeWithEvaluator(
+    evaluator: TypeEvaluator,
+    destType: Type,
+    srcType: Type,
+    recursionCount: number
+) {
+    // If the destType has a condition, don't consider the srcType a proper subtype.
+    if (destType.props?.condition) {
+        return false;
+    }
+
+    // Shortcut the check if either type is Any or Unknown.
+    if (isAnyOrUnknown(destType) || isAnyOrUnknown(srcType)) {
+        return true;
+    }
+
+    // Shortcut the check if either type is a class whose hierarchy contains an unknown type.
+    if (isClass(destType) && destType.shared.mro.some((mro) => isAnyOrUnknown(mro))) {
+        return true;
+    }
+
+    if (isClass(srcType) && srcType.shared.mro.some((mro) => isAnyOrUnknown(mro))) {
+        return true;
+    }
+
+    return (
+        evaluator.assignType(
+            destType,
+            srcType,
+            /* diag */ undefined,
+            /* constraints */ undefined,
+            AssignTypeFlags.Default,
+            recursionCount
+        ) &&
+        !evaluator.assignType(
+            srcType,
+            destType,
+            /* diag */ undefined,
+            /* constraints */ undefined,
+            AssignTypeFlags.Default,
+            recursionCount
+        )
+    );
+}
+
+export function isOverrideMethodApplicableWithEvaluator(
+    evaluator: TypeEvaluator,
+    baseMethod: FunctionType,
+    childClass: ClassType
+): boolean {
+    if (
+        !FunctionType.isInstanceMethod(baseMethod) &&
+        !FunctionType.isClassMethod(baseMethod) &&
+        !FunctionType.isConstructorMethod(baseMethod)
+    ) {
+        return true;
+    }
+
+    const baseParamDetails = getParamListDetails(baseMethod);
+    if (baseParamDetails.params.length === 0) {
+        return true;
+    }
+
+    const baseParamType = baseParamDetails.params[0].param;
+
+    if (baseParamType.category !== ParamCategory.Simple || !FunctionParam.isTypeDeclared(baseParamType)) {
+        return true;
+    }
+
+    // If this is a self or cls parameter, determine whether the override
+    // class can be assigned to the base parameter type. If not, then this
+    // override doesn't apply.
+    const childSelfOrClsType = FunctionType.isInstanceMethod(baseMethod)
+        ? ClassType.cloneAsInstance(childClass)
+        : childClass;
+
+    return evaluator.assignType(
+        baseParamDetails.params[0].type,
+        childSelfOrClsType,
+        /* diag */ undefined,
+        /* constraints */ undefined,
+        AssignTypeFlags.Default
+    );
+}
+
+export function assignRecursiveTypeAliasToSelfWithEvaluator(
+    evaluator: TypeEvaluator,
+    destAliasInfo: TypeAliasInfo,
+    srcAliasInfo: TypeAliasInfo,
+    diag?: DiagnosticAddendum,
+    constraints?: ConstraintTracker,
+    flags = AssignTypeFlags.Default,
+    recursionCount = 0
+) {
+    assert(destAliasInfo.typeArgs !== undefined);
+    assert(srcAliasInfo.typeArgs !== undefined);
+
+    let isAssignable = true;
+    const srcTypeArgs = srcAliasInfo.typeArgs;
+    const variances = destAliasInfo.shared.computedVariance;
+
+    destAliasInfo.typeArgs.forEach((destTypeArg, index) => {
+        const srcTypeArg = index < srcTypeArgs.length ? srcTypeArgs[index] : UnknownType.create();
+
+        let adjFlags = flags;
+        const variance = variances && index < variances.length ? variances[index] : Variance.Covariant;
+
+        if (variance === Variance.Invariant) {
+            adjFlags |= AssignTypeFlags.Invariant;
+        } else if (variance === Variance.Contravariant) {
+            adjFlags ^= AssignTypeFlags.Contravariant;
+        }
+
+        if (!evaluator.assignType(destTypeArg, srcTypeArg, diag, constraints, adjFlags, recursionCount)) {
+            isAssignable = false;
+        }
+    });
+
+    return isAssignable;
+}
+
+export function convertToTypeFormTypeWithEvaluator(
+    evaluator: TypeEvaluator,
+    expectedType: Type,
+    srcType: Type
+): Type {
+    // Is the source is a TypeForm type?
+    if (!srcType.props?.typeForm) {
+        return srcType;
+    }
+
+    let srcTypeFormType: Type | undefined;
+
+    // Is the source is a TypeForm type?
+    if (srcType.props?.typeForm) {
+        srcTypeFormType = srcType.props.typeForm;
+    } else if (isClass(srcType)) {
+        if (TypeBase.isInstantiable(srcType)) {
+            if (!ClassType.isSpecialBuiltIn(srcType)) {
+                srcTypeFormType = ClassType.cloneAsInstance(srcType);
+            }
+        } else if (ClassType.isBuiltIn(srcType, 'type')) {
+            srcTypeFormType =
+                srcType.priv.typeArgs?.length && srcType.priv.typeArgs.length > 0
+                    ? srcType.priv.typeArgs[0]
+                    : UnknownType.create();
+        }
+    } else if (isTypeVar(srcType) && TypeBase.isInstantiable(srcType)) {
+        if (!isTypeVarTuple(srcType) || !srcType.priv.isInUnion) {
+            srcTypeFormType = convertToInstance(srcType);
+        }
+    }
+
+    if (!srcTypeFormType) {
+        return srcType;
+    }
+
+    let resultType: Type | undefined;
+
+    doForEachSubtype(expectedType, (subtype) => {
+        if (resultType || !isClassInstance(subtype) || !ClassType.isBuiltIn(subtype, 'TypeForm')) {
+            return;
+        }
+
+        const destTypeFormType =
+            subtype.priv.typeArgs && subtype.priv.typeArgs.length > 0
+                ? subtype.priv.typeArgs[0]
+                : UnknownType.create();
+
+        if (evaluator.assignType(destTypeFormType, srcTypeFormType)) {
+            resultType = ClassType.specialize(subtype, [srcTypeFormType]);
+        }
+    });
+
+    return resultType ?? srcType;
+}
+
+export function assignConditionalTypeToTypeVarWithEvaluator(
+    evaluator: TypeEvaluator,
+    destType: TypeVarType,
+    srcType: Type,
+    recursionCount: number
+): boolean {
+    // The srcType is assignable only if all of its subtypes are assignable.
+    return !findSubtype(srcType, (srcSubtype) => {
+        if (isTypeSame(destType, srcSubtype, { ignorePseudoGeneric: true }, recursionCount)) {
+            return false;
+        }
+
+        if (isIncompleteUnknown(srcSubtype)) {
+            return false;
+        }
+
+        const destTypeVarName = TypeVarType.getNameWithScope(destType);
+
+        // Determine which conditions on this type apply to this type variable.
+        const applicableConditions = (getTypeCondition(srcSubtype) ?? []).filter(
+            (constraint) => constraint.typeVar.priv.nameWithScope === destTypeVarName
+        );
+
+        // If there are no applicable conditions, it's not assignable.
+        if (applicableConditions.length === 0) {
+            return true;
+        }
+
+        return !applicableConditions.some((condition) => {
+            if (condition.typeVar.priv.nameWithScope === TypeVarType.getNameWithScope(destType)) {
+                if (destType.shared.boundType) {
+                    assert(
+                        condition.constraintIndex === 0,
+                        'Expected constraint for bound TypeVar to have index of 0'
+                    );
+
+                    return evaluator.assignType(
+                        destType.shared.boundType,
+                        srcSubtype,
+                        /* diag */ undefined,
+                        /* constraints */ undefined,
+                        AssignTypeFlags.Default,
+                        recursionCount
+                    );
+                }
+
+                if (TypeVarType.hasConstraints(destType)) {
+                    assert(
+                        condition.constraintIndex < destType.shared.constraints.length,
+                        'Constraint for constrained TypeVar is out of bounds'
+                    );
+
+                    return evaluator.assignType(
+                        destType.shared.constraints[condition.constraintIndex],
+                        srcSubtype,
+                        /* diag */ undefined,
+                        /* constraints */ undefined,
+                        AssignTypeFlags.Default,
+                        recursionCount
+                    );
+                }
+
+                // This is a non-bound and non-constrained type variable with a matching condition.
+                return true;
+            }
+
+            return false;
+        });
+    });
+}
+
+export function isTypeHashableWithEvaluator(
+    evaluator: TypeEvaluator,
+    type: Type
+): boolean {
+    let isHashable = true;
+
+    doForEachSubtype(evaluator.makeTopLevelTypeVarsConcrete(type), (subtype) => {
+        if (isClassInstance(subtype)) {
+            // Assume the class is hashable.
+            let isObjectHashable = true;
+
+            // Have we already computed and cached the hashability?
+            if (subtype.shared.isInstanceHashable !== undefined) {
+                isObjectHashable = subtype.shared.isInstanceHashable;
+            } else {
+                const hashMember = lookUpObjectMember(subtype, '__hash__', MemberAccessFlags.SkipObjectBaseClass);
+
+                if (hashMember && hashMember.isTypeDeclared) {
+                    const decls = hashMember.symbol.getTypedDeclarations();
+                    const synthesizedType = hashMember.symbol.getSynthesizedType();
+
+                    // Handle the case where the type is synthesized (used for
+                    // dataclasses).
+                    if (synthesizedType) {
+                        isObjectHashable = !isNoneInstance(synthesizedType.type);
+                    } else {
+                        // Assume that if '__hash__' is declared as a variable, it is
+                        // not hashable. If it's declared as a function, it is.
+                        if (decls.every((decl) => decl.type === DeclarationType.Variable)) {
+                            isObjectHashable = false;
+                        }
+                    }
+                }
+
+                // Cache the hashability for next time.
+                subtype.shared.isInstanceHashable = isObjectHashable;
+            }
+
+            if (!isObjectHashable) {
+                isHashable = false;
+            }
+        }
+    });
+
+    return isHashable;
+}
+
+export function isTypeComparableWithEvaluator(
+    evaluator: TypeEvaluator,
+    leftType: Type,
+    rightType: Type,
+    assumeIsOperator = false
+) {
+    if (isAnyOrUnknown(leftType) || isAnyOrUnknown(rightType)) {
+        return true;
+    }
+
+    if (isNever(leftType) || isNever(rightType)) {
+        return false;
+    }
+
+    if (isModule(leftType) || isModule(rightType)) {
+        return isTypeSame(leftType, rightType, { ignoreConditions: true });
+    }
+
+    const isLeftCallable = isFunctionOrOverloaded(leftType);
+    const isRightCallable = isFunctionOrOverloaded(rightType);
+
+    if (isLeftCallable || isRightCallable) {
+        return true;
+    }
+
+    if (isInstantiableClass(leftType) || (isClassInstance(leftType) && ClassType.isBuiltIn(leftType, 'type'))) {
+        if (
+            isInstantiableClass(rightType) ||
+            (isClassInstance(rightType) && ClassType.isBuiltIn(rightType, 'type'))
+        ) {
+            const genericLeftType = ClassType.specialize(leftType, /* typeArgs */ undefined);
+            const genericRightType = ClassType.specialize(rightType, /* typeArgs */ undefined);
+
+            if (
+                evaluator.assignType(genericLeftType, genericRightType) ||
+                evaluator.assignType(genericRightType, genericLeftType)
+            ) {
+                return true;
+            }
+        }
+
+        // Does the class have an operator overload for eq?
+        const metaclass = leftType.shared.effectiveMetaclass;
+        if (metaclass && isClass(metaclass)) {
+            if (lookUpClassMember(metaclass, '__eq__', MemberAccessFlags.SkipObjectBaseClass)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    if (isClassInstance(leftType)) {
+        if (isClass(rightType)) {
+            const genericLeftType = ClassType.specialize(leftType, /* typeArgs */ undefined);
+            const genericRightType = ClassType.specialize(rightType, /* typeArgs */ undefined);
+
+            if (
+                evaluator.assignType(genericLeftType, genericRightType) ||
+                evaluator.assignType(genericRightType, genericLeftType)
+            ) {
+                return true;
+            }
+
+            // Check for the "is None" or "is not None" case.
+            if (assumeIsOperator && isNoneInstance(rightType)) {
+                if (isNoneInstance(leftType)) {
+                    return true;
+                }
+
+                return evaluator.assignType(leftType, rightType);
+            }
+
+            // Assume that if the types are disjoint and built-in classes that they
+            // will never be comparable.
+            if (ClassType.isBuiltIn(leftType) && ClassType.isBuiltIn(rightType) && TypeBase.isInstance(rightType)) {
+                let boolType: ClassType | undefined;
+                let intType: ClassType | undefined;
+                if (ClassType.isBuiltIn(leftType, 'bool') && ClassType.isBuiltIn(rightType, 'int')) {
+                    boolType = leftType;
+                    intType = rightType;
+                } else if (ClassType.isBuiltIn(rightType, 'bool') && ClassType.isBuiltIn(leftType, 'int')) {
+                    boolType = rightType;
+                    intType = leftType;
+                }
+
+                if (boolType && intType) {
+                    const intVal = intType.priv?.literalValue as number | BigInt | undefined;
+                    if (intVal === undefined) {
+                        return true;
+                    }
+                    if (intVal !== 0 && intVal !== 1) {
+                        return false;
+                    }
+
+                    const boolVal = boolType.priv?.literalValue as boolean | undefined;
+                    if (boolVal === undefined) {
+                        return true;
+                    }
+
+                    return boolVal === (intVal === 1);
+                }
+
+                return false;
+            }
+        }
+
+        // Does the class have an operator overload for eq?
+        const eqMethod = lookUpClassMember(
+            ClassType.cloneAsInstantiable(leftType),
+            '__eq__',
+            MemberAccessFlags.SkipObjectBaseClass
+        );
+
+        if (eqMethod) {
+            if (ClassType.isDataClass(leftType) && eqMethod.symbol.getSynthesizedType()) {
+                return false;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    return true;
+}
+
+export function createSubclassWithEvaluator(
+    evaluator: TypeEvaluator,
+    errorNode: ExpressionNode,
+    type1: ClassType,
+    type2: ClassType
+): ClassType {
+    assert(isInstantiableClass(type1) && isInstantiableClass(type2));
+
+    let createClassObject = false;
+    if (TypeBase.getInstantiableDepth(type1) > 0 && TypeBase.getInstantiableDepth(type2) > 0) {
+        type1 = ClassType.cloneAsInstance(type1);
+        type2 = ClassType.cloneAsInstance(type2);
+        createClassObject = true;
+    }
+
+    const className = `<subclass of ${evaluator.printType(convertToInstance(type1), {
+        omitTypeArgsIfUnknown: true,
+    })} and ${evaluator.printType(convertToInstance(type2), { omitTypeArgsIfUnknown: true })}>`;
+    const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
+
+    // The effective metaclass of the intersection is the narrower of the two metaclasses.
+    let effectiveMetaclass = type1.shared.effectiveMetaclass;
+    if (type2.shared.effectiveMetaclass) {
+        if (!effectiveMetaclass || evaluator.assignType(effectiveMetaclass, type2.shared.effectiveMetaclass)) {
+            effectiveMetaclass = type2.shared.effectiveMetaclass;
+        }
+    }
+
+    let newClassType = ClassType.createInstantiable(
+        className,
+        ParseTreeUtils.getClassFullName(errorNode, fileInfo.moduleName, className),
+        fileInfo.moduleName,
+        fileInfo.fileUri,
+        ClassTypeFlags.None,
+        ParseTreeUtils.getTypeSourceId(errorNode),
+        /* declaredMetaclass */ undefined,
+        effectiveMetaclass,
+        type1.shared.docString
+    );
+
+    newClassType.shared.baseClasses = [type1, type2];
+    computeMroLinearization(newClassType);
+
+    newClassType = addConditionToType(newClassType, type1.props?.condition);
+    newClassType = addConditionToType(newClassType, type2.props?.condition);
+
+    if (createClassObject) {
+        newClassType = ClassType.cloneAsInstantiable(newClassType);
+    }
+
+    return newClassType;
 }
