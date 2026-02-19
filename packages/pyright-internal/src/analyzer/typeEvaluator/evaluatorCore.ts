@@ -6,6 +6,7 @@
  * Small extraction helpers for type evaluator core behavior.
  */
 
+import { DiagnosticLevel } from '../../common/configOptions';
 import { Diagnostic, DiagnosticAddendum } from '../../common/diagnostic';
 import { DiagnosticRule } from '../../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../../localization/localize';
@@ -21,8 +22,8 @@ import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
 import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { AnyType, ClassType, combineTypes, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, NeverType, ParamSpecType, TupleTypeArg, Type, TypeBase, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnknownType } from '../types';
-import { convertToInstance, doForEachSubtype, addTypeVarsToListIfUnique, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
+import { AnyType, ClassType, combineTypes, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, NeverType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeBase, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnknownType } from '../types';
+import { convertToInstance, doForEachSubtype, addTypeVarsToListIfUnique, getTypeVarArgsRecursive, isEffectivelyInstantiable, isEllipsisType, isNoneInstance, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails, ParamKind, ParamListDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 import { makeTupleObject } from '../tuples';
@@ -2196,4 +2197,87 @@ export function createUnionTypeFromArgs(
     }
 
     return unionType;
+}
+
+export function validateTypeIsInstantiableWithEvaluator(
+    evaluator: TypeEvaluator,
+    typeResult: TypeResult,
+    flags: EvalFlags,
+    node: ExpressionNode
+) {
+    if (typeResult.isIncomplete) {
+        return;
+    }
+
+    if ((flags & EvalFlags.NoTypeVarTuple) !== 0) {
+        if (isTypeVarTuple(typeResult.type) && !typeResult.type.priv.isInUnion) {
+            evaluator.addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.typeVarTupleContext(), node);
+            typeResult.type = UnknownType.create();
+        }
+    }
+
+    if (isEffectivelyInstantiable(typeResult.type, { honorTypeVarBounds: true })) {
+        return;
+    }
+
+    if (isClassInstance(typeResult.type) && ClassType.isBuiltIn(typeResult.type, ['EllipsisType', 'ellipsis'])) {
+        return;
+    }
+
+    if ((flags & EvalFlags.TypeExpression) !== 0) {
+        const diag = new DiagnosticAddendum();
+        if (isUnion(typeResult.type)) {
+            doForEachSubtype(typeResult.type, (subtype) => {
+                if (!isEffectivelyInstantiable(subtype, { honorTypeVarBounds: true })) {
+                    diag.addMessage(LocAddendum.typeNotClass().format({ type: evaluator.printType(subtype) }));
+                }
+            });
+        }
+
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.typeExpectedClass().format({ type: evaluator.printType(typeResult.type) }) + diag.getString(),
+            node
+        );
+
+        typeResult.type = UnknownType.create();
+    }
+
+    typeResult.typeErrors = true;
+}
+
+export function reportPossibleUnknownAssignmentWithEvaluator(
+    evaluator: TypeEvaluator,
+    diagLevel: DiagnosticLevel,
+    rule: DiagnosticRule,
+    target: NameNode,
+    type: Type,
+    errorNode: ExpressionNode,
+    ignoreEmptyContainers: boolean
+) {
+    if (diagLevel === 'none') {
+        return;
+    }
+
+    const nameValue = target.d.value;
+    const simplifiedType = removeUnbound(type);
+
+    if (isUnknown(simplifiedType)) {
+        evaluator.addDiagnostic(rule, LocMessage.typeUnknown().format({ name: nameValue }), errorNode);
+    } else if (isPartlyUnknown(simplifiedType)) {
+        if (!ignoreEmptyContainers || !isClassInstance(type) || !type.priv.isEmptyContainer) {
+            const diagAddendum = new DiagnosticAddendum();
+            diagAddendum.addMessage(
+                LocAddendum.typeOfSymbol().format({
+                    name: nameValue,
+                    type: evaluator.printType(simplifiedType, { expandTypeAlias: true }),
+                })
+            );
+            evaluator.addDiagnostic(
+                rule,
+                LocMessage.typePartiallyUnknown().format({ name: nameValue }) + diagAddendum.getString(),
+                errorNode
+            );
+        }
+    }
 }

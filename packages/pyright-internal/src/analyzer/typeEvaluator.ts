@@ -1443,48 +1443,7 @@ export function createTypeEvaluator(
     }
 
     function validateTypeIsInstantiable(typeResult: TypeResult, flags: EvalFlags, node: ExpressionNode) {
-        // If the type is incomplete, don't log any diagnostics yet.
-        if (typeResult.isIncomplete) {
-            return;
-        }
-
-        if ((flags & EvalFlags.NoTypeVarTuple) !== 0) {
-            if (isTypeVarTuple(typeResult.type) && !typeResult.type.priv.isInUnion) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.typeVarTupleContext(), node);
-                typeResult.type = UnknownType.create();
-            }
-        }
-
-        if (isEffectivelyInstantiable(typeResult.type, { honorTypeVarBounds: true })) {
-            return;
-        }
-
-        // Exempt ellipses.
-        if (isClassInstance(typeResult.type) && ClassType.isBuiltIn(typeResult.type, ['EllipsisType', 'ellipsis'])) {
-            return;
-        }
-
-        // Emit these errors only if we know we're evaluating a type expression.
-        if ((flags & EvalFlags.TypeExpression) !== 0) {
-            const diag = new DiagnosticAddendum();
-            if (isUnion(typeResult.type)) {
-                doForEachSubtype(typeResult.type, (subtype) => {
-                    if (!isEffectivelyInstantiable(subtype, { honorTypeVarBounds: true })) {
-                        diag.addMessage(LocAddendum.typeNotClass().format({ type: printType(subtype) }));
-                    }
-                });
-            }
-
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.typeExpectedClass().format({ type: printType(typeResult.type) }) + diag.getString(),
-                node
-            );
-
-            typeResult.type = UnknownType.create();
-        }
-
-        typeResult.typeErrors = true;
+        return TypeEvaluatorCore.validateTypeIsInstantiableWithEvaluator(evaluatorInterface, typeResult, flags, node);
     }
 
     function getTypeOfAwaitOperator(node: AwaitNode, flags: EvalFlags, inferenceContext?: InferenceContext) {
@@ -14392,39 +14351,7 @@ export function createTypeEvaluator(
         errorNode: ExpressionNode,
         ignoreEmptyContainers: boolean
     ) {
-        // Don't bother if the feature is disabled.
-        if (diagLevel === 'none') {
-            return;
-        }
-
-        const nameValue = target.d.value;
-
-        // Sometimes variables contain an "unbound" type if they're
-        // assigned only within conditional statements. Remove this
-        // to avoid confusion.
-        const simplifiedType = removeUnbound(type);
-
-        if (isUnknown(simplifiedType)) {
-            addDiagnostic(rule, LocMessage.typeUnknown().format({ name: nameValue }), errorNode);
-        } else if (isPartlyUnknown(simplifiedType)) {
-            // If ignoreEmptyContainers is true, don't report the problem for
-            // empty containers (lists or dictionaries). We'll report the problem
-            // only if the assigned value is used later.
-            if (!ignoreEmptyContainers || !isClassInstance(type) || !type.priv.isEmptyContainer) {
-                const diagAddendum = new DiagnosticAddendum();
-                diagAddendum.addMessage(
-                    LocAddendum.typeOfSymbol().format({
-                        name: nameValue,
-                        type: printType(simplifiedType, { expandTypeAlias: true }),
-                    })
-                );
-                addDiagnostic(
-                    rule,
-                    LocMessage.typePartiallyUnknown().format({ name: nameValue }) + diagAddendum.getString(),
-                    errorNode
-                );
-            }
-        }
+        return TypeEvaluatorCore.reportPossibleUnknownAssignmentWithEvaluator(evaluatorInterface, diagLevel, rule, target, type, errorNode, ignoreEmptyContainers);
     }
 
     function evaluateComprehensionForIf(node: ComprehensionForIfNode) {
