@@ -28132,9 +28132,7 @@ export function createTypeEvaluator(
     }
 
     function getLineNum(node: ParseNode) {
-        const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-        const range = convertOffsetsToRange(node.start, node.start + node.length, fileInfo.lines);
-        return (range.start.line + 1).toString();
+        return TypeEvaluatorCore.getLineNumForNode(node);
     }
 
     function printControlFlowGraph(

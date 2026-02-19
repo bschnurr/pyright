@@ -7,6 +7,10 @@
  */
 
 import { ParseNode } from '../../parser/parseNodes';
+import { TextRange } from '../../common/textRange';
+import { TextRangeCollection } from '../../common/textRangeCollection';
+import { convertOffsetsToRange } from '../../common/positionUtils';
+import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 
 export interface ReturnTypeInferenceContextFrame {
     functionNode: ParseNode;
@@ -162,4 +166,10 @@ export function getSymbolResolutionPartialType(
     }
 
     return undefined;
+}
+
+export function getLineNumForNode(node: ParseNode) {
+    const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
+    const range = convertOffsetsToRange(node.start, node.start + node.length, fileInfo.lines);
+    return (range.start.line + 1).toString();
 }
