@@ -773,7 +773,8 @@ export interface TypeEvaluator {
         usage?: EvaluatorUsage,
         diag?: DiagnosticAddendum | undefined,
         flags?: MemberAccessFlags,
-        selfType?: ClassType | TypeVarType
+        selfType?: ClassType | TypeVarType,
+        recursionCount?: number
     ): TypeResult | undefined;
     getBoundMagicMethod: (
         classType: ClassType,
