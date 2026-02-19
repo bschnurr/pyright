@@ -21,7 +21,7 @@ import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { isAnnotationEvaluationPostponed } from '../analyzerFileInfo';
 import { Declaration, DeclarationType } from '../declaration';
-import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, PrefetchedTypes, Reachability, SymbolDeclInfo, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
+import { ArgWithExpression, AssignTypeFlags, CallResult, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, PrefetchedTypes, Reachability, SymbolDeclInfo, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
 import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isOverloaded, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, ModuleType, NeverType, OverloadedType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnknownType, Variance } from '../types';
 import { addConditionToType, computeMroLinearization, convertToInstance, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, getGeneratorTypeArgs, getTypeCondition, getTypeVarArgsRecursive, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isLiteralType, isNoneInstance, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, mapSubtypes, MemberAccessFlags, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
@@ -32,7 +32,7 @@ import { ScopeType, SymbolWithScope } from '../scope';
 import { CodeFlowEngine } from '../codeFlowEngine';
 import { Symbol, SynthesizedTypeInfo } from '../symbol';
 import { getDeclarationsWithUsesLocalNameRemoved, synthesizeAliasDeclaration } from '../declarationUtils';
-import { getBoundInitMethod } from '../constructors';
+import { getBoundInitMethod, validateConstructorArgs } from '../constructors';
 import * as ScopeUtils from '../scopeUtils';
 
 export interface ReturnTypeInferenceContextFrame {
@@ -3570,4 +3570,86 @@ export function getDeclInfoForNameNodeWithEvaluator(
     }
 
     return { decls, synthesizedTypes };
+}
+
+export function verifyRaiseExceptionTypeWithEvaluator(node: ExpressionNode, allowNone: boolean, evaluator: TypeEvaluator) {
+    const baseExceptionType = evaluator.getBuiltInType(node, 'BaseException');
+    const exceptionType = evaluator.getTypeOfExpression(node).type;
+
+    // Validate that the argument of "raise" is an exception object or class.
+    // If it is a class, validate that the class's constructor accepts zero
+    // arguments.
+    if (exceptionType && baseExceptionType && isInstantiableClass(baseExceptionType)) {
+        const diag = new DiagnosticAddendum();
+
+        doForEachSubtype(exceptionType, (subtype) => {
+            const concreteSubtype = evaluator.makeTopLevelTypeVarsConcrete(subtype);
+
+            if (isAnyOrUnknown(concreteSubtype) || isNever(concreteSubtype)) {
+                return;
+            }
+
+            if (allowNone && isNoneInstance(concreteSubtype)) {
+                return;
+            }
+
+            if (isInstantiableClass(concreteSubtype) && concreteSubtype.priv.literalValue === undefined) {
+                if (!derivesFromClassRecursive(concreteSubtype, baseExceptionType, /* ignoreUnknown */ false)) {
+                    diag.addMessage(
+                        LocMessage.exceptionTypeIncorrect().format({
+                            type: evaluator.printType(subtype),
+                        })
+                    );
+                } else {
+                    let callResult: CallResult | undefined;
+                    evaluator.suppressDiagnostics(node, () => {
+                        callResult = validateConstructorArgs(
+                            evaluator,
+                            node,
+                            [],
+                            concreteSubtype,
+                            /* skipUnknownArgCheck */ false,
+                            /* inferenceContext */ undefined
+                        );
+                    });
+
+                    if (callResult && callResult.argumentErrors) {
+                        diag.addMessage(
+                            LocMessage.exceptionTypeNotInstantiable().format({
+                                type: evaluator.printType(subtype),
+                            })
+                        );
+                    }
+                }
+            } else if (isClassInstance(concreteSubtype)) {
+                if (
+                    !derivesFromClassRecursive(
+                        ClassType.cloneAsInstantiable(concreteSubtype),
+                        baseExceptionType,
+                        /* ignoreUnknown */ false
+                    )
+                ) {
+                    diag.addMessage(
+                        LocMessage.exceptionTypeIncorrect().format({
+                            type: evaluator.printType(subtype),
+                        })
+                    );
+                }
+            } else {
+                diag.addMessage(
+                    LocMessage.exceptionTypeIncorrect().format({
+                        type: evaluator.printType(subtype),
+                    })
+                );
+            }
+        });
+
+        if (!diag.isEmpty()) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.expectedExceptionClass() + diag.getString(),
+                node
+            );
+        }
+    }
 }
