@@ -121,6 +121,13 @@ typeEvaluatorIndex.ts  (factory / entry point)
 
 These constraints apply to any deeper refactoring beyond the current Phase 4 extractions.
 
+### Current baseline audit (verified)
+
+- ✅ **Dispatch pattern**: `getTypeOfExpressionCore` uses a pure `switch (node.nodeType)` with direct function calls for all ~27 expression types. No handler maps or dynamic dispatch.
+- ✅ **Object shape stability**: `evaluatorInterface` is constructed as a single object literal (~110 properties) with zero post-construction mutations. Stable V8 hidden class.
+- ✅ **No import cycles**: `typeEvaluator.ts` → `typeEvaluator/` subdirectory (one-way). Subdirectory modules import `typeEvaluatorTypes.ts` only. `codeFlowEngine.ts` imports `typeEvaluatorTypes.ts` only — no back-imports into `typeEvaluator.ts`.
+- ✅ **Centralized state**: All mutable state (`typeCache`, `speculativeTypeTracker`, `symbolResolutionStack`, `returnTypeInferenceContextStack`, `evaluatorOptions`, `prefetched`, `codeFlowEngine`) lives in the `createTypeEvaluator` closure — not split across modules.
+
 ### 1. Keep hot dispatch as switch statements
 
 `getTypeOfExpressionCore` uses a big `switch (node.nodeType)`. **Keep it as a switch** — do NOT
