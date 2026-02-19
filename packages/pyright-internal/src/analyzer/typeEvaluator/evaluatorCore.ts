@@ -17,7 +17,8 @@ import { Declaration, DeclarationType } from '../declaration';
 import { ArgWithExpression, AssignTypeFlags, EvaluatorUsage } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
 import { ClassType, FunctionParam, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnknown, Type, TypeBase, TypeVarType } from '../types';
-import { doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder } from '../typeUtils';
+import { doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, lookUpClassMember } from '../typeUtils';
+import { getParamListDetails } from '../parameterUtils';
 
 export interface ReturnTypeInferenceContextFrame {
     functionNode: ParseNode;
@@ -485,6 +486,42 @@ export function applyUnpackToTupleLikeType(type: Type): Type | undefined {
     if (isInstantiableClass(type) && !type.priv.includeSubclasses) {
         if (isTupleClass(type)) {
             return ClassType.cloneForUnpacked(type);
+        }
+    }
+
+    return undefined;
+}
+
+export function getDeclarationFromKeywordParamForFunction(
+    type: FunctionType,
+    paramName: string
+): Declaration | undefined {
+    if (isFunction(type)) {
+        if (type.shared.declaration) {
+            const functionDecl = type.shared.declaration;
+            if (functionDecl.type === DeclarationType.Function) {
+                const functionNode = functionDecl.node;
+                const functionScope = AnalyzerNodeInfo.getScope(functionNode);
+                if (functionScope) {
+                    const paramSymbol = functionScope.lookUpSymbol(paramName)!;
+                    if (paramSymbol) {
+                        return paramSymbol.getDeclarations().find((decl) => decl.type === DeclarationType.Param);
+                    }
+
+                    const parameterDetails = getParamListDetails(type);
+                    if (parameterDetails.unpackedKwargsTypedDictType) {
+                        const lookupResults = lookUpClassMember(
+                            parameterDetails.unpackedKwargsTypedDictType,
+                            paramName
+                        );
+                        if (lookupResults) {
+                            return lookupResults.symbol
+                                .getDeclarations()
+                                .find((decl) => decl.type === DeclarationType.Variable);
+                        }
+                    }
+                }
+            }
         }
     }
 
