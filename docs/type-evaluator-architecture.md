@@ -71,28 +71,25 @@ This module accepts a `DiagnosticsContext` so it can operate without importing t
     - **Phase 3b** (`AddDiagnosticFn` callback injection): 20 functions including `createSpecialTypeFromArgs`, `createCallableTypeFromArgs`, `createAnnotatedTypeFromArgs`, `createOptionalTypeFromArgs`, `createTypeFormTypeFromArgs`, `createTypeGuardTypeFromArgs`, `createUnionTypeFromArgs`.
     - **Phase 4** (`TypeEvaluator` param injection): 22 functions including `adjustTypeArgsForTypeVarTuple` (144), `transformTypeForTypeAlias` (125), `isTypeComparable` (129), `adjustSourceParamDetailsForDestVariadic` (97), `createRequiredOrReadOnlyType` (96), `getTypeOfExpressionExpectingType` (82), `computeEffectiveMetaclass` (63), `isUnambiguousInference` (59), `convertToTypeFormType` (51), `assignConditionalTypeToTypeVar` (66), `createSubclass` (49), `isTypeHashable` (45), `isProperSubtype` (39), `isOverrideMethodApplicable` (37), `expandPromotionTypes` (34), `assignRecursiveTypeAliasToSelf` (34), `getTypeOfSlice` (41), `transformVariadicParamType` (41), `getTypeOfYieldFrom` (30), `isPossibleTypeDictFactoryCall` (32), `validateTypeIsInstantiable` (45), `reportPossibleUnknownAssignment` (43).
 - Current state:
-  - `typeEvaluator.ts` reduced from ~28,000 to ~19,835 lines (~8,165 lines extracted or removed).
-  - `evaluatorCore.ts` now contains **~110 exported functions** (~5,459 lines).
-  - **Phase 5** (deeper extraction) — established two new context-injection patterns:
+  - `typeEvaluator.ts` reduced from ~28,000 to ~18,145 lines (~9,855 lines extracted or removed, ~35% reduction).
+  - `evaluatorCore.ts` now contains **~125+ exported functions** (~7,282 lines).
+  - **Phase 5** (deeper extraction) — established context-injection patterns:
     - `codeFlowEngine: CodeFlowEngine` + `isFlowPathBetweenNodes` callback for flow-dependent functions
-    - `evaluator: TypeEvaluator` with expanded interface (added `preferGlobalScope` to `lookUpSymbolRecursive`, `recursionCount` to `isTypeSubsumedByOtherType`)
-  - Phase 5 extractions:
-    - Batch 1: `lookUpSymbolRecursive` (130 lines), `getDeclInfoForStringNode` (30 lines), `getDeclInfoForNameNode` (220 lines)
-    - Batch 2: `verifyRaiseExceptionType` (80 lines)
-    - Batch 3: `assignFromUnionType` (272), `assignToUnionType` (188), `getCallbackProtocolType` (56), `assignParam` (80), `assignFunction` (838), `getEffectiveReturnTypeForAssign` helper (7) — total ~1,441 lines
-    - Batch 4: `validateOverrideMethod` (130), `validateOverrideMethodInternal` (400), `applyTypeArgToTypeVar` (125) — total ~660 lines
-    - Batch 5: `bindFunctionToClassOrObject` (87), `partiallySpecializeBoundMethod` (110) — total ~200 lines
-    - Batch 6: `makeTopLevelTypeVarsConcrete` (132), `printSrcDestTypes` (22) — total ~155 lines
-    - Batch 7: `inferVarianceForTypeAlias` (30), `updateUsageVariancesRecursive` (100) — total ~130 lines
-  - **Phase 5 extraction limit reached.** Remaining ~240 functions depend on closure variables that block extraction:
-    1. `writeTypeCache`/`readTypeCache`/`readTypeCacheEntry` (~60+ call sites) — the core cache mechanism
-    2. `getTypeOfExpression` / `evaluateTypesFor*` — the main expression evaluation entry points
-    3. `speculativeTypeTracker` / `effectiveTypeCache` / `isTypeCached` — speculative evaluation state
-    4. `addDiagnostic` (direct calls, not via `AddDiagnosticFn`) — diagnostic emission
-    5. `getBuiltInType` / `getBuiltInObject` / `getTypingType` / `getTypesType` — stdlib lookups
-    6. `getNoneType()` / `getObjectType()` / `getTypeClassType()` — prefetched type accessors used directly
-    7. `deferredClassCompletions` — mutable closure state
-  - **Next step to unblock further extraction**: Create an `InternalTypeEvaluator` interface (extending `TypeEvaluator`) that adds `writeTypeCache`, `readTypeCache`, `getTypeOfExpression`, `speculativeTypeTracker`, etc. This would allow the next ~100+ functions to be extracted.
+    - `evaluator: TypeEvaluator` with expanded interface (added optional params to several methods)
+  - **Phase 6** (interface-method extraction) — discovered that many "blocking" methods (`addDiagnostic`, `getBuiltInType`, `getObjectType`, etc.) are already on the `TypeEvaluator` interface. This unlocked extraction of functions that call these through `evaluator.xxx(...)`.
+  - Phase 5 extractions (batches 1-7): ~2,900 lines across 19 functions
+  - Phase 6 extractions (batches 1-4): ~2,080 lines across 13 functions
+    - Batch 1: `expandArgList` (55), `specializeTypeAliasWithDefaults` (68), `inferVarianceForClass` (88), `getTypeOfMagicMethodCall` (122), `getTypeOfAwaitable` (55), `createSelfType` (95) — total ~485 lines
+    - Batch 2: `getTypeOfSuperCall` (326), `getDeclaredTypeForExpression` (239), `getTypeOfIndexedObjectOrClass` (224), `getAliasedSymbolTypeForName` (85) — total ~875 lines
+    - Batch 3: `getTypeOfIterator` (137), `getTypeOfStringListAsType` (69) — total ~206 lines
+    - Batch 4: `createSpecializedClassType` (513) — total ~513 lines
+  - **Remaining extraction blockers** (~90 functions, ~8,000 lines):
+    1. Functions using `getTypeOfBoundMember` with `recursionCount` not on interface
+    2. Functions using `pushSymbolResolution` / `popSymbolResolution` / `effectiveTypeCache` closure state
+    3. Functions using `writeTypeCache` / `readTypeCache` / `isTypeCached` closure cache
+    4. Functions using `speculativeTypeTracker` / `disableSpeculativeMode` closure state
+    5. Functions using `deferredClassCompletions` closure state
+    6. Functions calling other non-interface inner functions (cascading deps)
 
 ## Planned breakdown (future slices)
 
