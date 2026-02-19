@@ -11,7 +11,7 @@ import { Diagnostic, DiagnosticAddendum } from '../../common/diagnostic';
 import { DiagnosticRule } from '../../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../../localization/localize';
 import { ArgCategory, ArgumentNode, AssignmentNode, CallNode, ExpressionNode, FunctionNode, ImportAsNode, ImportFromAsNode, ImportFromNode, IndexNode, NameNode, ParamCategory, ParseNode, ParseNodeType, SliceNode, StringListNode, StringNode, TypeParameterNode, YieldFromNode } from '../../parser/parseNodes';
-import { KeywordType, OperatorType } from '../../parser/tokenizerTypes';
+import { KeywordType, OperatorType, StringTokenFlags } from '../../parser/tokenizerTypes';
 import { Parser, ParseOptions, ParseTextMode } from '../../parser/parser';
 import { TextRange } from '../../common/textRange';
 import { TextRangeCollection } from '../../common/textRangeCollection';
@@ -25,7 +25,7 @@ import { Declaration, DeclarationType } from '../declaration';
 import { Arg, ArgWithExpression, AssignTypeFlags, CallResult, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, MagicMethodDeprecationInfo, PrefetchedTypes, PrintTypeOptions, Reachability, SymbolDeclInfo, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
 import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isOverloaded, isParamSpec, isPositionOnlySeparator, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, maxTypeRecursionCount, ModuleType, NeverType, OverloadedType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeCategory, TypeCondition, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnionType, UnknownType, Variance } from '../types';
-import { addConditionToType, combineSameSizedTuples, combineVariances, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromAnyOrUnknown, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, getGeneratorTypeArgs, getSpecializedTupleType, getTypeCondition, getTypeVarArgsRecursive, InferenceContext, invertVariance, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralType, isMetaclassInstance, isNoneInstance, isNoneTypeClass, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTupleIndexUnambiguous, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeTypeVarsBound, mapSignatures, mapSubtypes, MemberAccessFlags, partiallySpecializeType, requiresSpecialization, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeForBaseClass, specializeWithDefaultTypeArgs, specializeTupleClass, synthesizeTypeVarForSelfCls, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
+import { addConditionToType, combineSameSizedTuples, combineVariances, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromAnyOrUnknown, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, getGeneratorTypeArgs, getSpecializedTupleType, getTypeCondition, getTypeVarArgsRecursive, InferenceContext, invertVariance, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralType, isMetaclassInstance, isNoneInstance, isNoneTypeClass, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTupleIndexUnambiguous, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeTypeVarsBound, mapSignatures, mapSubtypes, MemberAccessFlags, partiallySpecializeType, removeNoneFromUnion, requiresSpecialization, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeForBaseClass, specializeWithDefaultTypeArgs, specializeTupleClass, synthesizeTypeVarForSelfCls, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails, ParamKind, ParamListDetails, VirtualParamDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 import { getSlicedTupleType, makeTupleObject } from '../tuples';
@@ -7640,4 +7640,220 @@ export function getTypeOfIndexedObjectOrClassWithEvaluator(
         type: callResult.returnType ?? UnknownType.create(),
         isIncomplete: !!callResult.isTypeIncomplete,
     };
+}
+
+// Validates that the type is an iterator and returns the iterated type
+// (i.e. the type returned from the '__next__' or '__anext__' method).
+export function getTypeOfIteratorWithEvaluator(
+    evaluator: TypeEvaluator,
+    typeResult: TypeResult,
+    isAsync: boolean,
+    errorNode: ExpressionNode,
+    prefetched: Partial<PrefetchedTypes> | undefined,
+    emitNotIterableError = true
+): TypeResult | undefined {
+    const iterMethodName = isAsync ? '__aiter__' : '__iter__';
+    const nextMethodName = isAsync ? '__anext__' : '__next__';
+    let isValidIterator = true;
+    let isIncomplete = typeResult.isIncomplete;
+
+    let type = transformPossibleRecursiveTypeAlias(typeResult.type);
+    type = evaluator.makeTopLevelTypeVarsConcrete(type);
+    type = removeUnbound(type);
+
+    if (isOptionalType(type) && emitNotIterableError) {
+        if (!typeResult.isIncomplete) {
+            evaluator.addDiagnostic(DiagnosticRule.reportOptionalIterable, LocMessage.noneNotIterable(), errorNode);
+        }
+        type = removeNoneFromUnion(type);
+    }
+
+    const iterableType = mapSubtypes(type, (subtype) => {
+        subtype = evaluator.makeTopLevelTypeVarsConcrete(subtype);
+
+        if (isAnyOrUnknown(subtype)) {
+            return subtype;
+        }
+
+        const diag = new DiagnosticAddendum();
+        if (isClass(subtype)) {
+            // Handle an empty tuple specially.
+            if (
+                TypeBase.isInstance(subtype) &&
+                isTupleClass(subtype) &&
+                subtype.priv.tupleTypeArgs &&
+                subtype.priv.tupleTypeArgs.length === 0
+            ) {
+                return NeverType.createNever();
+            }
+
+            const iterReturnType = evaluator.getTypeOfMagicMethodCall(subtype, iterMethodName, [], errorNode, undefined)?.type;
+
+            if (!iterReturnType) {
+                // There was no __iter__. See if we can fall back to
+                // the __getitem__ method instead.
+                if (!isAsync && isClassInstance(subtype)) {
+                    const getItemReturnType = evaluator.getTypeOfMagicMethodCall(
+                        subtype,
+                        '__getitem__',
+                        [
+                            {
+                                type:
+                                    prefetched?.intClass && isInstantiableClass(prefetched.intClass)
+                                        ? ClassType.cloneAsInstance(prefetched.intClass)
+                                        : UnknownType.create(),
+                            },
+                        ],
+                        errorNode,
+                        undefined
+                    )?.type;
+                    if (getItemReturnType) {
+                        return getItemReturnType;
+                    }
+                }
+
+                diag.addMessage(LocMessage.methodNotDefined().format({ name: iterMethodName }));
+            } else {
+                const iterReturnTypeDiag = new DiagnosticAddendum();
+
+                const returnType = evaluator.mapSubtypesExpandTypeVars(iterReturnType, /* options */ undefined, (subtype) => {
+                    if (isAnyOrUnknown(subtype)) {
+                        return subtype;
+                    }
+
+                    let nextReturnType = evaluator.getTypeOfMagicMethodCall(subtype, nextMethodName, [], errorNode, undefined)?.type;
+
+                    if (!nextReturnType) {
+                        iterReturnTypeDiag.addMessage(
+                            LocMessage.methodNotDefinedOnType().format({
+                                name: nextMethodName,
+                                type: evaluator.printType(subtype),
+                            })
+                        );
+                    } else {
+                        // Convert any unpacked TypeVarTuples into object instances. We don't
+                        // know anything more about them.
+                        nextReturnType = mapSubtypes(nextReturnType, (returnSubtype) => {
+                            if (isTypeVar(returnSubtype) && isUnpackedTypeVarTuple(returnSubtype)) {
+                                return evaluator.getObjectType();
+                            }
+
+                            return returnSubtype;
+                        });
+
+                        if (!isAsync) {
+                            return nextReturnType;
+                        }
+
+                        // If it's an async iteration, there's an implicit
+                        // 'await' operator applied.
+                        const awaitableResult = getTypeOfAwaitableWithEvaluator(
+                            evaluator,
+                            { type: nextReturnType, isIncomplete: typeResult.isIncomplete },
+                            prefetched,
+                            errorNode
+                        );
+                        if (awaitableResult.isIncomplete) {
+                            isIncomplete = true;
+                        }
+                        return awaitableResult.type;
+                    }
+
+                    return undefined;
+                });
+
+                if (iterReturnTypeDiag.isEmpty()) {
+                    return returnType;
+                }
+
+                diag.addAddendum(iterReturnTypeDiag);
+            }
+        }
+
+        if (!isIncomplete && emitNotIterableError) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.typeNotIterable().format({ type: evaluator.printType(subtype) }) + diag.getString(),
+                errorNode
+            );
+        }
+
+        isValidIterator = false;
+        return undefined;
+    });
+
+    return isValidIterator ? { type: iterableType, isIncomplete } : undefined;
+}
+
+export function getTypeOfStringListAsTypeWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: StringListNode,
+    flags: EvalFlags
+): TypeResult {
+    const reportTypeErrors = (flags & EvalFlags.StrLiteralAsType) !== 0;
+    let updatedFlags = flags | EvalFlags.ForwardRefs | EvalFlags.InstantiableType;
+    let typeResult: TypeResult | undefined;
+
+    // In most cases, annotations within a string are not parsed by the interpreter.
+    // There are a few exceptions (e.g. the "bound" value for a TypeVar constructor).
+    if ((flags & EvalFlags.ParsesStringLiteral) === 0) {
+        updatedFlags |= EvalFlags.NotParsed;
+    }
+
+    updatedFlags &= ~EvalFlags.TypeFormArg;
+
+    if (node.d.annotation && (flags & EvalFlags.TypeExpression) !== 0) {
+        return evaluator.getTypeOfExpression(node.d.annotation, updatedFlags);
+    }
+
+    if (node.d.strings.length === 1) {
+        const tokenFlags = node.d.strings[0].d.token.flags;
+
+        if (tokenFlags & StringTokenFlags.Bytes) {
+            if (reportTypeErrors) {
+                evaluator.addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.annotationBytesString(), node);
+            }
+            return { type: UnknownType.create() };
+        }
+
+        if (tokenFlags & StringTokenFlags.Raw) {
+            if (reportTypeErrors) {
+                evaluator.addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.annotationRawString(), node);
+            }
+            return { type: UnknownType.create() };
+        }
+
+        if (tokenFlags & StringTokenFlags.Format) {
+            if (reportTypeErrors) {
+                evaluator.addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.annotationFormatString(), node);
+            }
+            return { type: UnknownType.create() };
+        }
+
+        if (tokenFlags & StringTokenFlags.Template) {
+            if (reportTypeErrors) {
+                evaluator.addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.annotationTemplateString(), node);
+            }
+            return { type: UnknownType.create() };
+        }
+
+        // We didn't know at parse time that this string node was going
+        // to be evaluated as a forward-referenced type. We need
+        // to re-invoke the parser at this stage.
+        const expr = parseStringAsTypeAnnotationNode(node, reportTypeErrors);
+        if (expr) {
+            typeResult = evaluator.useSpeculativeMode(reportTypeErrors ? undefined : node, () => {
+                return evaluator.getTypeOfExpression(expr, updatedFlags);
+            });
+        }
+    }
+
+    if (!typeResult) {
+        if (reportTypeErrors) {
+            evaluator.addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.expectedTypeNotString(), node);
+        }
+        typeResult = { type: UnknownType.create() };
+    }
+
+    return typeResult;
 }
