@@ -8831,22 +8831,7 @@ export function createTypeEvaluator(
     // __init_subclass__ validation). Here we need to find some other parent
     // node of the error node that encompasses all of the arguments.
     function getSpeculativeNodeForCall(errorNode: ExpressionNode): ParseNode {
-        // If the error node is within an arg, expand to include the parent of the arg list.
-        const argParent = ParseTreeUtils.getParentNodeOfType(errorNode, ParseNodeType.Argument);
-        if (argParent?.parent) {
-            return argParent.parent;
-        }
-
-        // If the error node is the name in a class declaration, expand to include the class node.
-        if (
-            errorNode.nodeType === ParseNodeType.Name &&
-            errorNode.parent?.nodeType === ParseNodeType.Class &&
-            errorNode.parent.d.name === errorNode
-        ) {
-            return errorNode.parent;
-        }
-
-        return errorNode;
+        return TypeEvaluatorCore.getSpeculativeNodeForCallSite(errorNode);
     }
 
     // Attempts to find an overloaded function for each set of argument

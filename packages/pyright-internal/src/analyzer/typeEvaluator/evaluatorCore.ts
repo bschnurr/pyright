@@ -314,3 +314,20 @@ export function getFunctionFullNameFromNode(functionNode: ParseNode, moduleName:
 export function getPseudoGenericTypeVarNameForParam(paramName: string) {
     return `__type_of_${paramName}`;
 }
+
+export function getSpeculativeNodeForCallSite(errorNode: ExpressionNode): ParseNode {
+    const argParent = ParseTreeUtils.getParentNodeOfType(errorNode, ParseNodeType.Argument);
+    if (argParent?.parent) {
+        return argParent.parent;
+    }
+
+    if (
+        errorNode.nodeType === ParseNodeType.Name &&
+        errorNode.parent?.nodeType === ParseNodeType.Class &&
+        errorNode.parent.d.name === errorNode
+    ) {
+        return errorNode.parent;
+    }
+
+    return errorNode;
+}
