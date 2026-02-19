@@ -868,19 +868,15 @@ export function createTypeEvaluator(
     }
 
     function setSymbolResolutionPartialType(symbol: Symbol, declaration: Declaration, type: Type) {
-        const index = getIndexOfSymbolResolution(symbol, declaration);
-        if (index >= 0) {
-            symbolResolutionStack[index].partialType = type;
-        }
+        TypeEvaluatorCore.setSymbolResolutionPartialType(symbolResolutionStack, symbol.id, declaration, type);
     }
 
     function getSymbolResolutionPartialType(symbol: Symbol, declaration: Declaration): Type | undefined {
-        const index = getIndexOfSymbolResolution(symbol, declaration);
-        if (index >= 0) {
-            return symbolResolutionStack[index].partialType;
-        }
-
-        return undefined;
+        return TypeEvaluatorCore.getSymbolResolutionPartialType(
+            symbolResolutionStack,
+            symbol.id,
+            declaration
+        ) as Type | undefined;
     }
 
     // Determines the type of the specified node by evaluating it in

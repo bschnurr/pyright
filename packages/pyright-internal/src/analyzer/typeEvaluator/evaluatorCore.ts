@@ -138,3 +138,28 @@ export function tryPushSymbolResolutionEntry(
 export function popSymbolResolutionEntry<T extends MutableSymbolResolutionStackEntryLike>(symbolResolutionStack: T[]) {
     return symbolResolutionStack.pop();
 }
+
+export function setSymbolResolutionPartialType(
+    symbolResolutionStack: MutableSymbolResolutionStackEntryLike[],
+    symbolId: number,
+    declaration: unknown,
+    partialType: unknown
+) {
+    const index = getSymbolResolutionIndex(symbolResolutionStack, symbolId, declaration);
+    if (index >= 0) {
+        symbolResolutionStack[index].partialType = partialType;
+    }
+}
+
+export function getSymbolResolutionPartialType(
+    symbolResolutionStack: readonly MutableSymbolResolutionStackEntryLike[],
+    symbolId: number,
+    declaration: unknown
+): unknown | undefined {
+    const index = getSymbolResolutionIndex(symbolResolutionStack, symbolId, declaration);
+    if (index >= 0) {
+        return symbolResolutionStack[index].partialType;
+    }
+
+    return undefined;
+}
