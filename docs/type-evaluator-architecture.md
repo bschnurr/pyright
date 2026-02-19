@@ -65,15 +65,15 @@ This module accepts a `DiagnosticsContext` so it can operate without importing t
   - `diagnostics.ts` extraction.
   - `flowAnalysis.ts` helpers (flow graph delegators, constrained typevar narrowing, `printControlFlowGraph`).
   - `narrowing.ts` helpers for assignment-based narrowing, literal/type-guard stripping, truthiness handling (including direct-reference and `not` matching), `None`/ellipsis comparisons, class/literal equality comparisons (including equality matchers), discriminated equality helpers (tuple/dict/member), tuple length/containment/TypedDict-key narrowing, len(x) and `in`-operator comparison matching, call-expression matching for isinstance/issubclass, bool, and TypeGuard/TypeIs, literal enumeration, `type(x) is y` matching/narrowing, `X is <literal/class>` matching, indexed-literal and member-access discriminated matching, isinstance/issubclass narrowing (including class-type parsing and name-scope checks), aliased-condition and assignment-expression narrowing, and user-defined TypeGuard/TypeIs narrowing.
-  - `evaluatorCore.ts` extraction (73 exported functions, ~1,956 lines):
+  - `evaluatorCore.ts` extraction (89 exported functions, ~2,688 lines):
     - **Phase 2** (pure helpers, no closure deps): Return-type-inference context stack (7), symbol resolution stack (5), declaration helpers (3), type alias helpers (4), type checking helpers (3), utility helpers (12), `expandTypedKwargsForFunction`, `setConstraintsForFreeTypeVarsInType`.
     - **Phase 3a** (prefetched context injection): Prefetched type accessors (8), `parseStringAsTypeAnnotationNode`, `convertSpecialFormToRuntimeValueWithPrefetched`.
     - **Phase 3b** (`AddDiagnosticFn` callback injection): 20 functions including `createSpecialTypeFromArgs`, `createCallableTypeFromArgs`, `createAnnotatedTypeFromArgs`, `createOptionalTypeFromArgs`, `createTypeFormTypeFromArgs`, `createTypeGuardTypeFromArgs`, `createUnionTypeFromArgs`.
-    - **Phase 4** (`TypeEvaluator` param injection): `adjustTypeArgsForTypeVarTupleWithEvaluator` (144 lines), `transformTypeForTypeAliasWithEvaluator` (125 lines), `adjustSourceParamDetailsForDestVariadicWithEvaluator` (97 lines), `createRequiredOrReadOnlyTypeFromArgs` (96 lines), `validateTypeIsInstantiableWithEvaluator` (45 lines), `reportPossibleUnknownAssignmentWithEvaluator` (43 lines).
+    - **Phase 4** (`TypeEvaluator` param injection): 22 functions including `adjustTypeArgsForTypeVarTuple` (144), `transformTypeForTypeAlias` (125), `isTypeComparable` (129), `adjustSourceParamDetailsForDestVariadic` (97), `createRequiredOrReadOnlyType` (96), `getTypeOfExpressionExpectingType` (82), `computeEffectiveMetaclass` (63), `isUnambiguousInference` (59), `convertToTypeFormType` (51), `assignConditionalTypeToTypeVar` (66), `createSubclass` (49), `isTypeHashable` (45), `isProperSubtype` (39), `isOverrideMethodApplicable` (37), `expandPromotionTypes` (34), `assignRecursiveTypeAliasToSelf` (34), `getTypeOfSlice` (41), `transformVariadicParamType` (41), `getTypeOfYieldFrom` (30), `isPossibleTypeDictFactoryCall` (32), `validateTypeIsInstantiable` (45), `reportPossibleUnknownAssignment` (43).
 - Current state:
-  - `typeEvaluator.ts` reduced from ~28,000 to ~23,049 lines (~4,951 lines extracted or removed).
-  - Phase 4 established: pass `TypeEvaluator` interface to unlock functions needing `getTypeOfClass`, `getTypingType`, `printType`, `makeTupleObject`, etc.
-  - ~50 additional functions identified as Phase 4 candidates (functions with deps exclusively on TypeEvaluator interface methods).
+  - `typeEvaluator.ts` reduced from ~28,000 to ~22,410 lines (~5,590 lines extracted or removed).
+  - Phase 4 extraction is effectively complete — all remaining ~300 functions depend on deep closure state (`writeTypeCache`, `readTypeCache`, `speculativeTypeTracker`, `codeFlowEngine`, `evaluatorOptions`, etc.) or call multiple inner functions that themselves depend on closure state.
+  - Further extraction would require broader architectural changes (e.g., class-based refactor or extensive callback interfaces).
 
 ## Planned breakdown (future slices)
 
