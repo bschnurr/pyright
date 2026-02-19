@@ -15,13 +15,14 @@ import { Parser, ParseOptions, ParseTextMode } from '../../parser/parser';
 import { TextRange } from '../../common/textRange';
 import { TextRangeCollection } from '../../common/textRangeCollection';
 import { assert } from '../../common/debug';
+import { appendArray } from '../../common/collectionUtils';
 import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
 import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { AnyType, ClassType, FunctionParam, FunctionParamFlags, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpackedClass, Type, TypeBase, TypeVarScopeId, TypeVarTupleType, TypeVarType, UnknownType } from '../types';
-import { convertToInstance, doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, lookUpClassMember, requiresSpecialization, validateTypeVarDefault } from '../typeUtils';
+import { AnyType, ClassType, FunctionParam, FunctionParamFlags, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpackedClass, TupleTypeArg, Type, TypeBase, TypeVarScopeId, TypeVarTupleType, TypeVarType, UnknownType } from '../types';
+import { convertToInstance, doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 
@@ -1140,4 +1141,138 @@ export function createUnpackTypeFromArgs(
     }
     addDiagnosticFn(DiagnosticRule.reportGeneralTypeIssues, LocMessage.unpackNotAllowed(), errorNode);
     return UnknownType.create();
+}
+
+export function createSpecialTypeFromArgs(
+    classType: ClassType,
+    typeArgs: TypeResultWithNode[] | undefined,
+    addDiagnosticFn: AddDiagnosticFn,
+    paramLimit?: number,
+    allowParamSpec = false,
+    isSpecialForm = true
+): Type {
+    const isTupleTypeParam = ClassType.isTupleClass(classType);
+
+    if (typeArgs) {
+        if (isTupleTypeParam && typeArgs.length === 1 && typeArgs[0].isEmptyTupleShorthand) {
+            typeArgs = [];
+        } else {
+            let sawUnpacked = false;
+            const noteSawUnpacked = (typeArg: TypeResultWithNode) => {
+                if (sawUnpacked) {
+                    if (!reportedUnpackedError) {
+                        addDiagnosticFn(
+                            DiagnosticRule.reportInvalidTypeForm,
+                            LocMessage.variadicTypeArgsTooMany(),
+                            typeArg.node
+                        );
+                        reportedUnpackedError = true;
+                    }
+                }
+                sawUnpacked = true;
+            };
+            let reportedUnpackedError = false;
+
+            typeArgs.forEach((typeArg, index) => {
+                assert(typeArgs !== undefined);
+                if (isEllipsisType(typeArg.type)) {
+                    if (!isTupleTypeParam) {
+                        if (!allowParamSpec) {
+                            addDiagnosticFn(
+                                DiagnosticRule.reportInvalidTypeForm,
+                                LocMessage.ellipsisContext(),
+                                typeArg.node
+                            );
+                        }
+                    } else if (typeArgs!.length !== 2 || index !== 1) {
+                        addDiagnosticFn(
+                            DiagnosticRule.reportInvalidTypeForm,
+                            LocMessage.ellipsisSecondArg(),
+                            typeArg.node
+                        );
+                    } else {
+                        if (isTypeVarTuple(typeArgs![0].type) && !typeArgs![0].type.priv.isInUnion) {
+                            addDiagnosticFn(
+                                DiagnosticRule.reportInvalidTypeForm,
+                                LocMessage.typeVarTupleContext(),
+                                typeArgs![0].node
+                            );
+                        } else if (isUnpackedClass(typeArgs![0].type)) {
+                            addDiagnosticFn(
+                                DiagnosticRule.reportInvalidTypeForm,
+                                LocMessage.ellipsisAfterUnpacked(),
+                                typeArg.node
+                            );
+                        }
+                    }
+                } else if (isParamSpec(typeArg.type) && allowParamSpec) {
+                    // Nothing to do - this is allowed.
+                } else if (paramLimit === undefined && isTypeVarTuple(typeArg.type)) {
+                    if (!typeArg.type.priv.isInUnion) {
+                        noteSawUnpacked(typeArg);
+                    }
+                    validateTypeVarTupleIsUnpackedCheck(typeArg.type, typeArg.node, addDiagnosticFn);
+                } else if (paramLimit === undefined && isUnpackedClass(typeArg.type)) {
+                    if (isUnboundedTupleClass(typeArg.type)) {
+                        noteSawUnpacked(typeArg);
+                    }
+                    validateTypeArgCheck(typeArg, addDiagnosticFn, { allowUnpackedTuples: true });
+                } else {
+                    validateTypeArgCheck(typeArg, addDiagnosticFn);
+                }
+            });
+        }
+    }
+
+    let typeArgTypes = typeArgs ? typeArgs.map((t) => convertToInstance(t.type)) : [];
+
+    if (paramLimit !== undefined) {
+        if (typeArgs && typeArgTypes.length > paramLimit) {
+            addDiagnosticFn(
+                DiagnosticRule.reportInvalidTypeForm,
+                LocMessage.typeArgsTooMany().format({
+                    name: classType.priv.aliasName || classType.shared.name,
+                    expected: paramLimit,
+                    received: typeArgTypes.length,
+                }),
+                typeArgs[paramLimit].node
+            );
+            typeArgTypes = typeArgTypes.slice(0, paramLimit);
+        } else if (typeArgTypes.length < paramLimit) {
+            while (typeArgTypes.length < paramLimit) {
+                typeArgTypes.push(UnknownType.create());
+            }
+        }
+    }
+
+    let returnType: Type;
+    if (isTupleTypeParam) {
+        const tupleTypeArgTypes: TupleTypeArg[] = [];
+
+        if (!typeArgs) {
+            tupleTypeArgTypes.push({ type: UnknownType.create(), isUnbounded: true });
+        } else {
+            typeArgs.forEach((typeArg, index) => {
+                if (index === 1 && isEllipsisType(typeArgTypes[index])) {
+                    if (tupleTypeArgTypes.length === 1 && !tupleTypeArgTypes[0].isUnbounded) {
+                        tupleTypeArgTypes[0] = { type: tupleTypeArgTypes[0].type, isUnbounded: true };
+                    }
+                } else if (isUnpackedClass(typeArg.type) && typeArg.type.priv.tupleTypeArgs) {
+                    appendArray(tupleTypeArgTypes, typeArg.type.priv.tupleTypeArgs);
+                } else {
+                    tupleTypeArgTypes.push({ type: typeArgTypes[index], isUnbounded: false });
+                }
+            });
+        }
+
+        returnType = specializeTupleClass(classType, tupleTypeArgTypes, typeArgs !== undefined);
+    } else {
+        returnType = ClassType.specialize(classType, typeArgTypes, typeArgs !== undefined);
+    }
+
+    if (isSpecialForm) {
+        returnType = TypeBase.cloneAsSpecialForm(returnType, classType);
+    }
+
+    return returnType;
 }
