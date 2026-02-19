@@ -6,13 +6,15 @@
  * Small extraction helpers for type evaluator core behavior.
  */
 
-import { ExpressionNode, ImportFromAsNode, NameNode, ParseNode, ParseNodeType } from '../../parser/parseNodes';
+import { ArgumentNode, ExpressionNode, ImportFromAsNode, NameNode, ParseNode, ParseNodeType } from '../../parser/parseNodes';
 import { KeywordType, OperatorType } from '../../parser/tokenizerTypes';
 import { TextRange } from '../../common/textRange';
 import { TextRangeCollection } from '../../common/textRangeCollection';
+import { assert } from '../../common/debug';
 import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
+import { ArgWithExpression, EvaluatorUsage } from '../typeEvaluatorTypes';
 
 export interface ReturnTypeInferenceContextFrame {
     functionNode: ParseNode;
@@ -270,4 +272,23 @@ export function isPossibleTypeAliasDeclCheck(decl: Declaration): boolean {
     }
 
     return isLegalTypeAliasExprForm(decl.node.parent.d.rightExpr, /* allowStrLiteral */ false);
+}
+
+export function getIndexAccessMagicMethodNameForUsage(usage: EvaluatorUsage): string {
+    if (usage.method === 'get') {
+        return '__getitem__';
+    } else if (usage.method === 'set') {
+        return '__setitem__';
+    } else {
+        assert(usage.method === 'del');
+        return '__delitem__';
+    }
+}
+
+export function convertArgumentNodeToArg(node: ArgumentNode): ArgWithExpression {
+    return {
+        argCategory: node.d.argCategory,
+        name: node.d.name,
+        valueExpression: node.d.valueExpr,
+    };
 }

@@ -7578,14 +7578,7 @@ export function createTypeEvaluator(
     }
 
     function getIndexAccessMagicMethodName(usage: EvaluatorUsage): string {
-        if (usage.method === 'get') {
-            return '__getitem__';
-        } else if (usage.method === 'set') {
-            return '__setitem__';
-        } else {
-            assert(usage.method === 'del');
-            return '__delitem__';
-        }
+        return TypeEvaluatorCore.getIndexAccessMagicMethodNameForUsage(usage);
     }
 
     function getTypeOfIndexedObjectOrClass(
@@ -8380,11 +8373,7 @@ export function createTypeEvaluator(
     }
 
     function convertNodeToArg(node: ArgumentNode): ArgWithExpression {
-        return {
-            argCategory: node.d.argCategory,
-            name: node.d.name,
-            valueExpression: node.d.valueExpr,
-        };
+        return TypeEvaluatorCore.convertArgumentNodeToArg(node);
     }
 
     function getTypeOfRevealType(node: CallNode, inferenceContext: InferenceContext | undefined): TypeResult {
