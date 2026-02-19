@@ -18,9 +18,9 @@ import { assert } from '../../common/debug';
 import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
-import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes, TypeResultWithNode } from '../typeEvaluatorTypes';
+import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { AnyType, ClassType, FunctionParam, FunctionParamFlags, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, Type, TypeBase, TypeVarScopeId, TypeVarTupleType, TypeVarType, UnknownType } from '../types';
+import { AnyType, ClassType, FunctionParam, FunctionParamFlags, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpackedClass, Type, TypeBase, TypeVarScopeId, TypeVarTupleType, TypeVarType, UnknownType } from '../types';
 import { convertToInstance, doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, lookUpClassMember, requiresSpecialization, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
@@ -1029,4 +1029,115 @@ export function transformTypeArgsForParamSpecCheck(
             typeList: typeArgs,
         },
     ];
+}
+
+export function validateTypeArgCheck(
+    argResult: TypeResultWithNode,
+    addDiagnosticFn: AddDiagnosticFn,
+    options?: ValidateTypeArgsOptions
+): boolean {
+    if (argResult.typeList) {
+        if (!options?.allowTypeArgList) {
+            addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.typeArgListNotAllowed(), argResult.node);
+            return false;
+        } else {
+            argResult.typeList.forEach((typeArg) => {
+                validateTypeArgCheck(typeArg, addDiagnosticFn);
+            });
+        }
+    }
+
+    if (isEllipsisType(argResult.type)) {
+        if (!options?.allowTypeArgList) {
+            addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.ellipsisContext(), argResult.node);
+            return false;
+        }
+    }
+
+    if (isModule(argResult.type)) {
+        addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.moduleAsType(), argResult.node);
+        return false;
+    }
+
+    if (isParamSpec(argResult.type)) {
+        if (!options?.allowParamSpec) {
+            addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.paramSpecContext(), argResult.node);
+            return false;
+        }
+    }
+
+    if (isTypeVarTuple(argResult.type) && !argResult.type.priv.isInUnion) {
+        if (!options?.allowTypeVarTuple) {
+            addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.typeVarTupleContext(), argResult.node);
+            return false;
+        } else {
+            validateTypeVarTupleIsUnpackedCheck(argResult.type, argResult.node, addDiagnosticFn);
+        }
+    }
+
+    if (!options?.allowEmptyTuple && argResult.isEmptyTupleShorthand) {
+        addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.zeroLengthTupleNotAllowed(), argResult.node);
+        return false;
+    }
+
+    if (isUnpackedClass(argResult.type)) {
+        if (!options?.allowUnpackedTuples) {
+            addDiagnosticFn(
+                DiagnosticRule.reportInvalidTypeForm,
+                LocMessage.unpackedArgInTypeArgument(),
+                argResult.node
+            );
+            return false;
+        }
+    }
+
+    return true;
+}
+
+export function createUnpackTypeFromArgs(
+    classType: ClassType,
+    errorNode: ParseNode,
+    typeArgs: TypeResultWithNode[] | undefined,
+    flags: EvalFlags,
+    addDiagnosticFn: AddDiagnosticFn
+): Type {
+    if (!typeArgs || typeArgs.length !== 1) {
+        if ((flags & EvalFlags.TypeExpression) !== 0) {
+            addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.unpackArgCount(), errorNode);
+        }
+        return classType;
+    }
+
+    const typeArgType = typeArgs[0].type;
+
+    if ((flags & EvalFlags.AllowUnpackedTuple) !== 0) {
+        const unpackedType = applyUnpackToTupleLikeType(typeArgType);
+        if (unpackedType) {
+            return unpackedType;
+        }
+
+        if ((flags & EvalFlags.TypeExpression) === 0) {
+            return classType;
+        }
+        addDiagnosticFn(DiagnosticRule.reportGeneralTypeIssues, LocMessage.unpackExpectedTypeVarTuple(), errorNode);
+        return UnknownType.create();
+    }
+
+    if ((flags & EvalFlags.AllowUnpackedTypedDict) !== 0) {
+        if (isInstantiableClass(typeArgType) && ClassType.isTypedDictClass(typeArgType)) {
+            return ClassType.cloneForUnpacked(typeArgType);
+        }
+
+        if ((flags & EvalFlags.TypeExpression) === 0) {
+            return classType;
+        }
+        addDiagnosticFn(DiagnosticRule.reportGeneralTypeIssues, LocMessage.unpackExpectedTypedDict(), errorNode);
+        return UnknownType.create();
+    }
+
+    if ((flags & EvalFlags.TypeExpression) === 0) {
+        return classType;
+    }
+    addDiagnosticFn(DiagnosticRule.reportGeneralTypeIssues, LocMessage.unpackNotAllowed(), errorNode);
+    return UnknownType.create();
 }

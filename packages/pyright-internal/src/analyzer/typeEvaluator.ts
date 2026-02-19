@@ -14714,62 +14714,7 @@ export function createTypeEvaluator(
 
     // Verifies that a type argument's type is not disallowed.
     function validateTypeArg(argResult: TypeResultWithNode, options?: ValidateTypeArgsOptions): boolean {
-        if (argResult.typeList) {
-            if (!options?.allowTypeArgList) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.typeArgListNotAllowed(), argResult.node);
-                return false;
-            } else {
-                argResult.typeList.forEach((typeArg) => {
-                    validateTypeArg(typeArg);
-                });
-            }
-        }
-
-        if (isEllipsisType(argResult.type)) {
-            if (!options?.allowTypeArgList) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.ellipsisContext(), argResult.node);
-                return false;
-            }
-        }
-
-        if (isModule(argResult.type)) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.moduleAsType(), argResult.node);
-            return false;
-        }
-
-        if (isParamSpec(argResult.type)) {
-            if (!options?.allowParamSpec) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.paramSpecContext(), argResult.node);
-                return false;
-            }
-        }
-
-        if (isTypeVarTuple(argResult.type) && !argResult.type.priv.isInUnion) {
-            if (!options?.allowTypeVarTuple) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.typeVarTupleContext(), argResult.node);
-                return false;
-            } else {
-                validateTypeVarTupleIsUnpacked(argResult.type, argResult.node);
-            }
-        }
-
-        if (!options?.allowEmptyTuple && argResult.isEmptyTupleShorthand) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.zeroLengthTupleNotAllowed(), argResult.node);
-            return false;
-        }
-
-        if (isUnpackedClass(argResult.type)) {
-            if (!options?.allowUnpackedTuples) {
-                addDiagnostic(
-                    DiagnosticRule.reportInvalidTypeForm,
-                    LocMessage.unpackedArgInTypeArgument(),
-                    argResult.node
-                );
-                return false;
-            }
-        }
-
-        return true;
+        return TypeEvaluatorCore.validateTypeArgCheck(argResult, addDiagnostic, options);
     }
 
     // Evaluates the type arguments for a Callable type. It should have zero
@@ -15420,45 +15365,7 @@ export function createTypeEvaluator(
         typeArgs: TypeResultWithNode[] | undefined,
         flags: EvalFlags
     ): Type {
-        if (!typeArgs || typeArgs.length !== 1) {
-            if ((flags & EvalFlags.TypeExpression) !== 0) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.unpackArgCount(), errorNode);
-            }
-            return classType;
-        }
-
-        const typeArgType = typeArgs[0].type;
-
-        if ((flags & EvalFlags.AllowUnpackedTuple) !== 0) {
-            const unpackedType = applyUnpackToTupleLike(typeArgType);
-            if (unpackedType) {
-                return unpackedType;
-            }
-
-            if ((flags & EvalFlags.TypeExpression) === 0) {
-                return classType;
-            }
-            addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.unpackExpectedTypeVarTuple(), errorNode);
-            return UnknownType.create();
-        }
-
-        if ((flags & EvalFlags.AllowUnpackedTypedDict) !== 0) {
-            if (isInstantiableClass(typeArgType) && ClassType.isTypedDictClass(typeArgType)) {
-                return ClassType.cloneForUnpacked(typeArgType);
-            }
-
-            if ((flags & EvalFlags.TypeExpression) === 0) {
-                return classType;
-            }
-            addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.unpackExpectedTypedDict(), errorNode);
-            return UnknownType.create();
-        }
-
-        if ((flags & EvalFlags.TypeExpression) === 0) {
-            return classType;
-        }
-        addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.unpackNotAllowed(), errorNode);
-        return UnknownType.create();
+        return TypeEvaluatorCore.createUnpackTypeFromArgs(classType, errorNode, typeArgs, flags, addDiagnostic);
     }
 
     function createFinalType(
