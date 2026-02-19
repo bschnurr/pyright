@@ -186,6 +186,7 @@ import {
     synthesizeTypedDictClassMethods,
 } from './typedDicts';
 import * as TypeEvaluatorDiagnostics from './typeEvaluator/diagnostics';
+import * as TypeEvaluatorCore from './typeEvaluator/evaluatorCore';
 import * as TypeEvaluatorFlowAnalysis from './typeEvaluator/flowAnalysis';
 import * as TypeEvaluatorNarrowing from './typeEvaluator/narrowing';
 import {
@@ -843,28 +844,12 @@ export function createTypeEvaluator(
     // are currently analyzing in the context of parameter types
     // defined by a call site.
     function isNodeInReturnTypeInferenceContext(node: ParseNode) {
-        const stackSize = returnTypeInferenceContextStack.length;
-        if (stackSize === 0) {
-            return false;
-        }
-
-        const contextNode = returnTypeInferenceContextStack[stackSize - 1];
-
-        let curNode: ParseNode | undefined = node;
-        while (curNode) {
-            if (curNode === contextNode.functionNode) {
-                return true;
-            }
-            curNode = curNode.parent;
-        }
-
-        return false;
+        return TypeEvaluatorCore.isNodeInReturnTypeInferenceContext(node, returnTypeInferenceContextStack);
     }
 
     function getCodeFlowAnalyzerForReturnTypeInferenceContext() {
-        const stackSize = returnTypeInferenceContextStack.length;
-        assert(stackSize > 0);
-        const contextNode = returnTypeInferenceContextStack[stackSize - 1];
+        const contextNode = TypeEvaluatorCore.getTopReturnTypeInferenceContextFrame(returnTypeInferenceContextStack);
+        assert(contextNode !== undefined);
         return contextNode.codeFlowAnalyzer;
     }
 
@@ -23246,7 +23231,9 @@ export function createTypeEvaluator(
         // Detect recurrence. If a function invokes itself either directly
         // or indirectly, we won't attempt to infer contextual return
         // types any further.
-        if (returnTypeInferenceContextStack.some((context) => context.functionNode === functionNode)) {
+        if (
+            TypeEvaluatorCore.isFunctionNodeInReturnTypeInferenceContext(functionNode, returnTypeInferenceContextStack)
+        ) {
             return undefined;
         }
 
@@ -23263,7 +23250,12 @@ export function createTypeEvaluator(
         }
 
         // Don't explore arbitrarily deep in the call graph.
-        if (returnTypeInferenceContextStack.length >= maxReturnTypeInferenceStackSize) {
+        if (
+            TypeEvaluatorCore.hasReachedReturnTypeInferenceStackLimit(
+                returnTypeInferenceContextStack,
+                maxReturnTypeInferenceStackSize
+            )
+        ) {
             return undefined;
         }
 
@@ -23280,7 +23272,7 @@ export function createTypeEvaluator(
             // this function so we can analyze it separately without polluting
             // the main type cache.
             const prevTypeCache = returnTypeInferenceTypeCache;
-            returnTypeInferenceContextStack.push({
+            TypeEvaluatorCore.pushReturnTypeInferenceContextFrame(returnTypeInferenceContextStack, {
                 functionNode,
                 codeFlowAnalyzer: codeFlowEngine.createCodeFlowAnalyzer(),
             });
@@ -23362,7 +23354,7 @@ export function createTypeEvaluator(
                     }
                 }
             } finally {
-                returnTypeInferenceContextStack.pop();
+                TypeEvaluatorCore.popReturnTypeInferenceContextFrame(returnTypeInferenceContextStack);
                 returnTypeInferenceTypeCache = prevTypeCache;
             }
         });

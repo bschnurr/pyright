@@ -16,6 +16,33 @@ incrementally evolve.
   - Shared helper modules must not import the evaluator façade.
 - Prefer passing a small context object to extracted modules over importing back into the evaluator.
 
+## Invariant checklist (must hold for every extraction slice)
+
+- **Public evaluator surface remains stable**
+  - Keep `createTypeEvaluator` in `analyzer/typeEvaluator.ts` and the `TypeEvaluator` contract in
+    `analyzer/typeEvaluatorTypes.ts` behavior-compatible across slices.
+- **Type cache semantics remain unchanged**
+  - Preserve the `readTypeCacheEntry` / `writeTypeCache` contract, including `incompleteGenCount` updates and
+    flag consistency checks.
+  - Keep the "write incomplete result before flow refinement" recursion guard behavior used by member/index access
+    code-flow paths.
+- **Speculative evaluation semantics remain unchanged**
+  - Preserve `useSpeculativeMode` enter/leave pairing and keep speculative cache tracking behavior
+    (`trackEntry`, optional `addSpeculativeType`) intact.
+  - Diagnostic suppression behavior that depends on speculative mode must remain identical.
+- **Symbol resolution ordering remains unchanged**
+  - Preserve `lookUpSymbolRecursive` behavior for:
+    - flow-reachability filtering of declarations,
+    - class-scope fallback rules,
+    - `preferGlobalScope` handling used for forward-reference contexts.
+- **Diagnostics behavior remains unchanged**
+  - Keep suppression stack semantics and reachability gating behavior as currently implemented in
+    `typeEvaluator/diagnostics.ts`.
+  - Continue honoring `@no_type_check` and unannotated-function suppression behaviors.
+- **No new cycles**
+  - `codeFlowEngine.ts` must remain independent of `typeEvaluator.ts`.
+  - Extracted helper modules must consume context objects rather than importing evaluator internals.
+
 ## Current module layout
 
 Extracted modules live under:
@@ -52,6 +79,28 @@ This module accepts a `DiagnosticsContext` so it can operate without importing t
 - `patternMatching.ts` — evaluator glue around existing `analyzer/patternMatching.ts`
 - `typeEvaluatorAPI.ts` — centralized construction of the exported `TypeEvaluator` object
 - `typeEvaluatorIndex.ts` — wiring / factory entry that builds the evaluator from all components
+
+### Recommended extraction order
+
+1. `evaluatorCore.ts` (entrypoint logic and cache-adjacent orchestration, no behavior changes)
+2. `symbolScope.ts` (`lookUpSymbolRecursive` and closely-related symbol-resolution helpers)
+3. `expressionVisitors.ts` (node-specific expression handlers, preserving `EvalFlags` behavior)
+4. `statementVisitors.ts` (statement evaluators and assignment/delete pathways)
+5. `patternMatching.ts` (glue around `analyzer/patternMatching.ts`)
+6. `typeEvaluatorAPI.ts` then `typeEvaluatorIndex.ts` (final API assembly and wiring split)
+
+### Verification gate for each extraction slice
+
+Run these checks for every slice before moving to the next:
+
+1. `cd packages/pyright-internal && npm run webpack:testserver`
+2. `cd packages/pyright-internal && npm run test:norebuild -- fourSlashRunner.test`
+3. `cd packages/pyright-internal && npm run test:norebuild -- importResolver.test`
+4. `cd packages/pyright-internal && npm test`
+5. `npm run typecheck`
+
+If a slice changes semantics (diagnostics, narrowing, recursion behavior, or cache behavior), revert that slice and
+re-apply with smaller extraction boundaries.
 
 ## Notes on narrowing and code flow
 
