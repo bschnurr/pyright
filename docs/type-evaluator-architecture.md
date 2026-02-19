@@ -65,8 +65,12 @@ This module accepts a `DiagnosticsContext` so it can operate without importing t
   - `diagnostics.ts` extraction.
   - `flowAnalysis.ts` helpers (flow graph delegators, constrained typevar narrowing, `printControlFlowGraph`).
   - `narrowing.ts` helpers for assignment-based narrowing, literal/type-guard stripping, truthiness handling (including direct-reference and `not` matching), `None`/ellipsis comparisons, class/literal equality comparisons (including equality matchers), discriminated equality helpers (tuple/dict/member), tuple length/containment/TypedDict-key narrowing, len(x) and `in`-operator comparison matching, call-expression matching for isinstance/issubclass, bool, and TypeGuard/TypeIs, literal enumeration, `type(x) is y` matching/narrowing, `X is <literal/class>` matching, indexed-literal and member-access discriminated matching, isinstance/issubclass narrowing (including class-type parsing and name-scope checks), aliased-condition and assignment-expression narrowing, and user-defined TypeGuard/TypeIs narrowing.
+  - `evaluatorCore.ts` extraction (60 exported functions, ~1,376 lines):
+    - **Phase 2** (pure helpers, no closure deps): Return-type-inference context stack (7), symbol resolution stack (5), declaration helpers (3), type alias helpers (4), type checking helpers (3), utility helpers (12), `expandTypedKwargsForFunction`, `setConstraintsForFreeTypeVarsInType`.
+    - **Phase 3a** (prefetched context injection): Prefetched type accessors (8), `parseStringAsTypeAnnotationNode`, `convertSpecialFormToRuntimeValueWithPrefetched`.
+    - **Phase 3b** (`AddDiagnosticFn` callback injection): `validateTypeVarTupleIsUnpackedCheck`, `getBooleanValueFromNode`, `reportUseOfTypeCheckOnlySymbol`, `enforceClassTypeVarScopeCheck`, `createClassVarTypeFromArgs`, `createFinalTypeFromArgs`, `verifyGenericTypeParamsCheck`, `validateTypeParamDefaultCheck`, `transformTypeArgsForParamSpecCheck`, `validateTypeArgCheck`, `createUnpackTypeFromArgs`, `createSpecialTypeFromArgs` (137 lines), `createConcatenateTypeFromArgs`, `createGenericTypeFromArgs`.
 - In progress:
-  - `evaluatorCore.ts` extraction (44 functions, ~550 lines): Phase 2 pure helpers complete. Phase 3 context-injected functions: prefetched type accessors (8), `parseStringAsTypeAnnotationNode`, `convertSpecialFormToRuntimeValueWithPrefetched`.
+  - Scanning for additional functions unlocked by cascading extractions.
 
 ## Planned breakdown (future slices)
 
@@ -101,6 +105,54 @@ Run these checks for every slice before moving to the next:
 
 If a slice changes semantics (diagnostics, narrowing, recursion behavior, or cache behavior), revert that slice and
 re-apply with smaller extraction boundaries.
+
+## Established context-injection patterns
+
+When extracting functions from the evaluator closure, two patterns have been validated:
+
+### 1. Prefetched type context
+
+For functions that access `prefetched` (pre-resolved built-in class types), pass
+`prefetched: Partial<PrefetchedTypes> | undefined` as a parameter:
+
+```ts
+// In evaluatorCore.ts
+export function getTypedDictClassTypeFromPrefetched(
+    prefetched: Partial<PrefetchedTypes> | undefined
+): ClassType | undefined { ... }
+
+// In typeEvaluator.ts (delegate)
+function getTypedDictClassType(): ClassType | undefined {
+    return TypeEvaluatorCore.getTypedDictClassTypeFromPrefetched(prefetched);
+}
+```
+
+### 2. `AddDiagnosticFn` callback injection
+
+For functions whose only closure dependency is `addDiagnostic`, pass a callback:
+
+```ts
+// In evaluatorCore.ts
+export type AddDiagnosticFn = (
+    rule: DiagnosticRule, message: string, node: ParseNode, range?: TextRange
+) => Diagnostic | undefined;
+
+export function createFinalTypeFromArgs(
+    classType: ClassType, errorNode: ParseNode,
+    typeArgs: TypeResultWithNode[] | undefined,
+    flags: EvalFlags, addDiagnosticFn: AddDiagnosticFn
+): Type { ... }
+
+// In typeEvaluator.ts (delegate)
+function createFinalType(...): Type {
+    return TypeEvaluatorCore.createFinalTypeFromArgs(
+        classType, errorNode, typeArgs, flags, addDiagnostic
+    );
+}
+```
+
+This pattern cascades: extracting one function can unlock others that call it (e.g.,
+`createSpecialType` unlocked `createConcatenateType` and `createGenericType`).
 
 ## Notes on narrowing and code flow
 
