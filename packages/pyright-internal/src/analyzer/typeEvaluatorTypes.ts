@@ -830,7 +830,7 @@ export interface TypeEvaluator {
     ) => CallResult;
     validateTypeArg: (argResult: TypeResultWithNode, options?: ValidateTypeArgsOptions) => boolean;
     assignTypeToExpression: (target: ExpressionNode, typeResult: TypeResult, srcExpr: ExpressionNode) => void;
-    assignClassToSelf: (destType: ClassType, srcType: ClassType, assumedVariance: Variance) => boolean;
+    assignClassToSelf: (destType: ClassType, srcType: ClassType, assumedVariance: Variance, ignoreBaseClassVariance?: boolean) => boolean;
     getBuiltInObject: (node: ParseNode, name: string, typeArgs?: Type[]) => Type;
     getTypedDictClassType: () => ClassType | undefined;
     getTupleClassType: () => ClassType | undefined;
