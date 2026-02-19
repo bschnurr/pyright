@@ -21,7 +21,7 @@ import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
 import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { AnyType, ClassType, combineTypes, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, ParamSpecType, TupleTypeArg, Type, TypeBase, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnknownType } from '../types';
+import { AnyType, ClassType, combineTypes, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, NeverType, ParamSpecType, TupleTypeArg, Type, TypeBase, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnknownType } from '../types';
 import { convertToInstance, doForEachSubtype, addTypeVarsToListIfUnique, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails, ParamKind, ParamListDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
@@ -2030,4 +2030,170 @@ export function adjustSourceParamDetailsForDestVariadicWithEvaluator(
             )
         );
     }
+}
+
+export function createRequiredOrReadOnlyTypeFromArgs(
+    evaluator: TypeEvaluator,
+    classType: ClassType,
+    errorNode: ParseNode,
+    typeArgs: TypeResultWithNode[] | undefined,
+    flags: EvalFlags
+): TypeResult {
+    if (!typeArgs && (flags & EvalFlags.TypeExpression) === 0) {
+        return { type: classType };
+    }
+
+    if (!typeArgs || typeArgs.length !== 1) {
+        if ((flags & EvalFlags.TypeExpression) !== 0) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportInvalidTypeForm,
+                classType.shared.name === 'ReadOnly'
+                    ? LocMessage.readOnlyArgCount()
+                    : classType.shared.name === 'Required'
+                    ? LocMessage.requiredArgCount()
+                    : LocMessage.notRequiredArgCount(),
+                errorNode
+            );
+        }
+
+        return { type: classType };
+    }
+
+    const typeArgType = typeArgs[0].type;
+
+    const containingClassNode = ParseTreeUtils.getEnclosingClass(errorNode, /* stopAtFunction */ true);
+    const classTypeInfo = containingClassNode ? evaluator.getTypeOfClass(containingClassNode) : undefined;
+
+    let isUsageLegal = false;
+
+    if (
+        classTypeInfo &&
+        isInstantiableClass(classTypeInfo.classType) &&
+        ClassType.isTypedDictClass(classTypeInfo.classType)
+    ) {
+        if (ParseTreeUtils.isNodeContainedWithinNodeType(errorNode, ParseNodeType.TypeAnnotation)) {
+            isUsageLegal = true;
+        }
+    }
+
+    let isReadOnly = typeArgs[0].isReadOnly;
+    let isRequired = typeArgs[0].isRequired;
+    let isNotRequired = typeArgs[0].isNotRequired;
+
+    if (classType.shared.name === 'ReadOnly') {
+        if ((flags & EvalFlags.AllowReadOnly) !== 0) {
+            isUsageLegal = true;
+        }
+
+        if (typeArgs[0].isReadOnly) {
+            isUsageLegal = false;
+        }
+
+        isReadOnly = true;
+    } else {
+        if ((flags & EvalFlags.AllowRequired) !== 0) {
+            isUsageLegal = true;
+        }
+
+        if (typeArgs[0].isRequired || typeArgs[0].isNotRequired) {
+            isUsageLegal = false;
+        }
+
+        isRequired = classType.shared.name === 'Required';
+        isNotRequired = classType.shared.name === 'NotRequired';
+    }
+
+    if (!isUsageLegal) {
+        if ((flags & EvalFlags.TypeExpression) !== 0) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportInvalidTypeForm,
+                classType.shared.name === 'ReadOnly'
+                    ? LocMessage.readOnlyNotInTypedDict()
+                    : classType.shared.name === 'Required'
+                    ? LocMessage.requiredNotInTypedDict()
+                    : LocMessage.notRequiredNotInTypedDict(),
+                errorNode
+            );
+        }
+
+        return { type: classType };
+    }
+
+    return { type: typeArgType, isReadOnly, isRequired, isNotRequired };
+}
+
+export function createUnionTypeFromArgs(
+    classType: ClassType,
+    errorNode: ParseNode,
+    typeArgs: TypeResultWithNode[] | undefined,
+    flags: EvalFlags,
+    prefetched: Partial<PrefetchedTypes> | undefined,
+    addDiagnosticFn: AddDiagnosticFn
+): Type {
+    const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
+    const types: Type[] = [];
+    let allowSingleTypeArg = false;
+    let isValidTypeForm = true;
+
+    if (!typeArgs) {
+        if ((flags & EvalFlags.TypeExpression) !== 0) {
+            addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.unionTypeArgCount(), errorNode);
+            return NeverType.createNever();
+        }
+
+        return classType;
+    }
+
+    for (const typeArg of typeArgs) {
+        let typeArgType = typeArg.type;
+
+        if (
+            !validateTypeArgCheck(typeArg, addDiagnosticFn, {
+                allowTypeVarTuple: fileInfo.diagnosticRuleSet.enableExperimentalFeatures,
+            })
+        ) {
+            typeArgType = UnknownType.create();
+        }
+
+        if (isTypeVar(typeArgType) && isUnpackedTypeVarTuple(typeArgType)) {
+            if (fileInfo.diagnosticRuleSet.enableExperimentalFeatures) {
+                typeArgType = TypeVarType.cloneForUnpacked(typeArgType, /* isInUnion */ true);
+                allowSingleTypeArg = true;
+            } else {
+                addDiagnosticFn(
+                    DiagnosticRule.reportGeneralTypeIssues,
+                    LocMessage.unionUnpackedTypeVarTuple(),
+                    errorNode
+                );
+
+                typeArgType = UnknownType.create();
+                isValidTypeForm = false;
+            }
+        }
+
+        types.push(typeArgType);
+    }
+
+    if (types.length === 1 && !allowSingleTypeArg && !isNoneInstance(types[0])) {
+        if ((flags & EvalFlags.TypeExpression) !== 0) {
+            addDiagnosticFn(DiagnosticRule.reportInvalidTypeArguments, LocMessage.unionTypeArgCount(), errorNode);
+        }
+        isValidTypeForm = false;
+    }
+
+    let unionType = combineTypes(types, { skipElideRedundantLiterals: true });
+    if (prefetched?.unionTypeClass && isInstantiableClass(prefetched.unionTypeClass)) {
+        unionType = TypeBase.cloneAsSpecialForm(unionType, ClassType.cloneAsInstance(prefetched.unionTypeClass));
+    }
+
+    if (!isValidTypeForm || types.some((t) => !t.props?.typeForm)) {
+        if (unionType.props?.typeForm) {
+            unionType = TypeBase.cloneWithTypeForm(unionType, undefined);
+        }
+    } else if (isTypeFormSupportedForNode(errorNode)) {
+        const typeFormType = combineTypes(types.map((t) => t.props!.typeForm!));
+        unionType = TypeBase.cloneWithTypeForm(unionType, typeFormType);
+    }
+
+    return unionType;
 }
