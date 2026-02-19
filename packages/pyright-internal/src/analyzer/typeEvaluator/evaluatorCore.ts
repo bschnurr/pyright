@@ -185,3 +185,8 @@ export function getAliasFromImportNode(node: NameNode): NameNode | undefined {
     }
     return undefined;
 }
+
+export function isTypeFormSupportedForNode(node: ParseNode) {
+    const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
+    return fileInfo.diagnosticRuleSet.enableExperimentalFeatures;
+}

@@ -28006,10 +28006,7 @@ export function createTypeEvaluator(
     }
 
     function isTypeFormSupported(node: ParseNode) {
-        const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-
-        // For now, enable only if enableExperimentalFeatures is true.
-        return fileInfo.diagnosticRuleSet.enableExperimentalFeatures;
+        return TypeEvaluatorCore.isTypeFormSupportedForNode(node);
     }
 
     function printType(type: Type, options?: PrintTypeOptions): string {
