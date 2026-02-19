@@ -14421,45 +14421,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfSlice(node: SliceNode): TypeResult {
-        const noneType = getNoneType();
-        let startType = noneType;
-        let endType = noneType;
-        let stepType = noneType;
-        let isIncomplete = false;
-
-        // Evaluate the expressions to report errors and record symbol
-        // references.
-        if (node.d.startValue) {
-            const startTypeResult = getTypeOfExpression(node.d.startValue);
-            startType = startTypeResult.type;
-            if (startTypeResult.isIncomplete) {
-                isIncomplete = true;
-            }
-        }
-
-        if (node.d.endValue) {
-            const endTypeResult = getTypeOfExpression(node.d.endValue);
-            endType = endTypeResult.type;
-            if (endTypeResult.isIncomplete) {
-                isIncomplete = true;
-            }
-        }
-
-        if (node.d.stepValue) {
-            const stepTypeResult = getTypeOfExpression(node.d.stepValue);
-            stepType = stepTypeResult.type;
-            if (stepTypeResult.isIncomplete) {
-                isIncomplete = true;
-            }
-        }
-
-        const sliceType = getBuiltInObject(node, 'slice');
-
-        if (!isClassInstance(sliceType)) {
-            return { type: sliceType };
-        }
-
-        return { type: ClassType.specialize(sliceType, [startType, endType, stepType]), isIncomplete };
+        return TypeEvaluatorCore.getTypeOfSliceWithEvaluator(evaluatorInterface, node);
     }
 
     // Verifies that a type argument's type is not disallowed.
@@ -16461,67 +16423,9 @@ export function createTypeEvaluator(
     }
 
     function computeEffectiveMetaclass(classType: ClassType, errorNode: ParseNode) {
-        let effectiveMetaclass = classType.shared.declaredMetaclass;
-        let reportedMetaclassConflict = false;
-
-        if (!effectiveMetaclass || isInstantiableClass(effectiveMetaclass)) {
-            for (const baseClass of classType.shared.baseClasses) {
-                if (isInstantiableClass(baseClass)) {
-                    const baseClassMeta = baseClass.shared.effectiveMetaclass ?? prefetched?.typeClass;
-                    if (baseClassMeta && isInstantiableClass(baseClassMeta)) {
-                        // Make sure there is no metaclass conflict.
-                        if (!effectiveMetaclass) {
-                            effectiveMetaclass = baseClassMeta;
-                        } else if (
-                            derivesFromClassRecursive(baseClassMeta, effectiveMetaclass, /* ignoreUnknown */ false)
-                        ) {
-                            effectiveMetaclass = baseClassMeta;
-                        } else if (
-                            !derivesFromClassRecursive(effectiveMetaclass, baseClassMeta, /* ignoreUnknown */ false)
-                        ) {
-                            if (!reportedMetaclassConflict) {
-                                const diag = new DiagnosticAddendum();
-
-                                diag.addMessage(
-                                    LocAddendum.metaclassConflict().format({
-                                        metaclass1: printType(convertToInstance(effectiveMetaclass)),
-                                        metaclass2: printType(convertToInstance(baseClassMeta)),
-                                    })
-                                );
-                                addDiagnostic(
-                                    DiagnosticRule.reportGeneralTypeIssues,
-                                    LocMessage.metaclassConflict() + diag.getString(),
-                                    errorNode
-                                );
-
-                                // Don't report more than once.
-                                reportedMetaclassConflict = true;
-                            }
-                        }
-                    } else {
-                        effectiveMetaclass = baseClassMeta ? UnknownType.create() : undefined;
-                        break;
-                    }
-                } else {
-                    // If one of the base classes is unknown, then the effective
-                    // metaclass is also unknowable.
-                    effectiveMetaclass = UnknownType.create();
-                    break;
-                }
-            }
-        }
-
-        // If we haven't found an effective metaclass, assume "type", which
-        // is the metaclass for "object".
-        if (!effectiveMetaclass) {
-            const typeMetaclass = getBuiltInType(errorNode, 'type');
-            effectiveMetaclass =
-                typeMetaclass && isInstantiableClass(typeMetaclass) ? typeMetaclass : UnknownType.create();
-        }
-
-        classType.shared.effectiveMetaclass = effectiveMetaclass;
-
-        return effectiveMetaclass;
+        return TypeEvaluatorCore.computeEffectiveMetaclassWithEvaluator(
+            evaluatorInterface, classType, errorNode, prefetched
+        );
     }
 
     // Verifies that the type variables provided outside of "Generic"
@@ -17475,45 +17379,7 @@ export function createTypeEvaluator(
     // no transform is applied. If it's a var-arg or keyword-arg parameter, the type
     // is wrapped in a List or Dict.
     function transformVariadicParamType(node: ParseNode, paramCategory: ParamCategory, type: Type): Type {
-        switch (paramCategory) {
-            case ParamCategory.Simple: {
-                return type;
-            }
-
-            case ParamCategory.ArgsList: {
-                if (isParamSpec(type) && type.priv.paramSpecAccess) {
-                    return type;
-                }
-
-                if (isUnpackedClass(type)) {
-                    return ClassType.cloneForPacked(type);
-                }
-
-                return makeTupleObject(evaluatorInterface, [{ type, isUnbounded: !isTypeVarTuple(type) }]);
-            }
-
-            case ParamCategory.KwargsDict: {
-                // Leave a ParamSpec alone.
-                if (isParamSpec(type) && type.priv.paramSpecAccess) {
-                    return type;
-                }
-
-                // Is this an unpacked TypedDict? If so, return its packed version.
-                if (isClassInstance(type) && ClassType.isTypedDictClass(type) && type.priv.isUnpacked) {
-                    return ClassType.cloneForPacked(type);
-                }
-
-                // Wrap the type in a dict with str keys.
-                const dictType = getBuiltInType(node, 'dict');
-                const strType = getBuiltInObject(node, 'str');
-
-                if (isInstantiableClass(dictType) && isClassInstance(strType)) {
-                    return ClassType.cloneAsInstance(ClassType.specialize(dictType, [strType, type]));
-                }
-
-                return UnknownType.create();
-            }
-        }
+        return TypeEvaluatorCore.transformVariadicParamTypeWithEvaluator(evaluatorInterface, node, paramCategory, type);
     }
 
     function createAsyncFunction(node: FunctionNode, functionType: FunctionType): FunctionType {

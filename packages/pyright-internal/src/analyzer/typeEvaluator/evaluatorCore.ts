@@ -10,7 +10,7 @@ import { DiagnosticLevel } from '../../common/configOptions';
 import { Diagnostic, DiagnosticAddendum } from '../../common/diagnostic';
 import { DiagnosticRule } from '../../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../../localization/localize';
-import { ArgumentNode, ExpressionNode, ImportFromAsNode, NameNode, ParamCategory, ParseNode, ParseNodeType, StringListNode, TypeParameterNode } from '../../parser/parseNodes';
+import { ArgumentNode, ExpressionNode, ImportFromAsNode, NameNode, ParamCategory, ParseNode, ParseNodeType, SliceNode, StringListNode, TypeParameterNode } from '../../parser/parseNodes';
 import { KeywordType, OperatorType } from '../../parser/tokenizerTypes';
 import { Parser, ParseOptions, ParseTextMode } from '../../parser/parser';
 import { TextRange } from '../../common/textRange';
@@ -23,7 +23,7 @@ import { Declaration, DeclarationType } from '../declaration';
 import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
 import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, NeverType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnknownType, Variance } from '../types';
-import { addConditionToType, computeMroLinearization, convertToInstance, doForEachSubtype, addTypeVarsToListIfUnique, getTypeCondition, getTypeVarArgsRecursive, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isNoneInstance, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, MemberAccessFlags, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
+import { addConditionToType, computeMroLinearization, convertToInstance, derivesFromClassRecursive, doForEachSubtype, addTypeVarsToListIfUnique, getTypeCondition, getTypeVarArgsRecursive, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isNoneInstance, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, isUnboundedTupleClass, lookUpClassMember, lookUpObjectMember, MemberAccessFlags, requiresSpecialization, specializeTupleClass, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails, ParamKind, ParamListDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 import { makeTupleObject } from '../tuples';
@@ -2756,4 +2756,154 @@ export function createSubclassWithEvaluator(
     }
 
     return newClassType;
+}
+
+export function getTypeOfSliceWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: SliceNode
+): TypeResult {
+    const noneType = evaluator.getNoneType();
+    let startType = noneType;
+    let endType = noneType;
+    let stepType = noneType;
+    let isIncomplete = false;
+
+    if (node.d.startValue) {
+        const startTypeResult = evaluator.getTypeOfExpression(node.d.startValue);
+        startType = startTypeResult.type;
+        if (startTypeResult.isIncomplete) {
+            isIncomplete = true;
+        }
+    }
+
+    if (node.d.endValue) {
+        const endTypeResult = evaluator.getTypeOfExpression(node.d.endValue);
+        endType = endTypeResult.type;
+        if (endTypeResult.isIncomplete) {
+            isIncomplete = true;
+        }
+    }
+
+    if (node.d.stepValue) {
+        const stepTypeResult = evaluator.getTypeOfExpression(node.d.stepValue);
+        stepType = stepTypeResult.type;
+        if (stepTypeResult.isIncomplete) {
+            isIncomplete = true;
+        }
+    }
+
+    const sliceType = evaluator.getBuiltInObject(node, 'slice');
+
+    if (!isClassInstance(sliceType)) {
+        return { type: sliceType };
+    }
+
+    return { type: ClassType.specialize(sliceType, [startType, endType, stepType]), isIncomplete };
+}
+
+export function transformVariadicParamTypeWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: ParseNode,
+    paramCategory: ParamCategory,
+    type: Type
+): Type {
+    switch (paramCategory) {
+        case ParamCategory.Simple: {
+            return type;
+        }
+
+        case ParamCategory.ArgsList: {
+            if (isParamSpec(type) && type.priv.paramSpecAccess) {
+                return type;
+            }
+
+            if (isUnpackedClass(type)) {
+                return ClassType.cloneForPacked(type);
+            }
+
+            return makeTupleObject(evaluator, [{ type, isUnbounded: !isTypeVarTuple(type) }]);
+        }
+
+        case ParamCategory.KwargsDict: {
+            if (isParamSpec(type) && type.priv.paramSpecAccess) {
+                return type;
+            }
+
+            if (isClassInstance(type) && ClassType.isTypedDictClass(type) && type.priv.isUnpacked) {
+                return ClassType.cloneForPacked(type);
+            }
+
+            const dictType = evaluator.getBuiltInType(node, 'dict');
+            const strType = evaluator.getBuiltInObject(node, 'str');
+
+            if (isInstantiableClass(dictType) && isClassInstance(strType)) {
+                return ClassType.cloneAsInstance(ClassType.specialize(dictType, [strType, type]));
+            }
+
+            return UnknownType.create();
+        }
+    }
+}
+
+export function computeEffectiveMetaclassWithEvaluator(
+    evaluator: TypeEvaluator,
+    classType: ClassType,
+    errorNode: ParseNode,
+    prefetched: Partial<PrefetchedTypes> | undefined
+) {
+    let effectiveMetaclass = classType.shared.declaredMetaclass;
+    let reportedMetaclassConflict = false;
+
+    if (!effectiveMetaclass || isInstantiableClass(effectiveMetaclass)) {
+        for (const baseClass of classType.shared.baseClasses) {
+            if (isInstantiableClass(baseClass)) {
+                const baseClassMeta = baseClass.shared.effectiveMetaclass ?? prefetched?.typeClass;
+                if (baseClassMeta && isInstantiableClass(baseClassMeta)) {
+                    if (!effectiveMetaclass) {
+                        effectiveMetaclass = baseClassMeta;
+                    } else if (
+                        derivesFromClassRecursive(baseClassMeta, effectiveMetaclass, /* ignoreUnknown */ false)
+                    ) {
+                        effectiveMetaclass = baseClassMeta;
+                    } else if (
+                        !derivesFromClassRecursive(effectiveMetaclass, baseClassMeta, /* ignoreUnknown */ false)
+                    ) {
+                        if (!reportedMetaclassConflict) {
+                            const diag = new DiagnosticAddendum();
+
+                            diag.addMessage(
+                                LocAddendum.metaclassConflict().format({
+                                    metaclass1: evaluator.printType(convertToInstance(effectiveMetaclass)),
+                                    metaclass2: evaluator.printType(convertToInstance(baseClassMeta)),
+                                })
+                            );
+                            evaluator.addDiagnostic(
+                                DiagnosticRule.reportGeneralTypeIssues,
+                                LocMessage.metaclassConflict() + diag.getString(),
+                                errorNode
+                            );
+
+                            reportedMetaclassConflict = true;
+                        }
+                    }
+                } else {
+                    effectiveMetaclass = baseClassMeta ? UnknownType.create() : undefined;
+                    break;
+                }
+            } else {
+                effectiveMetaclass = UnknownType.create();
+                break;
+            }
+        }
+    }
+
+    if (!effectiveMetaclass) {
+        const typeMetaclass = evaluator.getBuiltInType(errorNode, 'type');
+        effectiveMetaclass =
+            typeMetaclass && isInstantiableClass(typeMetaclass) ? typeMetaclass : UnknownType.create();
+    }
+
+    classType.shared.effectiveMetaclass = effectiveMetaclass;
+
+    return effectiveMetaclass;
 }
