@@ -25010,15 +25010,7 @@ export function createTypeEvaluator(
         srcType: UnknownType | AnyType,
         constraints: ConstraintTracker
     ) {
-        const typeVars = getTypeVarArgsRecursive(destType);
-        typeVars.forEach((typeVar) => {
-            if (!TypeVarType.isBound(typeVar) && !constraints.getMainConstraintSet().getTypeVar(typeVar)) {
-                // Don't set ParamSpecs or TypeVarTuples.
-                if (!isParamSpec(srcType) && !isTypeVarTuple(srcType)) {
-                    constraints.setBounds(typeVar, srcType);
-                }
-            }
-        });
+        TypeEvaluatorCore.setConstraintsForFreeTypeVarsInType(destType, srcType, constraints);
     }
 
     // Determines whether a type is "subsumed by" (i.e. is a proper subtype of) another type.

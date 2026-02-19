@@ -17,9 +17,10 @@ import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
 import { ArgWithExpression, AssignTypeFlags, EvalFlags, EvaluatorUsage, PrefetchedTypes } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { ClassType, FunctionParam, FunctionParamFlags, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, Type, TypeBase, TypeVarType, UnknownType } from '../types';
+import { AnyType, ClassType, FunctionParam, FunctionParamFlags, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isModule, isNever, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, Type, TypeBase, TypeVarType, UnknownType } from '../types';
 import { convertToInstance, doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, lookUpClassMember } from '../typeUtils';
 import { getParamListDetails } from '../parameterUtils';
+import { ConstraintTracker } from '../constraintTracker';
 
 export interface ReturnTypeInferenceContextFrame {
     functionNode: ParseNode;
@@ -722,4 +723,19 @@ export function expandTypedKwargsForFunction(functionType: FunctionType): Functi
     }
 
     return newFunction;
+}
+
+export function setConstraintsForFreeTypeVarsInType(
+    destType: Type,
+    srcType: UnknownType | AnyType,
+    constraints: ConstraintTracker
+) {
+    const typeVars = getTypeVarArgsRecursive(destType);
+    typeVars.forEach((typeVar) => {
+        if (!TypeVarType.isBound(typeVar) && !constraints.getMainConstraintSet().getTypeVar(typeVar)) {
+            if (!isParamSpec(srcType) && !isTypeVarTuple(srcType)) {
+                constraints.setBounds(typeVar, srcType);
+            }
+        }
+    });
 }
