@@ -14921,33 +14921,7 @@ export function createTypeEvaluator(
         errorNode: ExpressionNode,
         typeArgs: TypeResultWithNode[] | undefined
     ): Type {
-        if (!typeArgs || typeArgs.length === 0) {
-            return ClassType.specialize(classType, [UnknownType.create()]);
-        }
-
-        if (typeArgs.length > 1) {
-            addDiagnostic(
-                DiagnosticRule.reportInvalidTypeForm,
-                LocMessage.typeArgsTooMany().format({
-                    name: classType.priv.aliasName || classType.shared.name,
-                    expected: 1,
-                    received: typeArgs.length,
-                }),
-                typeArgs[1].node
-            );
-            return UnknownType.create();
-        }
-
-        const convertedTypeArgs = typeArgs.map((typeArg) => {
-            return convertToInstance(validateTypeArg(typeArg) ? typeArg.type : UnknownType.create());
-        });
-        let resultType = ClassType.specialize(classType, convertedTypeArgs);
-
-        if (isTypeFormSupported(errorNode)) {
-            resultType = TypeBase.cloneWithTypeForm(resultType, convertToInstance(resultType));
-        }
-
-        return resultType;
+        return TypeEvaluatorCore.createTypeFormTypeFromArgs(classType, errorNode, typeArgs, addDiagnostic);
     }
 
     // Creates a "TypeGuard" and "TypeIs" type.
@@ -14957,31 +14931,7 @@ export function createTypeEvaluator(
         typeArgs: TypeResultWithNode[] | undefined,
         flags: EvalFlags
     ): Type {
-        // If no type arguments are provided, the resulting type
-        // depends on whether we're evaluating a type annotation or
-        // we're in some other context.
-        if (!typeArgs) {
-            if ((flags & EvalFlags.TypeExpression) !== 0) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.typeGuardArgCount(), errorNode);
-            }
-
-            return classType;
-        } else if (typeArgs.length !== 1) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.typeGuardArgCount(), errorNode);
-            return UnknownType.create();
-        }
-
-        const convertedTypeArgs = typeArgs.map((typeArg) => {
-            return convertToInstance(validateTypeArg(typeArg) ? typeArg.type : UnknownType.create());
-        });
-
-        let resultType = ClassType.specialize(classType, convertedTypeArgs);
-
-        if (isTypeFormSupported(errorNode)) {
-            resultType = TypeBase.cloneWithTypeForm(resultType, convertToInstance(resultType));
-        }
-
-        return resultType;
+        return TypeEvaluatorCore.createTypeGuardTypeFromArgs(classType, errorNode, typeArgs, flags, addDiagnostic);
     }
 
     function createSelfType(

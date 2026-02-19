@@ -1629,3 +1629,69 @@ export function createOptionalTypeFromArgs(
 
     return optionalType;
 }
+
+export function createTypeFormTypeFromArgs(
+    classType: ClassType,
+    errorNode: ExpressionNode,
+    typeArgs: TypeResultWithNode[] | undefined,
+    addDiagnosticFn: AddDiagnosticFn
+): Type {
+    if (!typeArgs || typeArgs.length === 0) {
+        return ClassType.specialize(classType, [UnknownType.create()]);
+    }
+
+    if (typeArgs.length > 1) {
+        addDiagnosticFn(
+            DiagnosticRule.reportInvalidTypeForm,
+            LocMessage.typeArgsTooMany().format({
+                name: classType.priv.aliasName || classType.shared.name,
+                expected: 1,
+                received: typeArgs.length,
+            }),
+            typeArgs[1].node
+        );
+        return UnknownType.create();
+    }
+
+    const convertedTypeArgs = typeArgs.map((typeArg) => {
+        return convertToInstance(validateTypeArgCheck(typeArg, addDiagnosticFn) ? typeArg.type : UnknownType.create());
+    });
+    let resultType = ClassType.specialize(classType, convertedTypeArgs);
+
+    if (isTypeFormSupportedForNode(errorNode)) {
+        resultType = TypeBase.cloneWithTypeForm(resultType, convertToInstance(resultType));
+    }
+
+    return resultType;
+}
+
+export function createTypeGuardTypeFromArgs(
+    classType: ClassType,
+    errorNode: ParseNode,
+    typeArgs: TypeResultWithNode[] | undefined,
+    flags: EvalFlags,
+    addDiagnosticFn: AddDiagnosticFn
+): Type {
+    if (!typeArgs) {
+        if ((flags & EvalFlags.TypeExpression) !== 0) {
+            addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.typeGuardArgCount(), errorNode);
+        }
+
+        return classType;
+    } else if (typeArgs.length !== 1) {
+        addDiagnosticFn(DiagnosticRule.reportInvalidTypeForm, LocMessage.typeGuardArgCount(), errorNode);
+        return UnknownType.create();
+    }
+
+    const convertedTypeArgs = typeArgs.map((typeArg) => {
+        return convertToInstance(validateTypeArgCheck(typeArg, addDiagnosticFn) ? typeArg.type : UnknownType.create());
+    });
+
+    let resultType = ClassType.specialize(classType, convertedTypeArgs);
+
+    if (isTypeFormSupportedForNode(errorNode)) {
+        resultType = TypeBase.cloneWithTypeForm(resultType, convertToInstance(resultType));
+    }
+
+    return resultType;
+}
