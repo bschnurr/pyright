@@ -735,7 +735,7 @@ export interface TypeEvaluator {
     ) => TupleTypeArg[];
     markNamesAccessed: (node: ParseNode, names: string[]) => void;
     expandPromotionTypes: (node: ParseNode, type: Type) => Type;
-    makeTopLevelTypeVarsConcrete: (type: Type, makeParamSpecsConcrete?: boolean) => Type;
+    makeTopLevelTypeVarsConcrete: (type: Type, makeParamSpecsConcrete?: boolean, conditionFilter?: TypeCondition[]) => Type;
     mapSubtypesExpandTypeVars: (
         type: Type,
         options: MapSubtypesOptions | undefined,
@@ -748,7 +748,7 @@ export interface TypeEvaluator {
         honorCodeFlow: boolean,
         preferGlobalScope?: boolean
     ) => SymbolWithScope | undefined;
-    getDeclaredTypeOfSymbol: (symbol: Symbol) => DeclaredSymbolTypeInfo;
+    getDeclaredTypeOfSymbol: (symbol: Symbol, usageNode?: NameNode) => DeclaredSymbolTypeInfo;
     getEffectiveTypeOfSymbol: (symbol: Symbol) => Type;
     getEffectiveTypeOfSymbolForUsage: (
         symbol: Symbol,
