@@ -741,7 +741,7 @@ export interface TypeEvaluator {
         options: MapSubtypesOptions | undefined,
         callback: (expandedSubtype: Type, unexpandedSubtype: Type) => Type | undefined
     ) => Type;
-    isTypeSubsumedByOtherType: (type: Type, otherType: Type, allowAnyToSubsume: boolean) => boolean;
+    isTypeSubsumedByOtherType: (type: Type, otherType: Type, allowAnyToSubsume: boolean, recursionCount?: number) => boolean;
     lookUpSymbolRecursive: (
         node: ParseNode,
         name: string,
