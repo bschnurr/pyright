@@ -22617,23 +22617,7 @@ export function createTypeEvaluator(
     // Determines whether the set of declarations includes a variable declaration
     // that is not part of a typing.pyi or typingExtensions.pyi file.
     function includesVariableTypeDecl(decls: Declaration[]): boolean {
-        return decls.some((decl) => {
-            if (decl.type === DeclarationType.Variable) {
-                // Exempt typing.pyi and typingExtensions.pyi, which use variables to
-                // define some special forms.
-                const fileInfo = AnalyzerNodeInfo.getFileInfo(decl.node);
-
-                if (!fileInfo.isTypingStubFile && !fileInfo.isTypingExtensionsStubFile) {
-                    return true;
-                }
-            }
-
-            if (decl.type === DeclarationType.Param) {
-                return true;
-            }
-
-            return false;
-        });
+        return TypeEvaluatorCore.includesVariableTypeDeclCheck(decls);
     }
 
     function inferTypeOfSymbolForUsage(symbol: Symbol, usageNode?: NameNode, useLastDecl = false): EffectiveTypeResult {
@@ -27827,7 +27811,7 @@ export function createTypeEvaluator(
     }
 
     function isFinalVariableDeclaration(decl: Declaration): boolean {
-        return decl.type === DeclarationType.Variable && !!decl.isFinal;
+        return TypeEvaluatorCore.isFinalVariableDecl(decl);
     }
 
     function isExplicitTypeAliasDeclaration(decl: Declaration): boolean {
@@ -27862,49 +27846,7 @@ export function createTypeEvaluator(
     }
 
     function isLegalTypeAliasExpressionForm(node: ExpressionNode, allowStrLiteral: boolean): boolean {
-        switch (node.nodeType) {
-            case ParseNodeType.Error:
-            case ParseNodeType.UnaryOperation:
-            case ParseNodeType.AssignmentExpression:
-            case ParseNodeType.TypeAnnotation:
-            case ParseNodeType.Await:
-            case ParseNodeType.Ternary:
-            case ParseNodeType.Unpack:
-            case ParseNodeType.Tuple:
-            case ParseNodeType.Call:
-            case ParseNodeType.Comprehension:
-            case ParseNodeType.Slice:
-            case ParseNodeType.Yield:
-            case ParseNodeType.YieldFrom:
-            case ParseNodeType.Lambda:
-            case ParseNodeType.Number:
-            case ParseNodeType.Dictionary:
-            case ParseNodeType.List:
-            case ParseNodeType.Set:
-                return false;
-
-            case ParseNodeType.StringList:
-            case ParseNodeType.String:
-                return allowStrLiteral;
-
-            case ParseNodeType.Constant:
-                return node.d.constType === KeywordType.None;
-
-            case ParseNodeType.BinaryOperation:
-                return (
-                    node.d.operator === OperatorType.BitwiseOr &&
-                    isLegalTypeAliasExpressionForm(node.d.leftExpr, /* allowStrLiteral */ true) &&
-                    isLegalTypeAliasExpressionForm(node.d.rightExpr, /* allowStrLiteral */ true)
-                );
-
-            case ParseNodeType.Index:
-                return isLegalTypeAliasExpressionForm(node.d.leftExpr, allowStrLiteral);
-
-            case ParseNodeType.MemberAccess:
-                return isLegalTypeAliasExpressionForm(node.d.leftExpr, allowStrLiteral);
-        }
-
-        return true;
+        return TypeEvaluatorCore.isLegalTypeAliasExprForm(node, allowStrLiteral);
     }
 
     function isLegalImplicitTypeAliasType(type: Type) {

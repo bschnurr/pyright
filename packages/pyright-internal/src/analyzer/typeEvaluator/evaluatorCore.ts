@@ -6,11 +6,13 @@
  * Small extraction helpers for type evaluator core behavior.
  */
 
-import { ImportFromAsNode, NameNode, ParseNode, ParseNodeType } from '../../parser/parseNodes';
+import { ExpressionNode, ImportFromAsNode, NameNode, ParseNode, ParseNodeType } from '../../parser/parseNodes';
+import { KeywordType, OperatorType } from '../../parser/tokenizerTypes';
 import { TextRange } from '../../common/textRange';
 import { TextRangeCollection } from '../../common/textRangeCollection';
 import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
+import { Declaration, DeclarationType } from '../declaration';
 
 export interface ReturnTypeInferenceContextFrame {
     functionNode: ParseNode;
@@ -189,4 +191,71 @@ export function getAliasFromImportNode(node: NameNode): NameNode | undefined {
 export function isTypeFormSupportedForNode(node: ParseNode) {
     const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
     return fileInfo.diagnosticRuleSet.enableExperimentalFeatures;
+}
+
+export function isFinalVariableDecl(decl: Declaration): boolean {
+    return decl.type === DeclarationType.Variable && !!decl.isFinal;
+}
+
+export function includesVariableTypeDeclCheck(decls: Declaration[]): boolean {
+    return decls.some((decl) => {
+        if (decl.type === DeclarationType.Variable) {
+            const fileInfo = AnalyzerNodeInfo.getFileInfo(decl.node);
+            if (!fileInfo.isTypingStubFile && !fileInfo.isTypingExtensionsStubFile) {
+                return true;
+            }
+        }
+
+        if (decl.type === DeclarationType.Param) {
+            return true;
+        }
+
+        return false;
+    });
+}
+
+export function isLegalTypeAliasExprForm(node: ExpressionNode, allowStrLiteral: boolean): boolean {
+    switch (node.nodeType) {
+        case ParseNodeType.Error:
+        case ParseNodeType.UnaryOperation:
+        case ParseNodeType.AssignmentExpression:
+        case ParseNodeType.TypeAnnotation:
+        case ParseNodeType.Await:
+        case ParseNodeType.Ternary:
+        case ParseNodeType.Unpack:
+        case ParseNodeType.Tuple:
+        case ParseNodeType.Call:
+        case ParseNodeType.Comprehension:
+        case ParseNodeType.Slice:
+        case ParseNodeType.Yield:
+        case ParseNodeType.YieldFrom:
+        case ParseNodeType.Lambda:
+        case ParseNodeType.Number:
+        case ParseNodeType.Dictionary:
+        case ParseNodeType.List:
+        case ParseNodeType.Set:
+            return false;
+
+        case ParseNodeType.StringList:
+        case ParseNodeType.String:
+            return allowStrLiteral;
+
+        case ParseNodeType.Constant:
+            return node.d.constType === KeywordType.None;
+
+        case ParseNodeType.BinaryOperation:
+            return (
+                node.d.operator === OperatorType.BitwiseOr &&
+                isLegalTypeAliasExprForm(node.d.leftExpr, /* allowStrLiteral */ true) &&
+                isLegalTypeAliasExprForm(node.d.rightExpr, /* allowStrLiteral */ true)
+            );
+
+        case ParseNodeType.Index:
+            return isLegalTypeAliasExprForm(node.d.leftExpr, allowStrLiteral);
+
+        case ParseNodeType.MemberAccess:
+            return isLegalTypeAliasExprForm(node.d.leftExpr, allowStrLiteral);
+    }
+
+    return true;
 }
