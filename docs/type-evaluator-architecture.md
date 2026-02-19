@@ -84,8 +84,8 @@ This module accepts a `DiagnosticsContext` so it can operate without importing t
 - `expressionVisitors.ts` — per-expression-node handling (Name, Attribute, Call, Await, ...)
 - `statementVisitors.ts` — per-statement handling (assignment, if, match, try, loops)
 - `patternMatching.ts` — evaluator glue around existing `analyzer/patternMatching.ts`
-- `typeEvaluatorAPI.ts` — centralized construction of the exported `TypeEvaluator` object
-- `typeEvaluatorIndex.ts` — wiring / factory entry that builds the evaluator from all components
+- `typeEvaluatorIndex.ts` — factory/build + exports (entry point; can merge with API if both become wiring)
+- `typeEvaluatorAPI.ts` — public interface type + thin wrapper (optional; merge into Index if redundant)
 
 ### Recommended extraction order
 
@@ -94,7 +94,92 @@ This module accepts a `DiagnosticsContext` so it can operate without importing t
 3. `expressionVisitors.ts` (node-specific expression handlers, preserving `EvalFlags` behavior)
 4. `statementVisitors.ts` (statement evaluators and assignment/delete pathways)
 5. `patternMatching.ts` (glue around `analyzer/patternMatching.ts`)
-6. `typeEvaluatorAPI.ts` then `typeEvaluatorIndex.ts` (final API assembly and wiring split)
+6. `typeEvaluatorIndex.ts` (final factory assembly and exports)
+
+### Intended dependency diagram
+
+```
+typeEvaluatorIndex.ts  (factory / entry point)
+  └── typeEvaluator.ts  (closure: state, caches, core dispatch)
+        ├── evaluatorCore.ts       (extracted helpers, no state ownership)
+        ├── expressionVisitors.ts  (calls core, never calls other visitors)
+        ├── statementVisitors.ts   (calls core, never calls other visitors)
+        ├── symbolScope.ts         (calls core for state, pure lookups)
+        ├── narrowing.ts           (library: called BY core, never calls back into visitors)
+        ├── flowAnalysis.ts        (library: called BY core, delegates to codeFlowEngine)
+        ├── patternMatching.ts     (library: called BY core)
+        └── diagnostics.ts         (library: accepts DiagnosticsContext)
+```
+
+**Rules to prevent cycles:**
+- Visitors call core methods, **not each other directly**.
+- `narrowing` and `flowAnalysis` are "libraries" called by core — they never call back into visitors.
+- If callbacks are needed, use a tiny interface with a fixed set of functions, not a big dependency bag.
+- All state (caches, scope, config, recursion guards, speculative contexts) stays in `typeEvaluator.ts` (the closure) or a single `context.ts` — never split across multiple modules.
+
+## V8 / performance guardrails
+
+These constraints apply to any deeper refactoring beyond the current Phase 4 extractions.
+
+### 1. Keep hot dispatch as switch statements
+
+`getTypeOfExpressionCore` uses a big `switch (node.nodeType)`. **Keep it as a switch** — do NOT
+convert to a megamorphic handler map (`{ [kind]: fn }`) which creates polymorphic call sites in V8.
+
+```ts
+// GOOD: static dispatch, monomorphic call sites
+switch (node.nodeType) {
+    case ParseNodeType.Name: return getTypeOfName(node);
+    case ParseNodeType.Call: return getTypeOfCall(node);
+    ...
+}
+
+// BAD: megamorphic, polymorphic call sites
+const handlers = { [ParseNodeType.Name]: getTypeOfName, ... };
+return handlers[node.nodeType](node);  // V8 can't optimize this
+```
+
+Even if `getTypeOfName` lives in `expressionVisitors.ts`, the dispatch switch must call it
+directly. The 5–10 most common expression cases (Name, Attribute, Call, MemberAccess, Index,
+Await) must remain monomorphic call sites.
+
+### 2. Avoid "component object soup"
+
+Do NOT create lots of "bags of functions" passed around as loosely-typed dependency objects —
+this causes shape churn in V8's hidden classes.
+
+```ts
+// BAD: shape churn, new object per call
+visitExpression(node, { getType, assignType, addDiag, printType, ... });
+
+// GOOD: single stable object, constructed once
+const evaluator = createTypeEvaluator(importLookup, ...);
+// Pass 'evaluator' (or 'this') everywhere — one stable shape
+```
+
+Construct **one stable evaluator object** with all fields initialized once. Pass around a single
+`ctx` object (or `this`) rather than multiple loosely-typed dependency objects.
+
+### 3. Keep state & caches centralized
+
+All evaluator state (caches, scope, config flags, recursion guards, speculative contexts) must live
+in one place. Do NOT split state across 9 modules where each owns partial state and cross-calls
+with "options objects."
+
+The current closure variables (`writeTypeCache`, `readTypeCache`, `speculativeTypeTracker`,
+`symbolResolutionStack`, etc.) enforce this naturally. A class-based refactor must preserve this
+centralization.
+
+### 4. Hot-path allocation guardrails
+
+- Avoid allocating closures or arrays in tight loops (especially in `doForEachSubtype`,
+  `mapSubtypes`, `assignType` recursion).
+- Avoid handler maps/dictionaries for dispatch in hot code — use `switch` statements.
+- Keep call sites monomorphic: call functions directly, don't route through generic dispatchers.
+- When re-checking hotspots after deeper extraction, the usual suspects to "keep close" are:
+  - `getTypeOfExpressionCore` + the 5–10 most common expression cases
+  - Narrowing entrypoints used constantly during expression typing
+  - Union combine/simplify helpers if they're hammered
 
 ### Verification gate for each extraction slice
 
