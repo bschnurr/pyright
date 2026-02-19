@@ -14726,153 +14726,7 @@ export function createTypeEvaluator(
         typeArgs: TypeResultWithNode[] | undefined,
         errorNode: ParseNode
     ): FunctionType {
-        let functionType = FunctionType.createInstantiable(FunctionTypeFlags.None);
-        let paramSpec: ParamSpecType | undefined;
-        let isValidTypeForm = true;
-
-        TypeBase.setSpecialForm(functionType, ClassType.cloneAsInstance(classType));
-        functionType.shared.declaredReturnType = UnknownType.create();
-        functionType.shared.typeVarScopeId = ParseTreeUtils.getScopeIdForNode(errorNode);
-
-        if (typeArgs && typeArgs.length > 0) {
-            functionType.priv.isCallableWithTypeArgs = true;
-
-            if (typeArgs[0].typeList) {
-                const typeList = typeArgs[0].typeList;
-                let sawUnpacked = false;
-                let reportedUnpackedError = false;
-                const noteSawUnpacked = (entry: TypeResultWithNode) => {
-                    // Make sure we have at most one unpacked TypeVarTuple.
-                    if (sawUnpacked) {
-                        if (!reportedUnpackedError) {
-                            addDiagnostic(
-                                DiagnosticRule.reportInvalidTypeForm,
-                                LocMessage.variadicTypeArgsTooMany(),
-                                entry.node
-                            );
-                            reportedUnpackedError = true;
-                            isValidTypeForm = false;
-                        }
-                    }
-                    sawUnpacked = true;
-                };
-
-                typeList.forEach((entry, index) => {
-                    let entryType = entry.type;
-                    let paramCategory: ParamCategory = ParamCategory.Simple;
-                    const paramName = `__p${index.toString()}`;
-
-                    if (isTypeVarTuple(entryType)) {
-                        validateTypeVarTupleIsUnpacked(entryType, entry.node);
-                        paramCategory = ParamCategory.ArgsList;
-                        noteSawUnpacked(entry);
-                    } else if (validateTypeArg(entry, { allowUnpackedTuples: true })) {
-                        if (isUnpackedClass(entryType)) {
-                            paramCategory = ParamCategory.ArgsList;
-
-                            if (
-                                entryType.priv.tupleTypeArgs?.some(
-                                    (typeArg) => isTypeVarTuple(typeArg.type) || typeArg.isUnbounded
-                                )
-                            ) {
-                                noteSawUnpacked(entry);
-                            }
-                        }
-                    } else {
-                        entryType = UnknownType.create();
-                    }
-
-                    FunctionType.addParam(
-                        functionType,
-                        FunctionParam.create(
-                            paramCategory,
-                            convertToInstance(entryType),
-                            FunctionParamFlags.NameSynthesized | FunctionParamFlags.TypeDeclared,
-                            paramName
-                        )
-                    );
-                });
-
-                if (typeList.length > 0) {
-                    FunctionType.addPositionOnlyParamSeparator(functionType);
-                }
-            } else if (isEllipsisType(typeArgs[0].type)) {
-                FunctionType.addDefaultParams(functionType);
-                functionType.shared.flags |= FunctionTypeFlags.GradualCallableForm;
-            } else if (isParamSpec(typeArgs[0].type)) {
-                paramSpec = typeArgs[0].type;
-            } else {
-                if (isInstantiableClass(typeArgs[0].type) && ClassType.isBuiltIn(typeArgs[0].type, 'Concatenate')) {
-                    const concatTypeArgs = typeArgs[0].type.priv.typeArgs;
-                    if (concatTypeArgs && concatTypeArgs.length > 0) {
-                        concatTypeArgs.forEach((typeArg, index) => {
-                            if (index === concatTypeArgs.length - 1) {
-                                FunctionType.addPositionOnlyParamSeparator(functionType);
-
-                                if (isParamSpec(typeArg)) {
-                                    paramSpec = typeArg;
-                                } else if (isEllipsisType(typeArg)) {
-                                    FunctionType.addDefaultParams(functionType);
-                                    functionType.shared.flags |= FunctionTypeFlags.GradualCallableForm;
-                                }
-                            } else {
-                                FunctionType.addParam(
-                                    functionType,
-                                    FunctionParam.create(
-                                        ParamCategory.Simple,
-                                        typeArg,
-                                        FunctionParamFlags.NameSynthesized | FunctionParamFlags.TypeDeclared,
-                                        `__p${index}`
-                                    )
-                                );
-                            }
-                        });
-                    }
-                } else {
-                    addDiagnostic(
-                        DiagnosticRule.reportInvalidTypeForm,
-                        LocMessage.callableFirstArg(),
-                        typeArgs[0].node
-                    );
-                    isValidTypeForm = false;
-                }
-            }
-
-            if (typeArgs.length > 1) {
-                let typeArg1Type = typeArgs[1].type;
-                if (!validateTypeArg(typeArgs[1])) {
-                    typeArg1Type = UnknownType.create();
-                }
-                functionType.shared.declaredReturnType = convertToInstance(typeArg1Type);
-            } else {
-                addDiagnostic(DiagnosticRule.reportMissingTypeArgument, LocMessage.callableSecondArg(), errorNode);
-
-                functionType.shared.declaredReturnType = UnknownType.create();
-                isValidTypeForm = false;
-            }
-
-            if (typeArgs.length > 2) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.callableExtraArgs(), typeArgs[2].node);
-                isValidTypeForm = false;
-            }
-        } else {
-            FunctionType.addDefaultParams(functionType, /* useUnknown */ true);
-            functionType.shared.flags |= FunctionTypeFlags.GradualCallableForm;
-
-            if (typeArgs && typeArgs.length === 0) {
-                isValidTypeForm = false;
-            }
-        }
-
-        if (paramSpec) {
-            FunctionType.addParamSpecVariadics(functionType, convertToInstance(paramSpec));
-        }
-
-        if (isTypeFormSupported(errorNode) && isValidTypeForm) {
-            functionType = TypeBase.cloneWithTypeForm(functionType, convertToInstance(functionType));
-        }
-
-        return functionType;
+        return TypeEvaluatorCore.createCallableTypeFromArgs(classType, typeArgs, errorNode, addDiagnostic);
     }
 
     // Creates an Optional[X] type.
@@ -14882,45 +14736,7 @@ export function createTypeEvaluator(
         typeArgs: TypeResultWithNode[] | undefined,
         flags: EvalFlags
     ): Type {
-        if (!typeArgs) {
-            // If no type arguments are provided, the resulting type
-            // depends on whether we're evaluating a type annotation or
-            // we're in some other context.
-            if ((flags & EvalFlags.TypeExpression) !== 0) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.optionalExtraArgs(), errorNode);
-                return UnknownType.create();
-            }
-
-            return classType;
-        }
-
-        if (typeArgs.length !== 1) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.optionalExtraArgs(), errorNode);
-            return UnknownType.create();
-        }
-
-        let typeArg0Type = typeArgs[0].type;
-        if (!validateTypeArg(typeArgs[0])) {
-            typeArg0Type = UnknownType.create();
-        }
-
-        let optionalType = combineTypes([typeArg0Type, prefetched?.noneTypeClass ?? UnknownType.create()]);
-        if (prefetched?.unionTypeClass && isInstantiableClass(prefetched.unionTypeClass)) {
-            optionalType = TypeBase.cloneAsSpecialForm(
-                optionalType,
-                ClassType.cloneAsInstance(prefetched.unionTypeClass)
-            );
-        }
-
-        if (typeArg0Type.props?.typeForm) {
-            const typeFormType = combineTypes([
-                typeArg0Type.props.typeForm,
-                convertToInstance(prefetched?.noneTypeClass ?? UnknownType.create()),
-            ]);
-            optionalType = TypeBase.cloneWithTypeForm(optionalType, typeFormType);
-        }
-
-        return optionalType;
+        return TypeEvaluatorCore.createOptionalTypeFromArgs(classType, errorNode, typeArgs, flags, prefetched, addDiagnostic);
     }
 
     function cloneBuiltinObjectWithLiteral(node: ParseNode, builtInName: string, value: LiteralValue): Type {
@@ -15392,62 +15208,18 @@ export function createTypeEvaluator(
         typeArgs: TypeResultWithNode[] | undefined,
         flags: EvalFlags
     ): TypeResult {
-        let type: Type | undefined;
-
-        const typeExprFlags = EvalFlags.TypeExpression | EvalFlags.NoConvertSpecialForm;
-        if ((flags & typeExprFlags) === 0) {
-            type = ClassType.cloneAsInstance(classType);
-
-            if (typeArgs && typeArgs.length >= 1 && typeArgs[0].type.props?.typeForm) {
-                type = TypeBase.cloneWithTypeForm(type, typeArgs[0].type.props.typeForm);
-            }
-
-            return { type };
-        }
-
-        if (typeArgs && typeArgs.length > 0) {
-            type = typeArgs[0].type;
-
-            if (typeArgs.length < 2) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.annotatedTypeArgMissing(), errorNode);
-            } else {
-                type = validateAnnotatedMetadata(errorNode, typeArgs[0].type, typeArgs.slice(1));
-            }
-        }
-
-        if (!type || !typeArgs || typeArgs.length === 0) {
-            return { type: AnyType.create() };
-        }
-
-        if (typeArgs[0].typeList) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.typeArgListNotAllowed(), typeArgs[0].node);
-        }
-
-        return {
-            type: TypeBase.cloneAsSpecialForm(type, ClassType.cloneAsInstance(classType)),
-            isReadOnly: typeArgs[0].isReadOnly,
-            isRequired: typeArgs[0].isRequired,
-            isNotRequired: typeArgs[0].isNotRequired,
-        };
+        return TypeEvaluatorCore.createAnnotatedTypeFromArgs(classType, errorNode, typeArgs, flags, addDiagnostic);
     }
 
-    // Enforces metadata consistency as specified in PEP 746.
     function validateAnnotatedMetadata(
         errorNode: ExpressionNode,
         baseType: Type,
         metaArgs: TypeResultWithNode[]
     ): Type {
-        for (const metaArg of metaArgs) {
-            validateTypeMetadata(errorNode, baseType, metaArg);
-        }
-
-        return baseType;
+        return TypeEvaluatorCore.validateAnnotatedMetadataCheck(errorNode, baseType, metaArgs);
     }
 
-    // Determines whether the metadata object is compatible with the base type.
     function validateTypeMetadata(errorNode: ExpressionNode, baseType: Type, metaArg: TypeResultWithNode): boolean {
-        // This function was added for draft PEP 746, but the functionality
-        // has been removed for now while the PEP is being revised.
         return true;
     }
 
