@@ -2946,40 +2946,35 @@ export function createTypeEvaluator(
     }
 
     function getTypedDictClassType(): ClassType | undefined {
-        return prefetched?.typedDictPrivateClass && isInstantiableClass(prefetched.typedDictPrivateClass)
-            ? prefetched.typedDictPrivateClass
-            : undefined;
+        return TypeEvaluatorCore.getTypedDictClassTypeFromPrefetched(prefetched);
     }
 
     function getTupleClassType(): ClassType | undefined {
-        return prefetched?.tupleClass && isInstantiableClass(prefetched.tupleClass) ? prefetched.tupleClass : undefined;
+        return TypeEvaluatorCore.getTupleClassTypeFromPrefetched(prefetched);
     }
 
     function getDictClassType(): ClassType | undefined {
-        return prefetched?.dictClass && isInstantiableClass(prefetched.dictClass) ? prefetched.dictClass : undefined;
+        return TypeEvaluatorCore.getDictClassTypeFromPrefetched(prefetched);
     }
 
     function getStrClassType(): ClassType | undefined {
-        return prefetched?.strClass && isInstantiableClass(prefetched.strClass) ? prefetched.strClass : undefined;
+        return TypeEvaluatorCore.getStrClassTypeFromPrefetched(prefetched);
     }
 
     function getObjectType(): Type {
-        return prefetched?.objectClass ? convertToInstance(prefetched.objectClass) : UnknownType.create();
+        return TypeEvaluatorCore.getObjectTypeFromPrefetched(prefetched);
     }
 
     function getNoneType(): Type {
-        return prefetched?.noneTypeClass ? convertToInstance(prefetched.noneTypeClass) : UnknownType.create();
+        return TypeEvaluatorCore.getNoneTypeFromPrefetched(prefetched);
     }
 
     function getUnionClassType(): Type {
-        return prefetched?.unionTypeClass ?? UnknownType.create();
+        return TypeEvaluatorCore.getUnionClassTypeFromPrefetched(prefetched);
     }
 
     function getTypeClassType(): ClassType | undefined {
-        if (prefetched?.typeClass && isInstantiableClass(prefetched.typeClass)) {
-            return prefetched.typeClass;
-        }
-        return undefined;
+        return TypeEvaluatorCore.getTypeClassTypeFromPrefetched(prefetched);
     }
 
     function getTypingType(node: ParseNode, symbolName: string): Type | undefined {

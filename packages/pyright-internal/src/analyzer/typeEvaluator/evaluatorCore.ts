@@ -14,10 +14,10 @@ import { assert } from '../../common/debug';
 import { convertOffsetsToRange } from '../../common/positionUtils';
 import * as AnalyzerNodeInfo from '../analyzerNodeInfo';
 import { Declaration, DeclarationType } from '../declaration';
-import { ArgWithExpression, AssignTypeFlags, EvaluatorUsage } from '../typeEvaluatorTypes';
+import { ArgWithExpression, AssignTypeFlags, EvaluatorUsage, PrefetchedTypes } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { ClassType, FunctionParam, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnknown, Type, TypeBase, TypeVarType } from '../types';
-import { doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, lookUpClassMember } from '../typeUtils';
+import { ClassType, FunctionParam, FunctionType, isClass, isClassInstance, isFunction, isInstantiableClass, isParamSpec, isTypeVar, isTypeSame, isTypeVarTuple, isUnknown, Type, TypeBase, TypeVarType, UnknownType } from '../types';
+import { convertToInstance, doForEachSubtype, getTypeVarArgsRecursive, isEllipsisType, isNoneInstance, isSentinelLiteral, isTupleClass, isTypeAliasPlaceholder, lookUpClassMember } from '../typeUtils';
 import { getParamListDetails } from '../parameterUtils';
 
 export interface ReturnTypeInferenceContextFrame {
@@ -525,5 +525,44 @@ export function getDeclarationFromKeywordParamForFunction(
         }
     }
 
+    return undefined;
+}
+
+// --- Prefetched type accessors (Phase 3: context-injected) ---
+
+export function getTypedDictClassTypeFromPrefetched(prefetched: Partial<PrefetchedTypes> | undefined): ClassType | undefined {
+    return prefetched?.typedDictPrivateClass && isInstantiableClass(prefetched.typedDictPrivateClass)
+        ? prefetched.typedDictPrivateClass
+        : undefined;
+}
+
+export function getTupleClassTypeFromPrefetched(prefetched: Partial<PrefetchedTypes> | undefined): ClassType | undefined {
+    return prefetched?.tupleClass && isInstantiableClass(prefetched.tupleClass) ? prefetched.tupleClass : undefined;
+}
+
+export function getDictClassTypeFromPrefetched(prefetched: Partial<PrefetchedTypes> | undefined): ClassType | undefined {
+    return prefetched?.dictClass && isInstantiableClass(prefetched.dictClass) ? prefetched.dictClass : undefined;
+}
+
+export function getStrClassTypeFromPrefetched(prefetched: Partial<PrefetchedTypes> | undefined): ClassType | undefined {
+    return prefetched?.strClass && isInstantiableClass(prefetched.strClass) ? prefetched.strClass : undefined;
+}
+
+export function getObjectTypeFromPrefetched(prefetched: Partial<PrefetchedTypes> | undefined): Type {
+    return prefetched?.objectClass ? convertToInstance(prefetched.objectClass) : UnknownType.create();
+}
+
+export function getNoneTypeFromPrefetched(prefetched: Partial<PrefetchedTypes> | undefined): Type {
+    return prefetched?.noneTypeClass ? convertToInstance(prefetched.noneTypeClass) : UnknownType.create();
+}
+
+export function getUnionClassTypeFromPrefetched(prefetched: Partial<PrefetchedTypes> | undefined): Type {
+    return prefetched?.unionTypeClass ?? UnknownType.create();
+}
+
+export function getTypeClassTypeFromPrefetched(prefetched: Partial<PrefetchedTypes> | undefined): ClassType | undefined {
+    if (prefetched?.typeClass && isInstantiableClass(prefetched.typeClass)) {
+        return prefetched.typeClass;
+    }
     return undefined;
 }
