@@ -187,6 +187,7 @@ import {
 } from './typedDicts';
 import * as TypeEvaluatorDiagnostics from './typeEvaluator/diagnostics';
 import * as TypeEvaluatorCore from './typeEvaluator/evaluatorCore';
+import * as CollectionInference from './typeEvaluator/collectionInference';
 import * as TypeEvaluatorFlowAnalysis from './typeEvaluator/flowAnalysis';
 import * as TypeEvaluatorNarrowing from './typeEvaluator/narrowing';
 import {
@@ -1484,7 +1485,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfStringList(node: StringListNode, flags: EvalFlags): TypeResult {
-        return TypeEvaluatorCore.getTypeOfStringListWithEvaluator(evaluatorInterface, node, flags, prefetched);
+        return CollectionInference.getTypeOfStringListWithEvaluator(evaluatorInterface, node, flags, prefetched);
     }
 
     function getTypeOfStringListAsType(node: StringListNode, flags: EvalFlags): TypeResult {
@@ -9666,7 +9667,7 @@ export function createTypeEvaluator(
         inferenceContext: InferenceContext,
         expectedDiagAddendum?: DiagnosticAddendum
     ): TypeResult | undefined {
-        return TypeEvaluatorCore.getTypeOfDictionaryWithContextWithEvaluator(
+        return CollectionInference.getTypeOfDictionaryWithContextWithEvaluator(
             evaluatorInterface, node, flags, inferenceContext, prefetched, expectedDiagAddendum
         );
     }
@@ -9674,7 +9675,7 @@ export function createTypeEvaluator(
     // Attempts to infer the type of a dictionary statement. If hasExpectedType
     // is true, strict inference is used for the subexpressions.
     function getTypeOfDictionaryInferred(node: DictionaryNode, flags: EvalFlags, hasExpectedType: boolean): TypeResult {
-        return TypeEvaluatorCore.getTypeOfDictionaryInferredWithEvaluator(evaluatorInterface, node, flags, hasExpectedType, prefetched);
+        return CollectionInference.getTypeOfDictionaryInferredWithEvaluator(evaluatorInterface, node, flags, hasExpectedType, prefetched);
     }
 
     function getKeyAndValueTypesFromDictionary(
@@ -9689,7 +9690,7 @@ export function createTypeEvaluator(
         expectedTypedDictEntries?: TypedDictEntries,
         expectedDiagAddendum?: DiagnosticAddendum
     ): TypeResult {
-        return TypeEvaluatorCore.getKeyAndValueTypesFromDictionaryWithEvaluator(
+        return CollectionInference.getKeyAndValueTypesFromDictionaryWithEvaluator(
             evaluatorInterface,
             node,
             flags,
@@ -10075,7 +10076,7 @@ export function createTypeEvaluator(
         flags: EvalFlags,
         inferenceContext?: InferenceContext
     ): TypeResult {
-        return TypeEvaluatorCore.getTypeOfComprehensionWithEvaluator(evaluatorInterface, node, flags, inferenceContext);
+        return CollectionInference.getTypeOfComprehensionWithEvaluator(evaluatorInterface, node, flags, inferenceContext);
     }
 
     function reportPossibleUnknownAssignment(
