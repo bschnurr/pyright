@@ -191,6 +191,7 @@ import * as CollectionInference from './typeEvaluator/collectionInference';
 import * as AssignFunctions from './typeEvaluator/assignFunctions';
 import * as OverrideValidation from './typeEvaluator/overrideValidation';
 import * as ExpressionEval from './typeEvaluator/expressionEvaluation';
+import * as TypeVarHandling from './typeEvaluator/typeVarHandling';
 import * as TypeEvaluatorFlowAnalysis from './typeEvaluator/flowAnalysis';
 import * as TypeEvaluatorNarrowing from './typeEvaluator/narrowing';
 import {
@@ -1916,7 +1917,7 @@ export function createTypeEvaluator(
     // If the function includes a `**kwargs: Unpack[TypedDict]` parameter, the
     // parameter is expanded to include individual keyword args.
     function expandTypedKwargs(functionType: FunctionType): FunctionType {
-        return TypeEvaluatorCore.expandTypedKwargsForFunction(functionType);
+        return TypeVarHandling.expandTypedKwargsForFunction(functionType);
     }
 
     // Determines whether the specified expression is an explicit TypeAlias declaration.
@@ -2662,7 +2663,7 @@ export function createTypeEvaluator(
 
     // If the type includes promotion types, expand these to their constituent types.
     function expandPromotionTypes(node: ParseNode, type: Type, excludeBytes = false): Type {
-        return TypeEvaluatorCore.expandPromotionTypesWithEvaluator(evaluatorInterface, node, type, excludeBytes);
+        return TypeVarHandling.expandPromotionTypesWithEvaluator(evaluatorInterface, node, type, excludeBytes);
     }
 
     // Replaces all of the top-level TypeVars (as opposed to TypeVars
@@ -2674,7 +2675,7 @@ export function createTypeEvaluator(
         makeParamSpecsConcrete = false,
         conditionFilter?: TypeCondition[]
     ): Type {
-        return TypeEvaluatorCore.makeTopLevelTypeVarsConcreteWithPrefetched(
+        return TypeVarHandling.makeTopLevelTypeVarsConcreteWithPrefetched(
             type, prefetched, evaluatorInterface, makeParamSpecsConcrete, conditionFilter
         );
     }
@@ -2691,7 +2692,7 @@ export function createTypeEvaluator(
         callback: (expandedSubtype: Type, unexpandedSubtype: Type, isLastIteration: boolean) => Type | undefined,
         recursionCount = 0
     ): Type {
-        return TypeEvaluatorCore.mapSubtypesExpandTypeVarsWithEvaluator(evaluatorInterface, type, options, callback, recursionCount);
+        return TypeVarHandling.mapSubtypesExpandTypeVarsWithEvaluator(evaluatorInterface, type, options, callback, recursionCount);
     }
 
     function applyConditionFilterToType(
@@ -3146,7 +3147,7 @@ export function createTypeEvaluator(
     }
 
     function addTypeFormForSymbol(node: ExpressionNode, type: Type, flags: EvalFlags, includesVarDecl: boolean): Type {
-        return TypeEvaluatorCore.addTypeFormForSymbolWithEvaluator(evaluatorInterface, node, type, flags, includesVarDecl);
+        return TypeVarHandling.addTypeFormForSymbolWithEvaluator(evaluatorInterface, node, type, flags, includesVarDecl);
     }
 
     function isSymbolValidTypeExpression(type: Type, includesVarDecl: boolean): boolean {
@@ -5525,7 +5526,7 @@ export function createTypeEvaluator(
     // it can be important in cases where the type alias is used to specify
     // a base class in a class definition.
     function inferVarianceForTypeAlias(type: Type): Variance[] | undefined {
-        return TypeEvaluatorCore.inferVarianceForTypeAliasWithEvaluator(type, evaluatorInterface);
+        return TypeVarHandling.inferVarianceForTypeAliasWithEvaluator(type, evaluatorInterface);
     }
 
     function getIndexAccessMagicMethodName(usage: EvaluatorUsage): string {
@@ -6516,7 +6517,7 @@ export function createTypeEvaluator(
         contextFreeArgTypes: Type[],
         expandedArgTypes: (Type | undefined)[][]
     ): (Type | undefined)[][] | undefined {
-        return TypeEvaluatorCore.expandArgTypesWithEvaluator(evaluatorInterface, contextFreeArgTypes, expandedArgTypes);
+        return TypeVarHandling.expandArgTypesWithEvaluator(evaluatorInterface, contextFreeArgTypes, expandedArgTypes);
     }
 
     function expandArgType(type: Type): Type[] | undefined {
@@ -7236,7 +7237,7 @@ export function createTypeEvaluator(
 
     // Expands any unpacked tuples within an argument list.
     function expandArgList(argList: Arg[]): Arg[] {
-        return TypeEvaluatorCore.expandArgListWithEvaluator(evaluatorInterface, argList, prefetched);
+        return TypeVarHandling.expandArgListWithEvaluator(evaluatorInterface, argList, prefetched);
     }
 
     // Matches the arguments passed to a function to the corresponding parameters in that
@@ -8750,7 +8751,7 @@ export function createTypeEvaluator(
     // we'll treat these as though they're scoped to the callable and leave them
     // unsolved.
     function getUnknownExemptTypeVarsForReturnType(functionType: FunctionType, returnType: Type): TypeVarType[] {
-        return TypeEvaluatorCore.getUnknownExemptTypeVarsForReturnTypeCheck(functionType, returnType);
+        return TypeVarHandling.getUnknownExemptTypeVarsForReturnTypeCheck(functionType, returnType);
     }
 
     // If the return type includes a generic Callable type, set the type var
@@ -9271,7 +9272,7 @@ export function createTypeEvaluator(
     }
 
     function createTypeVarType(errorNode: ExpressionNode, classType: ClassType, argList: Arg[]): Type | undefined {
-        return TypeEvaluatorCore.createTypeVarTypeWithEvaluator(evaluatorInterface, errorNode, classType, argList);
+        return TypeVarHandling.createTypeVarTypeWithEvaluator(evaluatorInterface, errorNode, classType, argList);
     }
 
     function verifyTypeVarDefaultIsCompatible(typeVar: TypeVarType, defaultValueNode: ExpressionNode) {
@@ -9279,7 +9280,7 @@ export function createTypeEvaluator(
     }
 
     function createTypeVarTupleType(errorNode: ExpressionNode, classType: ClassType, argList: Arg[]): Type | undefined {
-        return TypeEvaluatorCore.createTypeVarTupleTypeWithEvaluator(evaluatorInterface, errorNode, classType, argList, prefetched);
+        return TypeVarHandling.createTypeVarTupleTypeWithEvaluator(evaluatorInterface, errorNode, classType, argList, prefetched);
     }
 
     function getTypeVarTupleDefaultType(node: ExpressionNode, isPep695Syntax: boolean): Type | undefined {
@@ -10846,7 +10847,7 @@ export function createTypeEvaluator(
     }
 
     function getPseudoGenericTypeVarName(paramName: string) {
-        return TypeEvaluatorCore.getPseudoGenericTypeVarNameForParam(paramName);
+        return TypeVarHandling.getPseudoGenericTypeVarNameForParam(paramName);
     }
 
     // Creates a new class type that is a subclass of two other specified classes.
@@ -11769,7 +11770,7 @@ export function createTypeEvaluator(
     }
 
     function inferVarianceForClass(classType: ClassType): void {
-        return TypeEvaluatorCore.inferVarianceForClassWithEvaluator(evaluatorInterface, classType);
+        return TypeVarHandling.inferVarianceForClassWithEvaluator(evaluatorInterface, classType);
     }
 
     function evaluateTypeParamList(node: TypeParameterListNode): TypeVarType[] {
@@ -16954,7 +16955,7 @@ export function createTypeEvaluator(
     // type has an implicit TypeForm type that can be assigned to it. If so,
     // convert to an explicit TypeForm type.
     function convertToTypeFormType(expectedType: Type, srcType: Type): Type {
-        return TypeEvaluatorCore.convertToTypeFormTypeWithEvaluator(evaluatorInterface, expectedType, srcType);
+        return TypeVarHandling.convertToTypeFormTypeWithEvaluator(evaluatorInterface, expectedType, srcType);
     }
 
     function assignFromUnionType(
@@ -16981,7 +16982,7 @@ export function createTypeEvaluator(
         srcType: UnknownType | AnyType,
         constraints: ConstraintTracker
     ) {
-        TypeEvaluatorCore.setConstraintsForFreeTypeVarsInType(destType, srcType, constraints);
+        TypeVarHandling.setConstraintsForFreeTypeVarsInType(destType, srcType, constraints);
     }
 
     // Determines whether a type is "subsumed by" (i.e. is a proper subtype of) another type.
