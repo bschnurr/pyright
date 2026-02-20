@@ -188,6 +188,7 @@ import {
 import * as TypeEvaluatorDiagnostics from './typeEvaluator/diagnostics';
 import * as TypeEvaluatorCore from './typeEvaluator/evaluatorCore';
 import * as CollectionInference from './typeEvaluator/collectionInference';
+import * as AssignFunctions from './typeEvaluator/assignFunctions';
 import * as TypeEvaluatorFlowAnalysis from './typeEvaluator/flowAnalysis';
 import * as TypeEvaluatorNarrowing from './typeEvaluator/narrowing';
 import {
@@ -17044,7 +17045,7 @@ export function createTypeEvaluator(
         flags: AssignTypeFlags,
         recursionCount: number
     ) {
-        return TypeEvaluatorCore.assignParamWithEvaluator(
+        return AssignFunctions.assignParamWithEvaluator(
             destType, srcType, paramIndex, diag, constraints, flags, recursionCount, evaluatorInterface
         );
     }
@@ -17063,7 +17064,7 @@ export function createTypeEvaluator(
         flags: AssignTypeFlags,
         recursionCount: number
     ): boolean {
-        return TypeEvaluatorCore.assignFunctionWithEvaluator(
+        return AssignFunctions.assignFunctionWithEvaluator(
             destType, srcType, diag, constraints, flags, recursionCount, prefetched, evaluatorInterface
         );
     }
