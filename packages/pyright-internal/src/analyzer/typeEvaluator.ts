@@ -213,6 +213,7 @@ import {
     maxInferredContainerDepth,
     maxSubtypesForInferredType,
     MemberAccessDeprecationInfo,
+    MemberAccessTypeResult,
     PrefetchedTypes,
     PrintTypeOptions,
     Reachability,
@@ -406,14 +407,6 @@ interface MatchArgsToParamsResult {
     // of error reporting when no matches are found. The higher
     // the score, the worse the match.
     argumentMatchScore: number;
-}
-
-export interface MemberAccessTypeResult {
-    type: Type;
-    isDescriptorApplied?: boolean;
-    isAsymmetricAccessor?: boolean;
-    memberAccessDeprecationInfo?: MemberAccessDeprecationInfo;
-    typeErrors?: boolean;
 }
 
 interface ScopedTypeVarResult {
@@ -6125,78 +6118,11 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfTypeForm(node: CallNode, typeFormClass: ClassType): TypeResult {
-        if (
-            node.d.args.length !== 1 ||
-            node.d.args[0].d.argCategory !== ArgCategory.Simple ||
-            node.d.args[0].d.name !== undefined
-        ) {
-            addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.typeFormArgs(), node);
-            return { type: UnknownType.create() };
-        }
-
-        const typeFormResult = getTypeOfArgExpectingType(convertNodeToArg(node.d.args[0]), {
-            typeFormArg: isTypeFormSupported(node),
-            noNonTypeSpecialForms: true,
-            typeExpression: true,
-        });
-
-        if (!typeFormResult.typeErrors && typeFormResult.type.props?.typeForm) {
-            typeFormResult.type = convertToInstance(
-                ClassType.specialize(typeFormClass, [convertToInstance(typeFormResult.type.props.typeForm)])
-            );
-        }
-
-        return typeFormResult;
+        return TypeEvaluatorCore.getTypeOfTypeFormWithEvaluator(evaluatorInterface, node, typeFormClass);
     }
 
     function getTypeOfAssertType(node: CallNode, inferenceContext: InferenceContext | undefined): TypeResult {
-        if (
-            node.d.args.length !== 2 ||
-            node.d.args[0].d.argCategory !== ArgCategory.Simple ||
-            node.d.args[0].d.name !== undefined ||
-            node.d.args[0].d.argCategory !== ArgCategory.Simple ||
-            node.d.args[1].d.name !== undefined
-        ) {
-            addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.assertTypeArgs(), node);
-            return { type: UnknownType.create() };
-        }
-
-        const arg0TypeResult = getTypeOfExpression(node.d.args[0].d.valueExpr, /* flags */ undefined, inferenceContext);
-        if (arg0TypeResult.isIncomplete) {
-            return { type: UnknownType.create(/* isIncomplete */ true), isIncomplete: true };
-        }
-
-        const assertedType = convertToInstance(
-            getTypeOfArgExpectingType(convertNodeToArg(node.d.args[1]), {
-                typeExpression: true,
-            }).type
-        );
-
-        // We'll replace TypeGuard and TypeIs with bool for purposes of assert_type testing.
-        // The spec is unclear on whether this is the correct behavior, but it seems to be
-        // what mypy does -- and what various library authors expect.
-        const arg0Type = stripTypeGuard(arg0TypeResult.type);
-
-        if (
-            !isTypeSame(assertedType, arg0Type, {
-                treatAnySameAsUnknown: true,
-                ignorePseudoGeneric: true,
-                ignoreConditions: true,
-            })
-        ) {
-            const srcDestTypes = printSrcDestTypes(arg0TypeResult.type, assertedType, { expandTypeAlias: true });
-
-            addDiagnostic(
-                DiagnosticRule.reportAssertTypeFailure,
-                LocMessage.assertTypeTypeMismatch().format({
-                    expected: srcDestTypes.destType,
-                    received: srcDestTypes.sourceType,
-                }),
-                node.d.args[0].d.valueExpr
-            );
-        }
-
-        return { type: arg0TypeResult.type };
+        return TypeEvaluatorCore.getTypeOfAssertTypeWithEvaluator(evaluatorInterface, node, inferenceContext);
     }
 
     function convertNodeToArg(node: ArgumentNode): ArgWithExpression {
@@ -7625,43 +7551,7 @@ export function createTypeEvaluator(
 
     // Evaluates the type of the "cast" call.
     function evaluateCastCall(argList: Arg[], errorNode: ExpressionNode) {
-        if (argList[0].argCategory !== ArgCategory.Simple && argList[0].valueExpression) {
-            addDiagnostic(
-                DiagnosticRule.reportInvalidTypeForm,
-                LocMessage.unpackInAnnotation(),
-                argList[0].valueExpression
-            );
-        }
-
-        // Verify that the cast is necessary.
-        let castToType = getTypeOfArgExpectingType(argList[0], { typeExpression: true }).type;
-
-        const liveScopeIds = ParseTreeUtils.getTypeVarScopesForNode(errorNode);
-        castToType = makeTypeVarsBound(castToType, liveScopeIds);
-
-        let castFromType = getTypeOfArg(argList[1], /* inferenceContext */ undefined).type;
-
-        if (castFromType.props?.specialForm) {
-            castFromType = castFromType.props.specialForm;
-        }
-
-        if (TypeBase.isInstantiable(castToType) && !isUnknown(castToType)) {
-            if (
-                isTypeSame(convertToInstance(castToType), castFromType, {
-                    ignorePseudoGeneric: true,
-                })
-            ) {
-                addDiagnostic(
-                    DiagnosticRule.reportUnnecessaryCast,
-                    LocMessage.unnecessaryCast().format({
-                        type: printType(castFromType),
-                    }),
-                    errorNode
-                );
-            }
-        }
-
-        return convertToInstance(castToType);
+        return TypeEvaluatorCore.evaluateCastCallWithEvaluator(evaluatorInterface, argList, errorNode);
     }
 
     // Expands any unpacked tuples within an argument list.
@@ -9193,48 +9083,11 @@ export function createTypeEvaluator(
         returnType: Type,
         liveTypeVarScopes: TypeVarScopeId[]
     ): Type {
-        if (!isFunction(returnType)) {
-            return returnType;
-        }
-
-        // What type variables are referenced in the callable return type? Do not include any live type variables.
-        const typeParams = getTypeVarArgsRecursive(returnType).filter(
-            (t) => !liveTypeVarScopes.some((scopeId) => t.priv.scopeId === scopeId)
-        );
-
-        // If there are no unsolved type variables, we're done. If there are
-        // unsolved type variables, rescope them to the callable.
-        if (typeParams.length === 0) {
-            return returnType;
-        }
-
-        inferReturnTypeIfNecessary(returnType);
-
-        // Create a new scope ID based on the caller's position. This
-        // will guarantee uniqueness. If another caller uses the same
-        // call and arguments, the type vars will not conflict.
-        const newScopeId = ParseTreeUtils.getScopeIdForNode(callNode);
-        const solution = new ConstraintSolution();
-
-        const newTypeParams = typeParams.map((typeVar) => {
-            const newTypeParam = TypeVarType.cloneForScopeId(
-                typeVar,
-                newScopeId,
-                typeVar.priv.scopeName,
-                TypeVarScopeType.Function
-            );
-            solution.setType(typeVar, newTypeParam);
-            return newTypeParam;
-        });
-
-        return applySolvedTypeVars(
-            FunctionType.cloneWithNewTypeVarScopeId(
-                returnType,
-                newScopeId,
-                /* constructorTypeVarScopeId */ undefined,
-                newTypeParams
-            ),
-            solution
+        return TypeEvaluatorCore.adjustCallableReturnTypeWithEvaluator(
+            evaluatorInterface,
+            callNode,
+            returnType,
+            liveTypeVarScopes
         );
     }
 
@@ -11137,57 +10990,11 @@ export function createTypeEvaluator(
         entryTypes: Type[],
         isNarrowable: boolean
     ): Type | undefined {
-        // If the expected type is Any, the resulting type becomes Any.
-        if (isAny(inferenceContext.expectedType)) {
-            return inferenceContext.expectedType;
-        }
-
-        const constraints = new ConstraintTracker();
-        const expectedType = inferenceContext.expectedType;
-        let isCompatible = true;
-
-        entryTypes.forEach((entryType) => {
-            if (isCompatible && !assignType(expectedType, entryType, /* diag */ undefined, constraints)) {
-                isCompatible = false;
-            }
-        });
-
-        if (!isCompatible) {
-            return undefined;
-        }
-
-        if (isNarrowable && entryTypes.length > 0) {
-            const combinedTypes = combineTypes(entryTypes);
-            return containsLiteralType(inferenceContext.expectedType)
-                ? combinedTypes
-                : stripLiteralValue(combinedTypes);
-        }
-
-        return mapSubtypes(
-            solveAndApplyConstraints(inferenceContext.expectedType, constraints, {
-                replaceUnsolved: {
-                    scopeIds: [],
-                    tupleClassType: getTupleClassType(),
-                },
-            }),
-            (subtype) => {
-                if (entryTypes.length !== 1) {
-                    return subtype;
-                }
-                const entryType = entryTypes[0];
-
-                // If the entry type is a TypedDict instance, clone it with additional information.
-                if (
-                    isTypeSame(subtype, entryType, { ignoreTypedDictNarrowEntries: true }) &&
-                    isClass(subtype) &&
-                    isClass(entryType) &&
-                    ClassType.isTypedDictClass(entryType)
-                ) {
-                    return ClassType.cloneForNarrowedTypedDictEntries(subtype, entryType.priv.typedDictNarrowedEntries);
-                }
-
-                return subtype;
-            }
+        return TypeEvaluatorCore.inferTypeArgFromExpectedEntryTypeWithEvaluator(
+            evaluatorInterface,
+            inferenceContext,
+            entryTypes,
+            isNarrowable
         );
     }
 

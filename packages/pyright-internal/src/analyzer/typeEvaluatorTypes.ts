@@ -644,6 +644,14 @@ export const enum AssignTypeFlags {
     DisallowExtraKwargsForTd = 1 << 17,
 }
 
+export interface MemberAccessTypeResult {
+    type: Type;
+    isDescriptorApplied?: boolean;
+    isAsymmetricAccessor?: boolean;
+    memberAccessDeprecationInfo?: MemberAccessDeprecationInfo;
+    typeErrors?: boolean;
+}
+
 export interface TypeEvaluator {
     runWithCancellationToken<T>(token: CancellationToken, callback: () => T): T;
     runWithCancellationToken<T>(token: CancellationToken, callback: () => Promise<T>): Promise<T>;
