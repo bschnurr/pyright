@@ -6743,32 +6743,7 @@ export function createTypeEvaluator(
     }
 
     function expandArgType(type: Type): Type[] | undefined {
-        const expandedTypes: Type[] = [];
-
-        // Expand any top-level type variables with constraints.
-        type = makeTopLevelTypeVarsConcrete(type);
-
-        doForEachSubtype(type, (subtype) => {
-            if (isClassInstance(subtype)) {
-                // Expand any bool or Enum literals.
-                const expandedLiteralTypes = enumerateLiteralsForType(evaluatorInterface, subtype);
-                if (expandedLiteralTypes && expandedLiteralTypes.length <= maxSingleOverloadArgTypeExpansionCount) {
-                    appendArray(expandedTypes, expandedLiteralTypes);
-                    return;
-                }
-
-                // Expand any fixed-size tuples.
-                const expandedTuples = expandTuple(subtype, maxSingleOverloadArgTypeExpansionCount);
-                if (expandedTuples) {
-                    appendArray(expandedTypes, expandedTuples);
-                    return;
-                }
-            }
-
-            expandedTypes.push(subtype);
-        });
-
-        return expandedTypes.length > 1 ? expandedTypes : undefined;
+        return TypeEvaluatorCore.expandArgTypeWithEvaluator(evaluatorInterface, type);
     }
 
     // Validates that the arguments can be assigned to the call's parameter
@@ -9830,45 +9805,7 @@ export function createTypeEvaluator(
         argList: Arg[],
         metaclass: ClassType
     ): ClassType | undefined {
-        const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
-        const arg0Type = getTypeOfArg(argList[0], /* inferenceContext */ undefined).type;
-        if (!isClassInstance(arg0Type) || !ClassType.isBuiltIn(arg0Type, 'str')) {
-            return undefined;
-        }
-        const className = (arg0Type.priv.literalValue as string) || '_';
-
-        const arg1Type = getTypeOfArg(argList[1], /* inferenceContext */ undefined).type;
-
-        // TODO - properly handle case where tuple of base classes is provided.
-        if (!isClassInstance(arg1Type) || !isTupleClass(arg1Type) || arg1Type.priv.tupleTypeArgs === undefined) {
-            return undefined;
-        }
-
-        const classType = ClassType.createInstantiable(
-            className,
-            ParseTreeUtils.getClassFullName(errorNode, fileInfo.moduleName, className),
-            fileInfo.moduleName,
-            fileInfo.fileUri,
-            ClassTypeFlags.ValidTypeAliasClass,
-            ParseTreeUtils.getTypeSourceId(errorNode),
-            metaclass,
-            arg1Type.shared.effectiveMetaclass
-        );
-        arg1Type.priv.tupleTypeArgs.forEach((typeArg) => {
-            const specializedType = makeTopLevelTypeVarsConcrete(typeArg.type);
-
-            if (isEffectivelyInstantiable(specializedType)) {
-                classType.shared.baseClasses.push(specializedType);
-            } else {
-                classType.shared.baseClasses.push(UnknownType.create());
-            }
-        });
-
-        if (!computeMroLinearization(classType)) {
-            addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.methodOrdering(), errorNode);
-        }
-
-        return classType;
+        return TypeEvaluatorCore.createClassFromMetaclassWithEvaluator(evaluatorInterface, errorNode, argList, metaclass);
     }
 
     function getTypeOfConstant(node: ConstantNode, flags: EvalFlags): TypeResult {
@@ -16862,74 +16799,13 @@ export function createTypeEvaluator(
         selfClass: ClassType | TypeVarType | undefined,
         flags: MemberAccessFlags
     ): TypeResult | undefined {
-        if (isAnyOrUnknown(member.classType)) {
-            return {
-                type: member.classType,
-                isIncomplete: false,
-            };
-        }
-
-        if (!isInstantiableClass(member.classType)) {
-            return undefined;
-        }
-
-        const typeResult = getEffectiveTypeOfSymbolForUsage(member.symbol);
-
-        if (!typeResult) {
-            return undefined;
-        }
-
-        // Report inappropriate use of variables in type expressions.
-        if ((flags & MemberAccessFlags.TypeExpression) !== 0 && errorNode) {
-            typeResult.type = validateSymbolIsTypeExpression(
-                errorNode,
-                typeResult.type,
-                !!typeResult.includesVariableDecl
-            );
-        }
-
-        // If the type is a function or overloaded function, infer
-        // and cache the return type if necessary. This needs to be done
-        // prior to specializing.
-        inferReturnTypeIfNecessary(typeResult.type);
-
-        // Check for ambiguous accesses to attributes with generic types?
-        if (
-            errorNode &&
-            selfClass &&
-            isClass(selfClass) &&
-            member.isInstanceMember &&
-            isClass(member.unspecializedClassType) &&
-            (flags & MemberAccessFlags.DisallowGenericInstanceVariableAccess) !== 0 &&
-            requiresSpecialization(typeResult.type, { ignoreSelf: true, ignoreImplicitTypeArgs: true })
-        ) {
-            const specializedType = partiallySpecializeType(
-                typeResult.type,
-                member.unspecializedClassType,
-                getTypeClassType(),
-                selfSpecializeClass(selfClass, { overrideTypeArgs: true })
-            );
-
-            if (
-                findSubtype(
-                    specializedType,
-                    (subtype) =>
-                        !isFunctionOrOverloaded(subtype) &&
-                        requiresSpecialization(subtype, { ignoreSelf: true, ignoreImplicitTypeArgs: true })
-                )
-            ) {
-                addDiagnostic(
-                    DiagnosticRule.reportGeneralTypeIssues,
-                    LocMessage.genericInstanceVariableAccess(),
-                    errorNode
-                );
-            }
-        }
-
-        return {
-            type: partiallySpecializeType(typeResult.type, member.classType, getTypeClassType(), selfClass),
-            isIncomplete: !!typeResult.isIncomplete,
-        };
+        return TypeEvaluatorCore.getTypeOfMemberInternalWithEvaluator(
+            evaluatorInterface,
+            errorNode,
+            member,
+            selfClass,
+            flags
+        );
     }
 
     function assignClass(
@@ -16941,186 +16817,17 @@ export function createTypeEvaluator(
         recursionCount: number,
         reportErrorsUsingObjType: boolean
     ): boolean {
-        // If the source or dest types are partially evaluated (i.e. they are in the
-        // process of being constructed), assume they are assignable rather than risk
-        // emitting false positives.
-        if (ClassType.isHierarchyPartiallyEvaluated(destType) || ClassType.isHierarchyPartiallyEvaluated(srcType)) {
-            return true;
-        }
-
-        // Handle typed dicts. They also use a form of structural typing for type
-        // checking, as defined in PEP 589.
-        if (ClassType.isTypedDictClass(srcType)) {
-            if (ClassType.isTypedDictClass(destType) && !ClassType.isSameGenericClass(destType, srcType)) {
-                if (
-                    !assignTypedDictToTypedDict(
-                        evaluatorInterface,
-                        destType,
-                        srcType,
-                        diag,
-                        constraints,
-                        flags,
-                        recursionCount
-                    )
-                ) {
-                    return false;
-                }
-
-                // If invariance is being enforced, the two TypedDicts must be assignable to each other.
-                if ((flags & AssignTypeFlags.Invariant) !== 0) {
-                    return assignTypedDictToTypedDict(
-                        evaluatorInterface,
-                        srcType,
-                        destType,
-                        /* diag */ undefined,
-                        /* constraints */ undefined,
-                        flags,
-                        recursionCount
-                    );
-                }
-
-                return true;
-            }
-
-            // Handle some special cases where a TypedDict can act like
-            // a Mapping[str, T] or a dict[str, T].
-            if (ClassType.isBuiltIn(destType, 'Mapping')) {
-                const mappingValueType = getTypedDictMappingEquivalent(evaluatorInterface, srcType);
-
-                if (
-                    mappingValueType &&
-                    prefetched?.mappingClass &&
-                    isInstantiableClass(prefetched.mappingClass) &&
-                    prefetched?.strClass &&
-                    isInstantiableClass(prefetched.strClass)
-                ) {
-                    srcType = ClassType.specialize(prefetched.mappingClass, [
-                        ClassType.cloneAsInstance(prefetched.strClass),
-                        mappingValueType,
-                    ]);
-                }
-            } else if (ClassType.isBuiltIn(destType, ['dict', 'MutableMapping'])) {
-                const dictValueType = getTypedDictDictEquivalent(evaluatorInterface, srcType, recursionCount);
-
-                if (
-                    dictValueType &&
-                    prefetched?.dictClass &&
-                    isInstantiableClass(prefetched.dictClass) &&
-                    prefetched.strClass &&
-                    isInstantiableClass(prefetched.strClass)
-                ) {
-                    srcType = ClassType.specialize(prefetched.dictClass, [
-                        ClassType.cloneAsInstance(prefetched.strClass),
-                        dictValueType,
-                    ]);
-                }
-            }
-        }
-
-        // Handle special-case type promotions.
-        if (destType.priv.includePromotions) {
-            const promotionList = typePromotions.get(destType.shared.fullName);
-            if (
-                promotionList &&
-                promotionList.some((srcName) =>
-                    srcType.shared.mro.some((mroClass) => isClass(mroClass) && srcName === mroClass.shared.fullName)
-                )
-            ) {
-                if ((flags & AssignTypeFlags.Invariant) === 0) {
-                    return true;
-                }
-            }
-        }
-
-        // Is it a structural type (i.e. a protocol)? If so, we need to
-        // perform a member-by-member check.
-        const inheritanceChain: InheritanceChain = [];
-        const isDerivedFrom = ClassType.isDerivedFrom(srcType, destType, inheritanceChain);
-
-        // Use the slow path for protocols if the dest doesn't explicitly
-        // derive from the source. We also need to use this path if we're
-        // testing to see if the metaclass matches the protocol.
-        if (ClassType.isProtocolClass(destType) && !isDerivedFrom) {
-            if (
-                !assignClassToProtocol(
-                    evaluatorInterface,
-                    destType,
-                    ClassType.cloneAsInstance(srcType),
-                    diag?.createAddendum(),
-                    constraints,
-                    flags,
-                    recursionCount
-                )
-            ) {
-                diag?.addMessage(
-                    LocAddendum.protocolIncompatible().format({
-                        sourceType: printType(convertToInstance(srcType)),
-                        destType: printType(convertToInstance(destType)),
-                    })
-                );
-                return false;
-            }
-
-            return true;
-        }
-
-        if ((flags & AssignTypeFlags.Invariant) === 0 || ClassType.isSameGenericClass(srcType, destType)) {
-            if (isDerivedFrom) {
-                assert(inheritanceChain.length > 0);
-
-                if (
-                    assignClassWithTypeArgs(
-                        destType,
-                        srcType,
-                        inheritanceChain,
-                        diag?.createAddendum(),
-                        constraints,
-                        flags,
-                        recursionCount
-                    )
-                ) {
-                    return true;
-                }
-            }
-        }
-
-        // Everything is assignable to an object.
-        if (ClassType.isBuiltIn(destType, 'object')) {
-            if ((flags & AssignTypeFlags.Invariant) === 0) {
-                return true;
-            }
-        }
-
-        if (diag) {
-            const destErrorType = reportErrorsUsingObjType ? ClassType.cloneAsInstance(destType) : destType;
-            const srcErrorType = reportErrorsUsingObjType ? ClassType.cloneAsInstance(srcType) : srcType;
-
-            let destErrorTypeText = printType(destErrorType);
-            let srcErrorTypeText = printType(srcErrorType);
-
-            // If the text is the same, use the fully-qualified name rather than the short name.
-            if (destErrorTypeText === srcErrorTypeText && destType.shared.fullName && srcType.shared.fullName) {
-                destErrorTypeText = destType.shared.fullName;
-                srcErrorTypeText = srcType.shared.fullName;
-            }
-
-            diag?.addMessage(
-                LocAddendum.typeIncompatible().format({
-                    sourceType: srcErrorTypeText,
-                    destType: destErrorTypeText,
-                })
-            );
-
-            // Tell the user about the disableBytesTypePromotions if that is involved.
-            if (ClassType.isBuiltIn(destType, 'bytes')) {
-                const promotions = typePromotions.get(destType.shared.fullName);
-                if (promotions && promotions.some((name) => name === srcType.shared.fullName)) {
-                    diag?.addMessage(LocAddendum.bytesTypePromotions());
-                }
-            }
-        }
-
-        return false;
+        return TypeEvaluatorCore.assignClassWithEvaluator(
+            evaluatorInterface,
+            destType,
+            srcType,
+            diag,
+            constraints,
+            flags,
+            recursionCount,
+            reportErrorsUsingObjType,
+            prefetched
+        );
     }
 
     // This function is used to validate or infer the variance of type

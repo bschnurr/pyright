@@ -31,7 +31,9 @@ import { getParamListDetails, ParamKind, ParamListDetails, VirtualParamDetails }
 import { ConstraintTracker } from '../constraintTracker';
 import { ConstraintSolution } from '../constraintSolution';
 import { addConstraintsForExpectedType, solveConstraints } from '../constraintSolver';
-import { assignTupleTypeArgs, getSlicedTupleType, makeTupleObject } from '../tuples';
+import { assignTupleTypeArgs, expandTuple, getSlicedTupleType, makeTupleObject } from '../tuples';
+import { assignClassToProtocol } from '../protocols';
+import { enumerateLiteralsForType } from '../typeGuards';
 import { Scope, ScopeType, SymbolWithScope } from '../scope';
 import { CodeFlowEngine } from '../codeFlowEngine';
 import { Symbol, SymbolFlags, SynthesizedTypeInfo } from '../symbol';
@@ -42,7 +44,7 @@ import { getLastTypedDeclarationForSymbol } from '../symbolUtils';
 import * as TypeEvaluatorNarrowing from './narrowing';
 import * as ScopeUtils from '../scopeUtils';
 import { FunctionDecoratorInfo, getFunctionInfoFromDecorators } from '../decorators';
-import { createTypedDictTypeInlined, getTypeOfIndexedTypedDict } from '../typedDicts';
+import { createTypedDictTypeInlined, getTypeOfIndexedTypedDict, assignTypedDictToTypedDict, getTypedDictMappingEquivalent, getTypedDictDictEquivalent } from '../typedDicts';
 
 export interface ReturnTypeInferenceContextFrame {
     functionNode: ParseNode;
@@ -10872,4 +10874,331 @@ export function getExpectedEntryTypeForIterableWithEvaluator(
     }
 
     return specializedListOrSet.priv.typeArgs[0];
+}
+
+const maxSingleOverloadArgTypeExpansionCount = 64;
+
+export function expandArgTypeWithEvaluator(
+    evaluator: TypeEvaluator,
+    type: Type
+): Type[] | undefined {
+    const expandedTypes: Type[] = [];
+
+    type = evaluator.makeTopLevelTypeVarsConcrete(type);
+
+    doForEachSubtype(type, (subtype) => {
+        if (isClassInstance(subtype)) {
+            const expandedLiteralTypes = enumerateLiteralsForType(evaluator, subtype);
+            if (expandedLiteralTypes && expandedLiteralTypes.length <= maxSingleOverloadArgTypeExpansionCount) {
+                appendArray(expandedTypes, expandedLiteralTypes);
+                return;
+            }
+
+            const expandedTuples = expandTuple(subtype, maxSingleOverloadArgTypeExpansionCount);
+            if (expandedTuples) {
+                appendArray(expandedTypes, expandedTuples);
+                return;
+            }
+        }
+
+        expandedTypes.push(subtype);
+    });
+
+    return expandedTypes.length > 1 ? expandedTypes : undefined;
+}
+
+export function createClassFromMetaclassWithEvaluator(
+    evaluator: TypeEvaluator,
+    errorNode: ExpressionNode,
+    argList: Arg[],
+    metaclass: ClassType
+): ClassType | undefined {
+    const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
+    const arg0Type = evaluator.getTypeOfArg(argList[0], /* inferenceContext */ undefined).type;
+    if (!isClassInstance(arg0Type) || !ClassType.isBuiltIn(arg0Type, 'str')) {
+        return undefined;
+    }
+    const className = (arg0Type.priv.literalValue as string) || '_';
+
+    const arg1Type = evaluator.getTypeOfArg(argList[1], /* inferenceContext */ undefined).type;
+
+    if (!isClassInstance(arg1Type) || !isTupleClass(arg1Type) || arg1Type.priv.tupleTypeArgs === undefined) {
+        return undefined;
+    }
+
+    const classType = ClassType.createInstantiable(
+        className,
+        ParseTreeUtils.getClassFullName(errorNode, fileInfo.moduleName, className),
+        fileInfo.moduleName,
+        fileInfo.fileUri,
+        ClassTypeFlags.ValidTypeAliasClass,
+        ParseTreeUtils.getTypeSourceId(errorNode),
+        metaclass,
+        arg1Type.shared.effectiveMetaclass
+    );
+    arg1Type.priv.tupleTypeArgs.forEach((typeArg) => {
+        const specializedType = evaluator.makeTopLevelTypeVarsConcrete(typeArg.type);
+
+        if (isEffectivelyInstantiable(specializedType)) {
+            classType.shared.baseClasses.push(specializedType);
+        } else {
+            classType.shared.baseClasses.push(UnknownType.create());
+        }
+    });
+
+    if (!computeMroLinearization(classType)) {
+        evaluator.addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.methodOrdering(), errorNode);
+    }
+
+    return classType;
+}
+
+export function getTypeOfMemberInternalWithEvaluator(
+    evaluator: TypeEvaluator,
+    errorNode: ExpressionNode | undefined,
+    member: ClassMember,
+    selfClass: ClassType | TypeVarType | undefined,
+    flags: MemberAccessFlags
+): TypeResult | undefined {
+    if (isAnyOrUnknown(member.classType)) {
+        return {
+            type: member.classType,
+            isIncomplete: false,
+        };
+    }
+
+    if (!isInstantiableClass(member.classType)) {
+        return undefined;
+    }
+
+    const typeResult = evaluator.getEffectiveTypeOfSymbolForUsage(member.symbol);
+
+    if (!typeResult) {
+        return undefined;
+    }
+
+    if ((flags & MemberAccessFlags.TypeExpression) !== 0 && errorNode) {
+        typeResult.type = validateSymbolIsTypeExpressionWithEvaluator(
+            evaluator,
+            errorNode,
+            typeResult.type,
+            !!typeResult.includesVariableDecl
+        );
+    }
+
+    evaluator.inferReturnTypeIfNecessary(typeResult.type);
+
+    if (
+        errorNode &&
+        selfClass &&
+        isClass(selfClass) &&
+        member.isInstanceMember &&
+        isClass(member.unspecializedClassType) &&
+        (flags & MemberAccessFlags.DisallowGenericInstanceVariableAccess) !== 0 &&
+        requiresSpecialization(typeResult.type, { ignoreSelf: true, ignoreImplicitTypeArgs: true })
+    ) {
+        const specializedType = partiallySpecializeType(
+            typeResult.type,
+            member.unspecializedClassType,
+            evaluator.getTypeClassType(),
+            selfSpecializeClass(selfClass, { overrideTypeArgs: true })
+        );
+
+        if (
+            findSubtype(
+                specializedType,
+                (subtype) =>
+                    !isFunctionOrOverloaded(subtype) &&
+                    requiresSpecialization(subtype, { ignoreSelf: true, ignoreImplicitTypeArgs: true })
+            )
+        ) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.genericInstanceVariableAccess(),
+                errorNode
+            );
+        }
+    }
+
+    return {
+        type: partiallySpecializeType(typeResult.type, member.classType, evaluator.getTypeClassType(), selfClass),
+        isIncomplete: !!typeResult.isIncomplete,
+    };
+}
+
+export function assignClassWithEvaluator(
+    evaluator: TypeEvaluator,
+    destType: ClassType,
+    srcType: ClassType,
+    diag: DiagnosticAddendum | undefined,
+    constraints: ConstraintTracker | undefined,
+    flags: AssignTypeFlags,
+    recursionCount: number,
+    reportErrorsUsingObjType: boolean,
+    prefetched: Partial<PrefetchedTypes> | undefined
+): boolean {
+    if (ClassType.isHierarchyPartiallyEvaluated(destType) || ClassType.isHierarchyPartiallyEvaluated(srcType)) {
+        return true;
+    }
+
+    if (ClassType.isTypedDictClass(srcType)) {
+        if (ClassType.isTypedDictClass(destType) && !ClassType.isSameGenericClass(destType, srcType)) {
+            if (
+                !assignTypedDictToTypedDict(
+                    evaluator,
+                    destType,
+                    srcType,
+                    diag,
+                    constraints,
+                    flags,
+                    recursionCount
+                )
+            ) {
+                return false;
+            }
+
+            if ((flags & AssignTypeFlags.Invariant) !== 0) {
+                return assignTypedDictToTypedDict(
+                    evaluator,
+                    srcType,
+                    destType,
+                    /* diag */ undefined,
+                    /* constraints */ undefined,
+                    flags,
+                    recursionCount
+                );
+            }
+
+            return true;
+        }
+
+        if (ClassType.isBuiltIn(destType, 'Mapping')) {
+            const mappingValueType = getTypedDictMappingEquivalent(evaluator, srcType);
+
+            if (
+                mappingValueType &&
+                prefetched?.mappingClass &&
+                isInstantiableClass(prefetched.mappingClass) &&
+                prefetched?.strClass &&
+                isInstantiableClass(prefetched.strClass)
+            ) {
+                srcType = ClassType.specialize(prefetched.mappingClass, [
+                    ClassType.cloneAsInstance(prefetched.strClass),
+                    mappingValueType,
+                ]);
+            }
+        } else if (ClassType.isBuiltIn(destType, ['dict', 'MutableMapping'])) {
+            const dictValueType = getTypedDictDictEquivalent(evaluator, srcType, recursionCount);
+
+            if (
+                dictValueType &&
+                prefetched?.dictClass &&
+                isInstantiableClass(prefetched.dictClass) &&
+                prefetched.strClass &&
+                isInstantiableClass(prefetched.strClass)
+            ) {
+                srcType = ClassType.specialize(prefetched.dictClass, [
+                    ClassType.cloneAsInstance(prefetched.strClass),
+                    dictValueType,
+                ]);
+            }
+        }
+    }
+
+    if (destType.priv.includePromotions) {
+        const promotionList = typePromotions.get(destType.shared.fullName);
+        if (
+            promotionList &&
+            promotionList.some((srcName) =>
+                srcType.shared.mro.some((mroClass) => isClass(mroClass) && srcName === mroClass.shared.fullName)
+            )
+        ) {
+            if ((flags & AssignTypeFlags.Invariant) === 0) {
+                return true;
+            }
+        }
+    }
+
+    const inheritanceChain: InheritanceChain = [];
+    const isDerivedFrom = ClassType.isDerivedFrom(srcType, destType, inheritanceChain);
+
+    if (ClassType.isProtocolClass(destType) && !isDerivedFrom) {
+        if (
+            !assignClassToProtocol(
+                evaluator,
+                destType,
+                ClassType.cloneAsInstance(srcType),
+                diag?.createAddendum(),
+                constraints,
+                flags,
+                recursionCount
+            )
+        ) {
+            diag?.addMessage(
+                LocAddendum.protocolIncompatible().format({
+                    sourceType: evaluator.printType(convertToInstance(srcType)),
+                    destType: evaluator.printType(convertToInstance(destType)),
+                })
+            );
+            return false;
+        }
+
+        return true;
+    }
+
+    if ((flags & AssignTypeFlags.Invariant) === 0 || ClassType.isSameGenericClass(srcType, destType)) {
+        if (isDerivedFrom) {
+            assert(inheritanceChain.length > 0);
+
+            if (
+                assignClassWithTypeArgsWithEvaluator(
+                    evaluator,
+                    destType,
+                    srcType,
+                    inheritanceChain,
+                    diag?.createAddendum(),
+                    constraints,
+                    flags,
+                    recursionCount
+                )
+            ) {
+                return true;
+            }
+        }
+    }
+
+    if (ClassType.isBuiltIn(destType, 'object')) {
+        if ((flags & AssignTypeFlags.Invariant) === 0) {
+            return true;
+        }
+    }
+
+    if (diag) {
+        const destErrorType = reportErrorsUsingObjType ? ClassType.cloneAsInstance(destType) : destType;
+        const srcErrorType = reportErrorsUsingObjType ? ClassType.cloneAsInstance(srcType) : srcType;
+
+        let destErrorTypeText = evaluator.printType(destErrorType);
+        let srcErrorTypeText = evaluator.printType(srcErrorType);
+
+        if (destErrorTypeText === srcErrorTypeText && destType.shared.fullName && srcType.shared.fullName) {
+            destErrorTypeText = destType.shared.fullName;
+            srcErrorTypeText = srcType.shared.fullName;
+        }
+
+        diag?.addMessage(
+            LocAddendum.typeIncompatible().format({
+                sourceType: srcErrorTypeText,
+                destType: destErrorTypeText,
+            })
+        );
+
+        if (ClassType.isBuiltIn(destType, 'bytes')) {
+            const promotions = typePromotions.get(destType.shared.fullName);
+            if (promotions && promotions.some((name) => name === srcType.shared.fullName)) {
+                diag?.addMessage(LocAddendum.bytesTypePromotions());
+            }
+        }
+    }
+
+    return false;
 }
