@@ -192,6 +192,7 @@ import * as AssignFunctions from './typeEvaluator/assignFunctions';
 import * as OverrideValidation from './typeEvaluator/overrideValidation';
 import * as ExpressionEval from './typeEvaluator/expressionEvaluation';
 import * as TypeVarHandling from './typeEvaluator/typeVarHandling';
+import * as MemberResolution from './typeEvaluator/memberResolution';
 import * as TypeEvaluatorFlowAnalysis from './typeEvaluator/flowAnalysis';
 import * as TypeEvaluatorNarrowing from './typeEvaluator/narrowing';
 import {
@@ -852,21 +853,21 @@ export function createTypeEvaluator(
     }
 
     function pushSymbolResolution(symbol: Symbol, declaration: Declaration) {
-        return TypeEvaluatorCore.tryPushSymbolResolutionEntry(symbolResolutionStack, symbol.id, declaration);
+        return MemberResolution.tryPushSymbolResolutionEntry(symbolResolutionStack, symbol.id, declaration);
     }
 
     function popSymbolResolution(symbol: Symbol) {
-        const poppedEntry = TypeEvaluatorCore.popSymbolResolutionEntry(symbolResolutionStack)!;
+        const poppedEntry = MemberResolution.popSymbolResolutionEntry(symbolResolutionStack)!;
         assert(poppedEntry.symbolId === symbol.id);
         return poppedEntry.isResultValid;
     }
 
     function setSymbolResolutionPartialType(symbol: Symbol, declaration: Declaration, type: Type) {
-        TypeEvaluatorCore.setSymbolResolutionPartialType(symbolResolutionStack, symbol.id, declaration, type);
+        MemberResolution.setSymbolResolutionPartialType(symbolResolutionStack, symbol.id, declaration, type);
     }
 
     function getSymbolResolutionPartialType(symbol: Symbol, declaration: Declaration): Type | undefined {
-        return TypeEvaluatorCore.getSymbolResolutionPartialType(
+        return MemberResolution.getSymbolResolutionPartialType(
             symbolResolutionStack,
             symbol.id,
             declaration
@@ -1922,7 +1923,7 @@ export function createTypeEvaluator(
 
     // Determines whether the specified expression is an explicit TypeAlias declaration.
     function isDeclaredTypeAlias(expression: ExpressionNode): boolean {
-        return TypeEvaluatorCore.isDeclaredTypeAliasWithEvaluator(evaluatorInterface, expression);
+        return MemberResolution.isDeclaredTypeAliasWithEvaluator(evaluatorInterface, expression);
     }
 
     // Determines whether the specified expression is a symbol with a declared type.
@@ -3156,7 +3157,7 @@ export function createTypeEvaluator(
 
     // Reports diagnostics if type isn't valid within a type expression.
     function validateSymbolIsTypeExpression(node: ExpressionNode, type: Type, includesVarDecl: boolean): Type {
-        return TypeEvaluatorCore.validateSymbolIsTypeExpressionWithEvaluator(evaluatorInterface, node, type, includesVarDecl);
+        return MemberResolution.validateSymbolIsTypeExpressionWithEvaluator(evaluatorInterface, node, type, includesVarDecl);
     }
 
     // If the value is a special form (like a TypeVar or `Any`) and is being
@@ -4795,11 +4796,11 @@ export function createTypeEvaluator(
         diag: DiagnosticAddendum | undefined,
         recursionCount = 0
     ): TypeResult {
-        return TypeEvaluatorCore.bindMethodForMemberAccessWithEvaluator(evaluatorInterface, type, concreteType, memberInfo, classType, selfType, flags, memberName, usage, diag, recursionCount);
+        return MemberResolution.bindMethodForMemberAccessWithEvaluator(evaluatorInterface, type, concreteType, memberInfo, classType, selfType, flags, memberName, usage, diag, recursionCount);
     }
 
     function isAsymmetricDescriptorClass(classType: ClassType): boolean {
-        return TypeEvaluatorCore.isAsymmetricDescriptorClassWithEvaluator(evaluatorInterface, classType);
+        return MemberResolution.isAsymmetricDescriptorClassWithEvaluator(evaluatorInterface, classType);
     }
 
     function isClassWithAsymmetricAttributeAccessor(classType: ClassType): boolean {
@@ -4815,7 +4816,7 @@ export function createTypeEvaluator(
         memberName: string,
         selfType?: ClassType | TypeVarType
     ): MemberAccessTypeResult | undefined {
-        return TypeEvaluatorCore.applyAttributeAccessOverrideWithEvaluator(
+        return MemberResolution.applyAttributeAccessOverrideWithEvaluator(
             evaluatorInterface,
             errorNode,
             classType,
@@ -5530,7 +5531,7 @@ export function createTypeEvaluator(
     }
 
     function getIndexAccessMagicMethodName(usage: EvaluatorUsage): string {
-        return TypeEvaluatorCore.getIndexAccessMagicMethodNameForUsage(usage);
+        return MemberResolution.getIndexAccessMagicMethodNameForUsage(usage);
     }
 
     function getTypeOfIndexedObjectOrClass(
@@ -10726,7 +10727,7 @@ export function createTypeEvaluator(
     // Synthesize a TypeVar that acts as a placeholder for a type alias. This allows
     // the type alias definition to refer to itself.
     function synthesizeTypeAliasPlaceholder(nameNode: NameNode, isTypeAliasType: boolean = false): TypeVarType {
-        return TypeEvaluatorCore.synthesizeTypeAliasPlaceholderForName(nameNode, isTypeAliasType);
+        return MemberResolution.synthesizeTypeAliasPlaceholderForName(nameNode, isTypeAliasType);
     }
 
     // Evaluates the type of a type alias (i.e. "type") statement. This code
@@ -13533,7 +13534,7 @@ export function createTypeEvaluator(
         node: ImportAsNode | ImportFromAsNode | ImportFromNode,
         name: string
     ): Type | undefined {
-        return TypeEvaluatorCore.getAliasedSymbolTypeForNameWithEvaluator(
+        return MemberResolution.getAliasedSymbolTypeForNameWithEvaluator(
             evaluatorInterface,
             node,
             name,
@@ -14188,7 +14189,7 @@ export function createTypeEvaluator(
         honorCodeFlow: boolean,
         preferGlobalScope = false
     ): SymbolWithScope | undefined {
-        return TypeEvaluatorCore.lookUpSymbolRecursiveWithFlowContext(
+        return MemberResolution.lookUpSymbolRecursiveWithFlowContext(
             node, name, honorCodeFlow, codeFlowEngine, isFlowPathBetweenNodes, preferGlobalScope
         );
     }
@@ -14312,7 +14313,7 @@ export function createTypeEvaluator(
     // we need to handle the special case of string literals used as keys within a
     // dictionary expression where those keys are associated with a known TypedDict.
     function getDeclInfoForStringNode(node: StringNode): SymbolDeclInfo | undefined {
-        return TypeEvaluatorCore.getDeclInfoForStringNodeWithEvaluator(node, evaluatorInterface);
+        return MemberResolution.getDeclInfoForStringNodeWithEvaluator(node, evaluatorInterface);
     }
 
     function getAliasFromImport(node: NameNode): NameNode | undefined {
@@ -14320,7 +14321,7 @@ export function createTypeEvaluator(
     }
 
     function getDeclInfoForNameNode(node: NameNode, skipUnreachableCode = true): SymbolDeclInfo | undefined {
-        return TypeEvaluatorCore.getDeclInfoForNameNodeWithEvaluator(node, evaluatorInterface, skipUnreachableCode);
+        return MemberResolution.getDeclInfoForNameNodeWithEvaluator(node, evaluatorInterface, skipUnreachableCode);
     }
 
     function getTypeForDeclaration(declaration: Declaration): DeclaredSymbolTypeInfo {
@@ -14997,7 +14998,7 @@ export function createTypeEvaluator(
     // Determines whether the set of declarations includes a variable declaration
     // that is not part of a typing.pyi or typingExtensions.pyi file.
     function includesVariableTypeDecl(decls: Declaration[]): boolean {
-        return TypeEvaluatorCore.includesVariableTypeDeclCheck(decls);
+        return MemberResolution.includesVariableTypeDeclCheck(decls);
     }
 
     function inferTypeOfSymbolForUsage(symbol: Symbol, usageNode?: NameNode, useLastDecl = false): EffectiveTypeResult {
@@ -15729,7 +15730,7 @@ export function createTypeEvaluator(
     // unaltered unless the function is a generator, in which case it is
     // modified to return only the return type for the generator.
     function getDeclaredReturnType(node: FunctionNode): Type | undefined {
-        return TypeEvaluatorCore.getDeclaredReturnTypeWithEvaluator(evaluatorInterface, node);
+        return MemberResolution.getDeclaredReturnTypeWithEvaluator(evaluatorInterface, node);
     }
 
     function getTypeOfMember(member: ClassMember): Type {
@@ -17034,7 +17035,7 @@ export function createTypeEvaluator(
         objType: ClassType,
         recursionCount = 0
     ): FunctionType | OverloadedType | undefined {
-        return TypeEvaluatorCore.getCallbackProtocolTypeWithEvaluator(
+        return MemberResolution.getCallbackProtocolTypeWithEvaluator(
             objType, prefetched, evaluatorInterface, recursionCount
         );
     }
@@ -17130,7 +17131,7 @@ export function createTypeEvaluator(
     // Returns a list of unimplemented abstract symbols (methods or variables) for
     // the specified class.
     function getAbstractSymbols(classType: ClassType): AbstractSymbol[] {
-        return TypeEvaluatorCore.getAbstractSymbolsWithEvaluator(evaluatorInterface, classType);
+        return MemberResolution.getAbstractSymbolsWithEvaluator(evaluatorInterface, classType);
     }
 
     // If the memberType is an instance or class method, creates a new
@@ -17148,7 +17149,7 @@ export function createTypeEvaluator(
         diag?: DiagnosticAddendum,
         recursionCount = 0
     ): FunctionType | OverloadedType | undefined {
-        return TypeEvaluatorCore.bindFunctionToClassOrObjectWithEvaluator(
+        return MemberResolution.bindFunctionToClassOrObjectWithEvaluator(
             baseType,
             memberType,
             evaluatorInterface,
@@ -17169,11 +17170,11 @@ export function createTypeEvaluator(
     }
 
     function isExplicitTypeAliasDeclaration(decl: Declaration): boolean {
-        return TypeEvaluatorCore.isExplicitTypeAliasDeclarationWithEvaluator(evaluatorInterface, decl);
+        return MemberResolution.isExplicitTypeAliasDeclarationWithEvaluator(evaluatorInterface, decl);
     }
 
     function isPossibleTypeAliasDeclaration(decl: Declaration): boolean {
-        return TypeEvaluatorCore.isPossibleTypeAliasDeclCheck(decl);
+        return MemberResolution.isPossibleTypeAliasDeclCheck(decl);
     }
 
     function isLegalTypeAliasExpressionForm(node: ExpressionNode, allowStrLiteral: boolean): boolean {
@@ -17181,7 +17182,7 @@ export function createTypeEvaluator(
     }
 
     function isLegalImplicitTypeAliasType(type: Type) {
-        return TypeEvaluatorCore.isLegalImplicitTypeAliasTypeCheck(type);
+        return MemberResolution.isLegalImplicitTypeAliasTypeCheck(type);
     }
 
     function isPossibleTypeAliasOrTypedDict(decl: Declaration) {
