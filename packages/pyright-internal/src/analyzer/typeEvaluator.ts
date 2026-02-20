@@ -15758,7 +15758,7 @@ export function createTypeEvaluator(
         recursionCount: number,
         reportErrorsUsingObjType: boolean
     ): boolean {
-        return TypeEvaluatorCore.assignClassWithEvaluator(
+        return AssignFunctions.assignClassWithEvaluator(
             evaluatorInterface,
             destType,
             srcType,
@@ -15959,7 +15959,7 @@ export function createTypeEvaluator(
         flags: AssignTypeFlags,
         recursionCount: number
     ): boolean {
-        return TypeEvaluatorCore.assignClassWithTypeArgsWithEvaluator(evaluatorInterface, destType, srcType, inheritanceChain, diag, constraints, flags, recursionCount);
+        return AssignFunctions.assignClassWithTypeArgsWithEvaluator(evaluatorInterface, destType, srcType, inheritanceChain, diag, constraints, flags, recursionCount);
     }
 
     function getGetterTypeFromProperty(propertyClass: ClassType): Type | undefined {
@@ -16944,7 +16944,7 @@ export function createTypeEvaluator(
         flags = AssignTypeFlags.Default,
         recursionCount = 0
     ) {
-        return TypeEvaluatorCore.assignRecursiveTypeAliasToSelfWithEvaluator(
+        return AssignFunctions.assignRecursiveTypeAliasToSelfWithEvaluator(
             evaluatorInterface, destAliasInfo, srcAliasInfo, diag, constraints, flags, recursionCount
         );
     }
@@ -16964,7 +16964,7 @@ export function createTypeEvaluator(
         flags: AssignTypeFlags,
         recursionCount: number
     ): boolean {
-        return TypeEvaluatorCore.assignFromUnionTypeWithEvaluator(
+        return AssignFunctions.assignFromUnionTypeWithEvaluator(
             destType, srcType, diag, constraints, flags, recursionCount, evaluatorInterface
         );
     }
@@ -17013,13 +17013,13 @@ export function createTypeEvaluator(
         flags: AssignTypeFlags,
         recursionCount: number
     ): boolean {
-        return TypeEvaluatorCore.assignToUnionTypeWithEvaluator(
+        return AssignFunctions.assignToUnionTypeWithEvaluator(
             destType, srcType, diag, constraints, flags, recursionCount, evaluatorInterface
         );
     }
 
     function assignConditionalTypeToTypeVar(destType: TypeVarType, srcType: Type, recursionCount: number): boolean {
-        return TypeEvaluatorCore.assignConditionalTypeToTypeVarWithEvaluator(
+        return AssignFunctions.assignConditionalTypeToTypeVarWithEvaluator(
             evaluatorInterface, destType, srcType, recursionCount
         );
     }
