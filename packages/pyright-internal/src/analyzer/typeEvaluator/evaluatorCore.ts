@@ -11,7 +11,7 @@ import { PythonVersion, pythonVersion3_9, pythonVersion3_13 } from '../../common
 import { Diagnostic, DiagnosticAddendum } from '../../common/diagnostic';
 import { DiagnosticRule } from '../../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../../localization/localize';
-import { ArgCategory, ArgumentNode, AssignmentNode, CallNode, ComprehensionForIfNode, ComprehensionNode, ConstantNode, ExpressionNode, FunctionNode, ImportAsNode, ImportFromAsNode, ImportFromNode, IndexNode, isExpressionNode, LambdaNode, ListNode, NameNode, ParamCategory, ParameterNode, ParseNode, ParseNodeType, SetNode, SliceNode, StringListNode, StringNode, TypeParameterNode, UnpackNode, YieldFromNode, YieldNode } from '../../parser/parseNodes';
+import { ArgCategory, ArgumentNode, AssignmentNode, CallNode, ComprehensionForIfNode, ComprehensionNode, ConstantNode, ErrorExpressionCategory, ExpressionNode, FormatStringNode, FunctionNode, ImportAsNode, ImportFromAsNode, ImportFromNode, IndexNode, isExpressionNode, LambdaNode, ListNode, NameNode, ParamCategory, ParameterNode, ParseNode, ParseNodeType, SetNode, SliceNode, StringListNode, StringNode, TypeParameterNode, UnpackNode, YieldFromNode, YieldNode } from '../../parser/parseNodes';
 import { KeywordType, OperatorType, StringTokenFlags } from '../../parser/tokenizerTypes';
 import { Parser, ParseOptions, ParseTextMode } from '../../parser/parser';
 import { TextRange } from '../../common/textRange';
@@ -11201,4 +11201,266 @@ export function assignClassWithEvaluator(
     }
 
     return false;
+}
+
+export function getTypeOfStringWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: StringNode | FormatStringNode,
+    prefetched: Partial<PrefetchedTypes> | undefined
+): TypeResult {
+    const isBytes = (node.d.token.flags & StringTokenFlags.Bytes) !== 0;
+    let typeResult: TypeResult | undefined;
+    let isIncomplete = false;
+
+    if (node.nodeType === ParseNodeType.String) {
+        typeResult = {
+            type: cloneBuiltinObjectWithLiteralWithEvaluator(evaluator, node, isBytes ? 'bytes' : 'str', node.d.value),
+            isIncomplete,
+        };
+    } else {
+        const isTemplateString = (node.d.token.flags & StringTokenFlags.Template) !== 0;
+        let isLiteralString = true;
+
+        node.d.fieldExprs.forEach((expr) => {
+            const exprTypeResult = evaluator.getTypeOfExpression(expr);
+            const exprType = exprTypeResult.type;
+
+            if (exprTypeResult.isIncomplete) {
+                isIncomplete = true;
+            }
+
+            doForEachSubtype(exprType, (exprSubtype) => {
+                if (!isClassInstance(exprSubtype)) {
+                    isLiteralString = false;
+                    return;
+                }
+
+                if (ClassType.isBuiltIn(exprSubtype, 'LiteralString')) {
+                    return;
+                }
+
+                if (ClassType.isBuiltIn(exprSubtype, 'str') && exprSubtype.priv.literalValue !== undefined) {
+                    return;
+                }
+
+                isLiteralString = false;
+            });
+        });
+
+        if (isTemplateString) {
+            const templateType =
+                prefetched?.templateClass && isInstantiableClass(prefetched?.templateClass)
+                    ? ClassType.cloneAsInstance(prefetched.templateClass)
+                    : UnknownType.create();
+
+            typeResult = { type: templateType, isIncomplete };
+        } else if (!isBytes && isLiteralString) {
+            const literalStringType = evaluator.getTypingType(node, 'LiteralString');
+            if (literalStringType && isInstantiableClass(literalStringType)) {
+                typeResult = { type: ClassType.cloneAsInstance(literalStringType), isIncomplete };
+            }
+        }
+
+        if (!typeResult) {
+            typeResult = {
+                type: evaluator.getBuiltInObject(node, isBytes ? 'bytes' : 'str'),
+                isIncomplete,
+            };
+
+            if (isClass(typeResult.type) && typeResult.type.priv.includePromotions) {
+                typeResult.type = ClassType.cloneRemoveTypePromotions(typeResult.type);
+            }
+        }
+    }
+
+    return typeResult;
+}
+
+export function createLiteralTypeWithEvaluator(
+    evaluator: TypeEvaluator,
+    classType: ClassType,
+    node: IndexNode,
+    flags: EvalFlags,
+    prefetched: Partial<PrefetchedTypes> | undefined
+): Type {
+    if (node.d.items.length === 0) {
+        evaluator.addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.literalEmptyArgs(), node.d.leftExpr);
+        return UnknownType.create();
+    }
+
+    const literalTypes: Type[] = [];
+    let isValidTypeForm = true;
+
+    for (const item of node.d.items) {
+        let type: Type | undefined;
+        const itemExpr = item.d.valueExpr;
+
+        if (item.d.argCategory !== ArgCategory.Simple) {
+            if ((flags & EvalFlags.TypeExpression) !== 0) {
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportInvalidTypeForm,
+                    LocMessage.unpackedArgInTypeArgument(),
+                    itemExpr
+                );
+                type = UnknownType.create();
+                isValidTypeForm = false;
+            }
+        } else if (item.d.name) {
+            if ((flags & EvalFlags.TypeExpression) !== 0) {
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportInvalidTypeForm,
+                    LocMessage.keywordArgInTypeArgument(),
+                    itemExpr
+                );
+                type = UnknownType.create();
+                isValidTypeForm = false;
+            }
+        } else if (itemExpr.nodeType === ParseNodeType.StringList) {
+            const isBytes = (itemExpr.d.strings[0].d.token.flags & StringTokenFlags.Bytes) !== 0;
+            const value = itemExpr.d.strings.map((s) => s.d.value).join('');
+            if (isBytes) {
+                type = cloneBuiltinClassWithLiteralWithEvaluator(evaluator, node, classType, 'bytes', value);
+            } else {
+                type = cloneBuiltinClassWithLiteralWithEvaluator(evaluator, node, classType, 'str', value);
+            }
+
+            if ((flags & EvalFlags.TypeExpression) !== 0) {
+                itemExpr.d.strings.forEach((stringNode) => {
+                    if ((stringNode.d.token.flags & StringTokenFlags.NamedUnicodeEscape) !== 0) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportInvalidTypeForm,
+                            LocMessage.literalNamedUnicodeEscape(),
+                            stringNode
+                        );
+                        isValidTypeForm = false;
+                    }
+                });
+            }
+        } else if (itemExpr.nodeType === ParseNodeType.Number) {
+            if (!itemExpr.d.isImaginary && itemExpr.d.isInteger) {
+                type = cloneBuiltinClassWithLiteralWithEvaluator(evaluator, node, classType, 'int', itemExpr.d.value);
+            }
+        } else if (itemExpr.nodeType === ParseNodeType.Constant) {
+            if (itemExpr.d.constType === KeywordType.True) {
+                type = cloneBuiltinClassWithLiteralWithEvaluator(evaluator, node, classType, 'bool', true);
+            } else if (itemExpr.d.constType === KeywordType.False) {
+                type = cloneBuiltinClassWithLiteralWithEvaluator(evaluator, node, classType, 'bool', false);
+            } else if (itemExpr.d.constType === KeywordType.None) {
+                type = prefetched?.noneTypeClass ?? UnknownType.create();
+            }
+        } else if (itemExpr.nodeType === ParseNodeType.UnaryOperation) {
+            if (itemExpr.d.operator === OperatorType.Subtract || itemExpr.d.operator === OperatorType.Add) {
+                if (itemExpr.d.expr.nodeType === ParseNodeType.Number) {
+                    if (!itemExpr.d.expr.d.isImaginary && itemExpr.d.expr.d.isInteger) {
+                        type = cloneBuiltinClassWithLiteralWithEvaluator(
+                            evaluator,
+                            node,
+                            classType,
+                            'int',
+                            itemExpr.d.operator === OperatorType.Subtract
+                                ? -itemExpr.d.expr.d.value
+                                : itemExpr.d.expr.d.value
+                        );
+                    }
+                }
+            }
+        }
+
+        if (!type) {
+            const exprType = evaluator.getTypeOfExpression(
+                itemExpr,
+                (flags & (EvalFlags.ForwardRefs | EvalFlags.TypeExpression)) | EvalFlags.NoConvertSpecialForm
+            );
+
+            if (
+                isClassInstance(exprType.type) &&
+                ClassType.isEnumClass(exprType.type) &&
+                exprType.type.priv.literalValue !== undefined
+            ) {
+                type = ClassType.cloneAsInstantiable(exprType.type);
+            } else {
+                let isLiteralType = true;
+
+                doForEachSubtype(exprType.type, (subtype) => {
+                    if (!isInstantiableClass(subtype) || subtype.priv.literalValue === undefined) {
+                        if (!isNoneTypeClass(subtype)) {
+                            isLiteralType = false;
+                        }
+                    }
+                });
+
+                if (isLiteralType) {
+                    type = exprType.type;
+                }
+            }
+        }
+
+        if (!type) {
+            if ((flags & EvalFlags.TypeExpression) !== 0) {
+                evaluator.addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.literalUnsupportedType(), item);
+                type = UnknownType.create();
+                isValidTypeForm = false;
+            } else {
+                return ClassType.cloneAsInstance(classType);
+            }
+        }
+
+        literalTypes.push(type);
+    }
+
+    let result = combineTypes(literalTypes, { skipElideRedundantLiterals: true });
+
+    if (isUnion(result) && prefetched?.unionTypeClass && isInstantiableClass(prefetched.unionTypeClass)) {
+        result = TypeBase.cloneAsSpecialForm(result, ClassType.cloneAsInstance(prefetched.unionTypeClass));
+    }
+
+    if (isTypeFormSupportedForNode(node) && isValidTypeForm) {
+        result = TypeBase.cloneWithTypeForm(result, convertToInstance(result));
+    }
+
+    return result;
+}
+
+export function expandArgTypesWithEvaluator(
+    evaluator: TypeEvaluator,
+    contextFreeArgTypes: Type[],
+    expandedArgTypes: (Type | undefined)[][]
+): (Type | undefined)[][] | undefined {
+    let indexToExpand = contextFreeArgTypes.length - 1;
+    while (indexToExpand >= 0 && !expandedArgTypes[0][indexToExpand]) {
+        indexToExpand--;
+    }
+
+    indexToExpand++;
+
+    if (indexToExpand >= contextFreeArgTypes.length) {
+        return undefined;
+    }
+
+    let expandedTypes: Type[] | undefined;
+    while (indexToExpand < contextFreeArgTypes.length) {
+        const argType = contextFreeArgTypes[indexToExpand];
+
+        expandedTypes = expandArgTypeWithEvaluator(evaluator, argType);
+        if (expandedTypes) {
+            break;
+        }
+        indexToExpand++;
+    }
+
+    if (!expandedTypes) {
+        return undefined;
+    }
+
+    const newExpandedArgTypes: (Type | undefined)[][] = [];
+
+    expandedArgTypes.forEach((preExpandedTypes) => {
+        expandedTypes.forEach((subtype) => {
+            const expandedTypes = [...preExpandedTypes];
+            expandedTypes[indexToExpand] = subtype;
+            newExpandedArgTypes.push(expandedTypes);
+        });
+    });
+
+    return newExpandedArgTypes;
 }
