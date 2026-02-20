@@ -44,7 +44,7 @@ import { getLastTypedDeclarationForSymbol } from '../symbolUtils';
 import * as TypeEvaluatorNarrowing from './narrowing';
 import * as ScopeUtils from '../scopeUtils';
 import { FunctionDecoratorInfo, getFunctionInfoFromDecorators } from '../decorators';
-import { createTypedDictTypeInlined, getTypeOfIndexedTypedDict, assignTypedDictToTypedDict, getTypedDictMappingEquivalent, getTypedDictDictEquivalent, getTypedDictMembersForClass } from '../typedDicts';
+import { createTypedDictTypeInlined, getTypeOfIndexedTypedDict, assignTypedDictToTypedDict, getTypedDictMappingEquivalent, getTypedDictDictEquivalent, getTypedDictMembersForClass, assignToTypedDict } from '../typedDicts';
 
 export interface ReturnTypeInferenceContextFrame {
     functionNode: ParseNode;
@@ -12115,4 +12115,247 @@ export function getKeyAndValueTypesFromDictionaryWithEvaluator(
     });
 
     return { type: AnyType.create(), isIncomplete, typeErrors };
+}
+export function getTypeOfDictionaryWithContextWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: DictionaryNode,
+    flags: EvalFlags,
+    inferenceContext: InferenceContext,
+    prefetched: Partial<PrefetchedTypes> | undefined,
+    expectedDiagAddendum?: DiagnosticAddendum
+): TypeResult | undefined {
+    inferenceContext.expectedType = transformPossibleRecursiveTypeAlias(inferenceContext.expectedType);
+    let concreteExpectedType = evaluator.makeTopLevelTypeVarsConcrete(inferenceContext.expectedType);
+
+    if (!isClassInstance(concreteExpectedType)) {
+        return undefined;
+    }
+
+    const keyTypes: TypeResultWithNode[] = [];
+    const valueTypes: TypeResultWithNode[] = [];
+    let isIncomplete = false;
+    let typeErrors = false;
+
+    if (ClassType.isTypedDictClass(concreteExpectedType)) {
+        concreteExpectedType = TypeBase.cloneForCondition(concreteExpectedType, undefined);
+
+        const expectedTypedDictEntries = getTypedDictMembersForClass(evaluator, concreteExpectedType);
+
+        const keyValueTypeResult = getKeyAndValueTypesFromDictionaryWithEvaluator(
+            evaluator,
+            node,
+            flags,
+            keyTypes,
+            valueTypes,
+            /* forceStrictInference */ true,
+            /* isValueTypeInvariant */ true,
+            prefetched,
+            /* expectedKeyType */ undefined,
+            /* expectedValueType */ undefined,
+            expectedTypedDictEntries,
+            expectedDiagAddendum
+        );
+
+        if (keyValueTypeResult.isIncomplete) {
+            isIncomplete = true;
+        }
+
+        if (keyValueTypeResult.typeErrors) {
+            typeErrors = true;
+        }
+
+        const resultTypedDict = assignToTypedDict(
+            evaluator,
+            concreteExpectedType,
+            keyTypes,
+            valueTypes,
+            expectedDiagAddendum?.isEmpty() ? expectedDiagAddendum : undefined
+        );
+        if (resultTypedDict) {
+            return {
+                type: resultTypedDict,
+                isIncomplete,
+            };
+        }
+
+        return undefined;
+    }
+
+    let expectedKeyType: Type;
+    let expectedValueType: Type;
+
+    if (isAnyOrUnknown(inferenceContext.expectedType)) {
+        expectedKeyType = inferenceContext.expectedType;
+        expectedValueType = inferenceContext.expectedType;
+    } else {
+        const builtInDict = evaluator.getBuiltInObject(node, 'dict');
+        if (!isClassInstance(builtInDict)) {
+            return undefined;
+        }
+
+        const dictConstraints = new ConstraintTracker();
+        if (
+            !addConstraintsForExpectedType(
+                evaluator,
+                builtInDict,
+                inferenceContext.expectedType,
+                dictConstraints,
+                ParseTreeUtils.getTypeVarScopesForNode(node),
+                node.start
+            )
+        ) {
+            return undefined;
+        }
+
+        const specializedDict = evaluator.solveAndApplyConstraints(
+            ClassType.cloneAsInstantiable(builtInDict),
+            dictConstraints
+        ) as ClassType;
+        if (!specializedDict.priv.typeArgs || specializedDict.priv.typeArgs.length !== 2) {
+            return undefined;
+        }
+
+        expectedKeyType = specializedDict.priv.typeArgs[0];
+        expectedValueType = specializedDict.priv.typeArgs[1];
+    }
+
+    let isValueTypeInvariant = false;
+    if (isClassInstance(inferenceContext.expectedType)) {
+        if (inferenceContext.expectedType.shared.typeParams.length >= 2) {
+            const valueTypeParam = inferenceContext.expectedType.shared.typeParams[1];
+            if (TypeVarType.getVariance(valueTypeParam) === Variance.Invariant) {
+                isValueTypeInvariant = true;
+            }
+        }
+    }
+
+    const keyValueResult = getKeyAndValueTypesFromDictionaryWithEvaluator(
+        evaluator,
+        node,
+        flags,
+        keyTypes,
+        valueTypes,
+        /* forceStrictInference */ true,
+        isValueTypeInvariant,
+        prefetched,
+        expectedKeyType,
+        expectedValueType,
+        undefined,
+        expectedDiagAddendum
+    );
+
+    if (keyValueResult.isIncomplete) {
+        isIncomplete = true;
+    }
+
+    if (keyValueResult.typeErrors) {
+        typeErrors = true;
+    }
+
+    const specializedKeyType = inferTypeArgFromExpectedEntryTypeWithEvaluator(
+        evaluator,
+        makeInferenceContext(expectedKeyType),
+        keyTypes.map((result) => result.type),
+        /* isNarrowable */ false
+    );
+    const specializedValueType = inferTypeArgFromExpectedEntryTypeWithEvaluator(
+        evaluator,
+        makeInferenceContext(expectedValueType),
+        valueTypes.map((result) => result.type),
+        !isValueTypeInvariant
+    );
+    if (!specializedKeyType || !specializedValueType) {
+        return undefined;
+    }
+
+    const type = evaluator.getBuiltInObject(node, 'dict', [specializedKeyType, specializedValueType]);
+    return { type, isIncomplete, typeErrors };
+}
+
+export function getTypeOfDictionaryInferredWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: DictionaryNode,
+    flags: EvalFlags,
+    hasExpectedType: boolean,
+    prefetched: Partial<PrefetchedTypes> | undefined
+): TypeResult {
+    const fallbackType = hasExpectedType ? AnyType.create() : UnknownType.create();
+    let keyType: Type = fallbackType;
+    let valueType: Type = fallbackType;
+
+    const keyTypeResults: TypeResultWithNode[] = [];
+    const valueTypeResults: TypeResultWithNode[] = [];
+
+    let isEmptyContainer = false;
+    let isIncomplete = false;
+    let typeErrors = false;
+
+    const keyValueResult = getKeyAndValueTypesFromDictionaryWithEvaluator(
+        evaluator,
+        node,
+        flags,
+        keyTypeResults,
+        valueTypeResults,
+        /* forceStrictInference */ hasExpectedType,
+        /* isValueTypeInvariant */ false,
+        prefetched
+    );
+
+    if (keyValueResult.isIncomplete) {
+        isIncomplete = true;
+    }
+
+    if (keyValueResult.typeErrors) {
+        typeErrors = true;
+    }
+
+    const keyTypes = keyTypeResults.map((t) =>
+        stripTypeForm(convertSpecialFormToRuntimeValueWithPrefetched(evaluator.stripLiteralValue(t.type), flags, prefetched, !hasExpectedType))
+    );
+    const valueTypes = valueTypeResults.map((t) =>
+        stripTypeForm(convertSpecialFormToRuntimeValueWithPrefetched(evaluator.stripLiteralValue(t.type), flags, prefetched, !hasExpectedType))
+    );
+
+    if (keyTypes.length > 0) {
+        if (AnalyzerNodeInfo.getFileInfo(node).diagnosticRuleSet.strictDictionaryInference || hasExpectedType) {
+            keyType = combineTypes(keyTypes);
+        } else {
+            keyType = areTypesSame(keyTypes, { ignorePseudoGeneric: true }) ? keyTypes[0] : fallbackType;
+        }
+    } else {
+        keyType = fallbackType;
+    }
+
+    if (valueTypes.length > 0) {
+        if (AnalyzerNodeInfo.getFileInfo(node).diagnosticRuleSet.strictDictionaryInference || hasExpectedType) {
+            valueType = combineTypes(valueTypes);
+        } else {
+            valueType = areTypesSame(valueTypes, { ignorePseudoGeneric: true }) ? valueTypes[0] : fallbackType;
+        }
+    } else {
+        valueType = fallbackType;
+        isEmptyContainer = true;
+    }
+
+    const dictClass = evaluator.getBuiltInType(node, 'dict');
+    const type = isInstantiableClass(dictClass)
+        ? ClassType.cloneAsInstance(
+              ClassType.specialize(
+                  dictClass,
+                  [keyType, valueType],
+                  /* isTypeArgExplicit */ true,
+                  /* includeSubclasses */ undefined,
+                  /* tupleTypeArgs */ undefined,
+                  isEmptyContainer
+              )
+          )
+        : UnknownType.create();
+
+    if (isIncomplete) {
+        if (getContainerDepth(type) > maxInferredContainerDepth) {
+            return { type: UnknownType.create() };
+        }
+    }
+
+    return { type, isIncomplete, typeErrors };
 }
