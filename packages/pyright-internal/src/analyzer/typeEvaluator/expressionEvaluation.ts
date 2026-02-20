@@ -21,7 +21,8 @@ import { AnyType, ClassType, combineTypes, findSubtype, FunctionParam, FunctionP
 import { addConditionToType, ClassMember, convertToInstance, derivesFromAnyOrUnknown, derivesFromClassRecursive, doForEachSubtype, getGeneratorTypeArgs, getGeneratorYieldType, getSpecializedTupleType, getTypeCondition, InferenceContext, isLiteralType, isMetaclassInstance, isNoneInstance, isNoneTypeClass, isOptionalType, isTupleClass, isTupleIndexUnambiguous, lookUpClassMember, lookUpObjectMember, makeInferenceContext, makeTypeVarsBound, mapSubtypes, MemberAccessFlags, partiallySpecializeType, removeNoneFromUnion, requiresSpecialization, selfSpecializeClass, specializeForBaseClass, synthesizeTypeVarForSelfCls, transformPossibleRecursiveTypeAlias } from '../typeUtils';
 import { getSlicedTupleType, makeTupleObject } from '../tuples';
 import { createTypedDictTypeInlined, getTypeOfIndexedTypedDict } from '../typedDicts';
-import { cloneBuiltinClassWithLiteralWithEvaluator, cloneBuiltinObjectWithLiteralWithEvaluator, convertArgumentNodeToArg, convertSpecialFormToRuntimeValueWithPrefetched, getIndexAccessMagicMethodNameForUsage, getTypeOfArgExpectingTypeWithEvaluator, getTypeOfAwaitableWithEvaluator, parseStringAsTypeAnnotationNode, printSrcDestTypesWithEvaluator, validateSymbolIsTypeExpressionWithEvaluator } from './evaluatorCore';
+import { cloneBuiltinClassWithLiteralWithEvaluator, cloneBuiltinObjectWithLiteralWithEvaluator, convertArgumentNodeToArg, convertSpecialFormToRuntimeValueWithPrefetched, getTypeOfArgExpectingTypeWithEvaluator, getTypeOfAwaitableWithEvaluator, parseStringAsTypeAnnotationNode, printSrcDestTypesWithEvaluator } from './evaluatorCore';
+import { getIndexAccessMagicMethodNameForUsage, validateSymbolIsTypeExpressionWithEvaluator } from './memberResolution';
 import { isTypeFormSupportedForNode } from './pureHelpers';
 
 export function getTypeOfSliceWithEvaluator(
