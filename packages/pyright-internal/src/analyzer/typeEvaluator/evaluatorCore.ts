@@ -11,7 +11,7 @@ import { PythonVersion, pythonVersion3_9, pythonVersion3_13 } from '../../common
 import { Diagnostic, DiagnosticAddendum } from '../../common/diagnostic';
 import { DiagnosticRule } from '../../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../../localization/localize';
-import { ArgCategory, ArgumentNode, AssignmentNode, CallNode, ComprehensionForIfNode, ComprehensionNode, ConstantNode, ErrorExpressionCategory, ExpressionNode, FormatStringNode, FunctionNode, ImportAsNode, ImportFromAsNode, ImportFromNode, IndexNode, isExpressionNode, LambdaNode, ListNode, NameNode, ParamCategory, ParameterNode, ParseNode, ParseNodeType, SetNode, SliceNode, StringListNode, StringNode, TypeParameterNode, UnpackNode, YieldFromNode, YieldNode } from '../../parser/parseNodes';
+import { ArgCategory, ArgumentNode, AssignmentNode, CallNode, ComprehensionForIfNode, ComprehensionNode, ConstantNode, DictionaryNode, ErrorExpressionCategory, ExpressionNode, FormatStringNode, FunctionNode, ImportAsNode, ImportFromAsNode, ImportFromNode, IndexNode, isExpressionNode, LambdaNode, ListNode, NameNode, ParamCategory, ParameterNode, ParseNode, ParseNodeType, SetNode, SliceNode, StringListNode, StringNode, TypeParameterNode, UnpackNode, YieldFromNode, YieldNode } from '../../parser/parseNodes';
 import { KeywordType, OperatorType, StringTokenFlags } from '../../parser/tokenizerTypes';
 import { Parser, ParseOptions, ParseTextMode } from '../../parser/parser';
 import { TextRange } from '../../common/textRange';
@@ -25,8 +25,8 @@ import { isAnnotationEvaluationPostponed } from '../analyzerFileInfo';
 import { Declaration, DeclarationType, FunctionDeclaration } from '../declaration';
 import { AbstractSymbol, Arg, ArgWithExpression, AssignTypeFlags, CallResult, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, MagicMethodDeprecationInfo, maxInferredContainerDepth, maxSubtypesForInferredType, MemberAccessDeprecationInfo, MemberAccessTypeResult, PrefetchedTypes, PrintTypeOptions, Reachability, SolveConstraintsOptions, SymbolDeclInfo, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
-import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, InheritanceChain, isAny, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isOverloaded, isParamSpec, isPositionOnlySeparator, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, LiteralValue, maxTypeRecursionCount, ModuleType, NeverType, OverloadedType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeCategory, TypeCondition, TypeVarKind, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnionType, UnknownType, Variance } from '../types';
-import { addConditionToType, applySolvedTypeVars, ApplyTypeVarOptions, areTypesSame, ClassMember, combineSameSizedTuples, combineVariances, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromAnyOrUnknown, derivesFromClassRecursive, derivesFromStdlibClass, doForEachSubtype, addTypeVarsToListIfUnique, explodeGenericClass, getContainerDepth, getDeclaredGeneratorReturnType, getGeneratorTypeArgs, getGeneratorYieldType, getSpecializedTupleType, getTypeCondition, getTypeVarArgsRecursive, getTypeVarScopeId, getTypeVarScopeIds, getUnknownTypeForCallable, InferenceContext, invertVariance, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralLikeType, isLiteralType, isMetaclassInstance, isNoneInstance, isNoneTypeClass, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTupleIndexUnambiguous, isTypeAliasPlaceholder, isUnboundedTupleClass, isVarianceOfTypeArgCompatible, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeInferenceContext, makeTypeVarsBound, MapSubtypesOptions, mapSignatures, mapSubtypes, MemberAccessFlags, partiallySpecializeType, removeNoneFromUnion, requiresSpecialization, requiresTypeArgs, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeForBaseClass, specializeWithDefaultTypeArgs, specializeTupleClass, stripTypeForm, synthesizeTypeVarForSelfCls, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
+import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, InheritanceChain, isAny, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isOverloaded, isParamSpec, isPositionOnlySeparator, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, LiteralValue, maxTypeRecursionCount, ModuleType, NeverType, OverloadedType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeCategory, TypeCondition, TypedDictEntries, TypeVarKind, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnionType, UnknownType, Variance } from '../types';
+import { addConditionToType, applySolvedTypeVars, ApplyTypeVarOptions, areTypesSame, ClassMember, combineSameSizedTuples, combineVariances, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromAnyOrUnknown, derivesFromClassRecursive, derivesFromStdlibClass, doForEachSubtype, addTypeVarsToListIfUnique, explodeGenericClass, getContainerDepth, getDeclaredGeneratorReturnType, getGeneratorTypeArgs, getGeneratorYieldType, getSpecializedTupleType, getTypeCondition, getTypeVarArgsRecursive, getTypeVarScopeId, getTypeVarScopeIds, getUnknownTypeForCallable, InferenceContext, invertVariance, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralLikeType, isLiteralType, isMetaclassInstance, isNoneInstance, isNoneTypeClass, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTupleIndexUnambiguous, isTypeAliasPlaceholder, isUnboundedTupleClass, isVarianceOfTypeArgCompatible, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeInferenceContext, makeTypeVarsBound, MapSubtypesOptions, mapSignatures, mapSubtypes, MemberAccessFlags, partiallySpecializeType, removeNoneFromUnion, requiresSpecialization, requiresTypeArgs, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeForBaseClass, specializeWithDefaultTypeArgs, specializeTupleClass, stripTypeForm, synthesizeTypeVarForSelfCls, transformExpectedType, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails, ParamKind, ParamListDetails, VirtualParamDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 import { ConstraintSolution } from '../constraintSolution';
@@ -44,7 +44,7 @@ import { getLastTypedDeclarationForSymbol } from '../symbolUtils';
 import * as TypeEvaluatorNarrowing from './narrowing';
 import * as ScopeUtils from '../scopeUtils';
 import { FunctionDecoratorInfo, getFunctionInfoFromDecorators } from '../decorators';
-import { createTypedDictTypeInlined, getTypeOfIndexedTypedDict, assignTypedDictToTypedDict, getTypedDictMappingEquivalent, getTypedDictDictEquivalent } from '../typedDicts';
+import { createTypedDictTypeInlined, getTypeOfIndexedTypedDict, assignTypedDictToTypedDict, getTypedDictMappingEquivalent, getTypedDictDictEquivalent, getTypedDictMembersForClass } from '../typedDicts';
 
 export interface ReturnTypeInferenceContextFrame {
     functionNode: ParseNode;
@@ -11830,4 +11830,289 @@ export function getTypeOfComprehensionWithEvaluator(
     }
 
     return { type, isIncomplete, typeErrors };
+}
+export function getKeyAndValueTypesFromDictionaryWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: DictionaryNode,
+    flags: EvalFlags,
+    keyTypes: TypeResultWithNode[],
+    valueTypes: TypeResultWithNode[],
+    forceStrictInference: boolean,
+    isValueTypeInvariant: boolean,
+    prefetched: Partial<PrefetchedTypes> | undefined,
+    expectedKeyType?: Type,
+    expectedValueType?: Type,
+    expectedTypedDictEntries?: TypedDictEntries,
+    expectedDiagAddendum?: DiagnosticAddendum
+): TypeResult {
+    let isIncomplete = false;
+    let typeErrors = false;
+
+    const keyFlags = flags & ~(EvalFlags.TypeExpression | EvalFlags.StrLiteralAsType | EvalFlags.InstantiableType);
+
+    node.d.items.forEach((entryNode, index) => {
+        let addUnknown = true;
+
+        if (entryNode.nodeType === ParseNodeType.DictionaryKeyEntry) {
+            const keyTypeResult = evaluator.getTypeOfExpression(
+                entryNode.d.keyExpr,
+                keyFlags | EvalFlags.StripTupleLiterals,
+                makeInferenceContext(
+                    expectedKeyType ?? (forceStrictInference ? NeverType.createNever() : undefined)
+                )
+            );
+
+            if (keyTypeResult.isIncomplete) {
+                isIncomplete = true;
+            }
+
+            if (keyTypeResult.typeErrors) {
+                typeErrors = true;
+            }
+
+            const keyType = keyTypeResult.type;
+
+            if (!keyTypeResult.isIncomplete && !keyTypeResult.typeErrors) {
+                verifySetEntryOrDictKeyIsHashableWithEvaluator(evaluator, entryNode.d.keyExpr, keyType, /* isDictKey */ true);
+            }
+
+            if (expectedDiagAddendum && keyTypeResult.expectedTypeDiagAddendum) {
+                expectedDiagAddendum.addAddendum(keyTypeResult.expectedTypeDiagAddendum);
+            }
+
+            let valueTypeResult: TypeResult;
+            let entryInferenceContext: InferenceContext | undefined;
+
+            if (
+                expectedTypedDictEntries &&
+                isClassInstance(keyType) &&
+                ClassType.isBuiltIn(keyType, 'str') &&
+                isLiteralType(keyType) &&
+                (expectedTypedDictEntries.knownItems.has(keyType.priv.literalValue as string) ||
+                    expectedTypedDictEntries.extraItems)
+            ) {
+                let effectiveValueType =
+                    expectedTypedDictEntries.knownItems.get(keyType.priv.literalValue as string)?.valueType ??
+                    expectedTypedDictEntries.extraItems?.valueType;
+                if (effectiveValueType) {
+                    const liveTypeVarScopes = ParseTreeUtils.getTypeVarScopesForNode(node);
+                    effectiveValueType = transformExpectedType(effectiveValueType, liveTypeVarScopes, node.start);
+                }
+                entryInferenceContext = makeInferenceContext(effectiveValueType);
+                valueTypeResult = evaluator.getTypeOfExpression(
+                    entryNode.d.valueExpr,
+                    flags | EvalFlags.StripTupleLiterals,
+                    entryInferenceContext
+                );
+            } else {
+                let effectiveValueType =
+                    expectedValueType ?? (forceStrictInference ? NeverType.createNever() : undefined);
+                if (effectiveValueType) {
+                    const liveTypeVarScopes = ParseTreeUtils.getTypeVarScopesForNode(node);
+                    effectiveValueType = transformExpectedType(effectiveValueType, liveTypeVarScopes, node.start);
+                }
+                entryInferenceContext = makeInferenceContext(effectiveValueType);
+                valueTypeResult = evaluator.getTypeOfExpression(
+                    entryNode.d.valueExpr,
+                    flags | EvalFlags.StripTupleLiterals,
+                    entryInferenceContext
+                );
+            }
+
+            if (entryInferenceContext && !valueTypeResult.typeErrors) {
+                const fromExpectedType = inferTypeArgFromExpectedEntryTypeWithEvaluator(
+                    evaluator,
+                    entryInferenceContext,
+                    [valueTypeResult.type],
+                    !isValueTypeInvariant
+                );
+
+                if (fromExpectedType) {
+                    valueTypeResult = { ...valueTypeResult, type: fromExpectedType };
+                }
+            }
+
+            if (expectedDiagAddendum && valueTypeResult.expectedTypeDiagAddendum) {
+                expectedDiagAddendum.addAddendum(valueTypeResult.expectedTypeDiagAddendum);
+            }
+
+            const valueType = valueTypeResult.type;
+            if (valueTypeResult.isIncomplete) {
+                isIncomplete = true;
+            }
+
+            if (valueTypeResult.typeErrors) {
+                typeErrors = true;
+            }
+
+            if (forceStrictInference || index < maxEntriesToUseForInference) {
+                if (isClass(keyType) && isLiteralType(keyType)) {
+                    const existingIndex = keyTypes.findIndex((kt) => isTypeSame(keyType, kt.type));
+                    if (existingIndex >= 0) {
+                        keyTypes.splice(existingIndex, 1);
+                        valueTypes.splice(existingIndex, 1);
+                    }
+                }
+
+                keyTypes.push({ node: entryNode.d.keyExpr, type: keyType });
+                valueTypes.push({ node: entryNode.d.valueExpr, type: valueType });
+            }
+
+            addUnknown = false;
+        } else if (entryNode.nodeType === ParseNodeType.DictionaryExpandEntry) {
+            let expectedType: Type | undefined;
+            if (expectedKeyType && expectedValueType) {
+                if (
+                    prefetched?.supportsKeysAndGetItemClass &&
+                    isInstantiableClass(prefetched.supportsKeysAndGetItemClass)
+                ) {
+                    expectedType = ClassType.cloneAsInstance(
+                        ClassType.specialize(prefetched.supportsKeysAndGetItemClass, [
+                            expectedKeyType,
+                            expectedValueType,
+                        ])
+                    );
+                }
+            }
+
+            const entryInferenceContext = makeInferenceContext(expectedType);
+            let unexpandedTypeResult = evaluator.getTypeOfExpression(
+                entryNode.d.expr,
+                flags | EvalFlags.StripTupleLiterals,
+                entryInferenceContext
+            );
+
+            if (entryInferenceContext && !unexpandedTypeResult.typeErrors) {
+                const fromExpectedType = inferTypeArgFromExpectedEntryTypeWithEvaluator(
+                    evaluator,
+                    entryInferenceContext,
+                    [unexpandedTypeResult.type],
+                    !isValueTypeInvariant
+                );
+
+                if (fromExpectedType) {
+                    unexpandedTypeResult = { ...unexpandedTypeResult, type: fromExpectedType };
+                }
+            }
+
+            if (unexpandedTypeResult.isIncomplete) {
+                isIncomplete = true;
+            }
+
+            if (unexpandedTypeResult.typeErrors) {
+                typeErrors = true;
+            }
+
+            const unexpandedType = unexpandedTypeResult.type;
+
+            if (isAnyOrUnknown(unexpandedType)) {
+                if (forceStrictInference || index < maxEntriesToUseForInference) {
+                    keyTypes.push({ node: entryNode, type: unexpandedType });
+                    valueTypes.push({ node: entryNode, type: unexpandedType });
+                }
+                addUnknown = false;
+            } else if (isClassInstance(unexpandedType) && ClassType.isTypedDictClass(unexpandedType)) {
+                if (prefetched?.strClass && isInstantiableClass(prefetched.strClass)) {
+                    const strObject = ClassType.cloneAsInstance(prefetched.strClass);
+                    const tdEntries = getTypedDictMembersForClass(
+                        evaluator,
+                        unexpandedType,
+                        /* allowNarrowed */ true
+                    );
+
+                    tdEntries.knownItems.forEach((entry, name) => {
+                        if (entry.isRequired || entry.isProvided) {
+                            keyTypes.push({
+                                node: entryNode,
+                                type: ClassType.cloneWithLiteral(strObject, name),
+                            });
+                            valueTypes.push({ node: entryNode, type: entry.valueType });
+                        }
+                    });
+
+                    if (!expectedTypedDictEntries) {
+                        keyTypes.push({ node: entryNode, type: ClassType.cloneAsInstance(strObject) });
+                        valueTypes.push({
+                            node: entryNode,
+                            type: tdEntries.extraItems?.valueType ?? evaluator.getObjectType(),
+                        });
+                    }
+
+                    addUnknown = false;
+                }
+            } else if (
+                prefetched?.supportsKeysAndGetItemClass &&
+                isInstantiableClass(prefetched.supportsKeysAndGetItemClass)
+            ) {
+                const mappingConstraints = new ConstraintTracker();
+
+                const supportsKeysAndGetItemClass = selfSpecializeClass(prefetched.supportsKeysAndGetItemClass);
+
+                if (
+                    evaluator.assignType(
+                        ClassType.cloneAsInstance(supportsKeysAndGetItemClass),
+                        unexpandedType,
+                        /* diag */ undefined,
+                        mappingConstraints,
+                        AssignTypeFlags.RetainLiteralsForTypeVar
+                    )
+                ) {
+                    const specializedMapping = evaluator.solveAndApplyConstraints(
+                        supportsKeysAndGetItemClass,
+                        mappingConstraints
+                    ) as ClassType;
+                    const typeArgs = specializedMapping.priv.typeArgs;
+                    if (typeArgs && typeArgs.length >= 2) {
+                        if (forceStrictInference || index < maxEntriesToUseForInference) {
+                            keyTypes.push({ node: entryNode, type: typeArgs[0] });
+                            valueTypes.push({ node: entryNode, type: typeArgs[1] });
+                        }
+                        addUnknown = false;
+                    }
+                } else {
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportGeneralTypeIssues,
+                        LocMessage.dictUnpackIsNotMapping(),
+                        entryNode
+                    );
+                }
+            }
+        } else if (entryNode.nodeType === ParseNodeType.Comprehension) {
+            const dictEntryTypeResult = getElementTypeFromComprehensionWithEvaluator(
+                evaluator,
+                entryNode,
+                flags | EvalFlags.StripTupleLiterals,
+                expectedValueType,
+                expectedKeyType
+            );
+            const dictEntryType = dictEntryTypeResult.type;
+            if (dictEntryTypeResult.isIncomplete) {
+                isIncomplete = true;
+            }
+
+            if (dictEntryTypeResult.typeErrors) {
+                typeErrors = true;
+            }
+
+            if (isClassInstance(dictEntryType) && isTupleClass(dictEntryType)) {
+                const typeArgs = dictEntryType.priv.tupleTypeArgs?.map((t) => t.type);
+                if (typeArgs && typeArgs.length === 2) {
+                    if (forceStrictInference || index < maxEntriesToUseForInference) {
+                        keyTypes.push({ node: entryNode, type: typeArgs[0] });
+                        valueTypes.push({ node: entryNode, type: typeArgs[1] });
+                    }
+                    addUnknown = false;
+                }
+            }
+        }
+
+        if (addUnknown) {
+            if (forceStrictInference || index < maxEntriesToUseForInference) {
+                keyTypes.push({ node: entryNode, type: UnknownType.create() });
+                valueTypes.push({ node: entryNode, type: UnknownType.create() });
+            }
+        }
+    });
+
+    return { type: AnyType.create(), isIncomplete, typeErrors };
 }
