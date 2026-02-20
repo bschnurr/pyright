@@ -189,6 +189,7 @@ import * as TypeEvaluatorDiagnostics from './typeEvaluator/diagnostics';
 import * as TypeEvaluatorCore from './typeEvaluator/evaluatorCore';
 import * as CollectionInference from './typeEvaluator/collectionInference';
 import * as AssignFunctions from './typeEvaluator/assignFunctions';
+import * as OverrideValidation from './typeEvaluator/overrideValidation';
 import * as TypeEvaluatorFlowAnalysis from './typeEvaluator/flowAnalysis';
 import * as TypeEvaluatorNarrowing from './typeEvaluator/narrowing';
 import {
@@ -17088,7 +17089,7 @@ export function createTypeEvaluator(
         diag: DiagnosticAddendum,
         enforceParamNames = true
     ): boolean {
-        return TypeEvaluatorCore.validateOverrideMethodWithEvaluator(
+        return OverrideValidation.validateOverrideMethodWithEvaluator(
             baseMethod, overrideMethod, baseClass, diag, evaluatorInterface, enforceParamNames
         );
     }
@@ -17099,7 +17100,7 @@ export function createTypeEvaluator(
     // explicit type annotations for the "self" or "cls" parameter and some
     // of these do not apply to the child class.
     function isOverrideMethodApplicable(baseMethod: FunctionType, childClass: ClassType): boolean {
-        return TypeEvaluatorCore.isOverrideMethodApplicableWithEvaluator(evaluatorInterface, baseMethod, childClass);
+        return OverrideValidation.isOverrideMethodApplicableWithEvaluator(evaluatorInterface, baseMethod, childClass);
     }
 
     // Determines whether the override method is compatible with the overridden method.
@@ -17112,7 +17113,7 @@ export function createTypeEvaluator(
         diag: DiagnosticAddendum | undefined,
         enforceParamNames: boolean
     ): boolean {
-        return TypeEvaluatorCore.validateOverrideMethodInternalWithEvaluator(
+        return OverrideValidation.validateOverrideMethodInternalWithEvaluator(
             baseMethod, overrideMethod, diag, enforceParamNames, evaluatorInterface
         );
     }
