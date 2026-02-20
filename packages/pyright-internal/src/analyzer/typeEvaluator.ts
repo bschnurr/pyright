@@ -1689,15 +1689,7 @@ export function createTypeEvaluator(
     }
 
     function stripLiteralValue(type: Type): Type {
-        return TypeEvaluatorNarrowing.stripLiteralValue(
-            {
-                getStrInstanceTypeForLiteralString: () =>
-                    prefetched?.strClass && isInstantiableClass(prefetched.strClass)
-                        ? ClassType.cloneAsInstance(prefetched.strClass)
-                        : undefined,
-            },
-            type
-        );
+        return TypeEvaluatorCore.stripLiteralValueWithEvaluator(evaluatorInterface, type, prefetched);
     }
 
     function getTypeOfParamAnnotation(paramTypeNode: ExpressionNode, paramCategory: ParamCategory) {
@@ -1768,8 +1760,7 @@ export function createTypeEvaluator(
         applyOptions?: ApplyTypeVarOptions,
         solveOptions?: SolveConstraintsOptions
     ): Type {
-        const solution = solveConstraints(evaluatorInterface, constraints, solveOptions);
-        return applySolvedTypeVars(type, solution, applyOptions);
+        return TypeEvaluatorCore.solveAndApplyConstraintsWithEvaluator(evaluatorInterface, type, constraints, applyOptions, solveOptions);
     }
 
     // Gets a member type from an object or class. If it's a function, binds
@@ -2885,93 +2876,11 @@ export function createTypeEvaluator(
     // do not match will be ignored.
     function mapSubtypesExpandTypeVars(
         type: Type,
-        options: MapSubtypesOptions | undefined,
+        options: TypeEvaluatorCore.MapSubtypesExpandOptions | undefined,
         callback: (expandedSubtype: Type, unexpandedSubtype: Type, isLastIteration: boolean) => Type | undefined,
         recursionCount = 0
     ): Type {
-        const newSubtypes: Type[] = [];
-        let typeChanged = false;
-
-        function expandSubtype(unexpandedType: Type, isLastSubtype: boolean) {
-            let expandedType = isUnion(unexpandedType) ? unexpandedType : makeTopLevelTypeVarsConcrete(unexpandedType);
-
-            expandedType = transformPossibleRecursiveTypeAlias(expandedType);
-            if (options?.expandCallback) {
-                expandedType = options.expandCallback(expandedType);
-            }
-
-            doForEachSubtype(
-                expandedType,
-                (subtype, index, allSubtypes) => {
-                    if (options?.conditionFilter) {
-                        const filteredType = applyConditionFilterToType(
-                            subtype,
-                            options.conditionFilter,
-                            recursionCount
-                        );
-                        if (!filteredType) {
-                            return undefined;
-                        }
-
-                        subtype = filteredType;
-                    }
-
-                    let transformedType = callback(
-                        subtype,
-                        unexpandedType,
-                        isLastSubtype && index === allSubtypes.length - 1
-                    );
-
-                    if (transformedType !== unexpandedType) {
-                        typeChanged = true;
-                    }
-
-                    if (transformedType) {
-                        // Apply the type condition if it's associated with a constrained TypeVar.
-                        const typeCondition = getTypeCondition(subtype)?.filter((condition) =>
-                            TypeVarType.hasConstraints(condition.typeVar)
-                        );
-
-                        if (typeCondition && typeCondition.length > 0) {
-                            transformedType = addConditionToType(transformedType, typeCondition);
-                        }
-
-                        // This code path can often produce many duplicate subtypes. We can
-                        // reduce the cost of the combineTypes call below by filtering out these
-                        // duplicates proactively.
-                        if (
-                            newSubtypes.length === 0 ||
-                            !isTypeSame(transformedType, newSubtypes[newSubtypes.length - 1])
-                        ) {
-                            newSubtypes.push(transformedType);
-                        }
-                    }
-                    return undefined;
-                },
-                options?.sortSubtypes
-            );
-        }
-
-        if (isUnion(type)) {
-            const subtypes = options?.sortSubtypes ? sortTypes(type.priv.subtypes) : type.priv.subtypes;
-            subtypes.forEach((subtype, index) => {
-                expandSubtype(subtype, index === type.priv.subtypes.length - 1);
-            });
-        } else {
-            expandSubtype(type, /* isLastSubtype */ true);
-        }
-
-        if (!typeChanged) {
-            return type;
-        }
-
-        const newType = combineTypes(newSubtypes);
-
-        // Do our best to retain type aliases.
-        if (newType.category === TypeCategory.Union) {
-            UnionType.addTypeAliasSource(newType, type);
-        }
-        return newType;
+        return TypeEvaluatorCore.mapSubtypesExpandTypeVarsWithEvaluator(evaluatorInterface, type, options, callback, recursionCount);
     }
 
     function applyConditionFilterToType(
@@ -5074,41 +4983,7 @@ export function createTypeEvaluator(
         diag: DiagnosticAddendum | undefined,
         recursionCount = 0
     ): TypeResult {
-        // Check for an attempt to overwrite a final method.
-        if (usage.method === 'set') {
-            const impl = isFunction(concreteType) ? concreteType : OverloadedType.getImplementation(concreteType);
-
-            if (impl && isFunction(impl) && FunctionType.isFinal(impl) && memberInfo && isClass(memberInfo.classType)) {
-                diag?.addMessage(
-                    LocMessage.finalMethodOverride().format({
-                        name: memberName,
-                        className: memberInfo.classType.shared.name,
-                    })
-                );
-
-                return { type: UnknownType.create(), typeErrors: true };
-            }
-        }
-
-        // If this function is an instance member (e.g. a lambda that was
-        // assigned to an instance variable), don't perform any binding.
-        if (TypeBase.isInstance(classType)) {
-            if (!memberInfo || memberInfo.isInstanceMember) {
-                return { type: type };
-            }
-        }
-
-        const boundType = bindFunctionToClassOrObject(
-            classType,
-            concreteType,
-            memberInfo && isInstantiableClass(memberInfo.classType) ? memberInfo.classType : undefined,
-            (flags & MemberAccessFlags.TreatConstructorAsClassMethod) !== 0,
-            selfType && isClass(selfType) ? ClassType.cloneIncludeSubclasses(selfType) : selfType,
-            diag,
-            recursionCount
-        );
-
-        return { type: boundType ?? UnknownType.create(), typeErrors: !boundType };
+        return TypeEvaluatorCore.bindMethodForMemberAccessWithEvaluator(evaluatorInterface, type, concreteType, memberInfo, classType, selfType, flags, memberName, usage, diag, recursionCount);
     }
 
     function isAsymmetricDescriptorClass(classType: ClassType): boolean {
@@ -11743,12 +11618,7 @@ export function createTypeEvaluator(
     }
 
     function cloneBuiltinObjectWithLiteral(node: ParseNode, builtInName: string, value: LiteralValue): Type {
-        const type = getBuiltInObject(node, builtInName);
-        if (isClassInstance(type)) {
-            return ClassType.cloneWithLiteral(ClassType.cloneRemoveTypePromotions(type), value);
-        }
-
-        return UnknownType.create();
+        return TypeEvaluatorCore.cloneBuiltinObjectWithLiteralWithEvaluator(evaluatorInterface, node, builtInName, value);
     }
 
     function cloneBuiltinClassWithLiteral(
@@ -11757,14 +11627,7 @@ export function createTypeEvaluator(
         builtInName: string,
         value: LiteralValue
     ): Type {
-        const type = getBuiltInType(node, builtInName);
-        if (isInstantiableClass(type)) {
-            const literalType = ClassType.cloneWithLiteral(type, value);
-            TypeBase.setSpecialForm(literalType, literalClassType);
-            return literalType;
-        }
-
-        return UnknownType.create();
+        return TypeEvaluatorCore.cloneBuiltinClassWithLiteralWithEvaluator(evaluatorInterface, node, literalClassType, builtInName, value);
     }
 
     // Creates a type that represents a Literal.
@@ -15914,14 +15777,7 @@ export function createTypeEvaluator(
     // and therefore follows the normal rules of types (e.g. they
     // can be forward-declared in stubs, etc.).
     function getTypeOfArgExpectingType(arg: Arg, options?: ExpectedTypeOptions): TypeResult {
-        if (arg.typeResult) {
-            return { type: arg.typeResult.type, isIncomplete: arg.typeResult.isIncomplete };
-        }
-
-        // If there was no defined type provided, there should always
-        // be a value expression from which we can retrieve the type.
-        assert(arg.valueExpression !== undefined);
-        return getTypeOfExpressionExpectingType(arg.valueExpression, options);
+        return TypeEvaluatorCore.getTypeOfArgExpectingTypeWithEvaluator(evaluatorInterface, arg, options);
     }
 
     function getTypeOfExpressionExpectingType(node: ExpressionNode, options?: ExpectedTypeOptions): TypeResult {
