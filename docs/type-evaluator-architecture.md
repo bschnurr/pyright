@@ -59,12 +59,15 @@ Special form type creation functions (originally `AddDiagnosticFn`-injected):
 - Type alias transforms: `adjustTypeArgsForTypeVarTupleWithEvaluator`, `transformTypeForTypeAliasWithEvaluator`, `adjustSourceParamDetailsForDestVariadicWithEvaluator`
 - Utility: `getBooleanValueFromNode`, `reportUseOfTypeCheckOnlySymbol`, `enforceClassTypeVarScopeCheck`
 
-### `evaluatorCore.ts` (~4,305 lines)
+### `evaluatorCore.ts` (~2,757 lines)
 Core evaluation logic — re-exports functions from `specialFormCreation.ts` and `pureHelpers.ts` so the `TypeEvaluatorCore.*` import namespace in `typeEvaluator.ts` continues to work. Contains:
 - Non-leaf functions called by multiple modules (createSpecializedClassType, applyConditionFilter, etc.)
 - Type comparisons (isTypeHashable, isTypeComparable, isProperSubtype)
-- Member access helpers, symbol resolution, validation utilities
-- Constants (typePromotions map), prefetched type accessors
+- Type specialization (createSpecializedClassType, applyTypeArgToTypeVar, specializeTypeAlias)
+- Return type inference context stack management
+- Prefetched type accessors
+- Constants (typePromotions map, maxSingleOverloadArgTypeExpansionCount)
+- 76 exported functions (63 leaf, 13 non-leaf)
 
 ### `expressionEvaluation.ts` (~2,162 lines)
 Expression type evaluation functions:
@@ -99,6 +102,16 @@ TypeVar, TypeVarTuple, variance inference, type form, and expansion logic:
 - convertToTypeFormType, addTypeFormForSymbol, expandPromotionTypes
 - Imported from `typeEvaluator.ts` via dual-import pattern (`TypeVarHandling.*`)
 
+### `memberResolution.ts` (~1,120 lines)
+Member access, symbol resolution, binding, and import resolution:
+- getSymbolDeclInfoForName, getLookupNodeForSymbolDeclInfo, getTypeOfBoundMember
+- partiallySpecializeBoundMethod, lookUpSymbolRecursive, resolveAliasDeclaration
+- getDeclInfoForStringNode, getDeclInfoForNameNode, getTypeOfSuperCall
+- resolveExternalImportMemberAccess, getModuleCompletionFromImportedModule
+- getMemberAccessTypeResult, validatePropertyMethod, assignProperty
+- getIndexAccessMagicMethodName, getAbstractSymbolInfo
+- Imported from `typeEvaluator.ts` via dual-import pattern (`MemberResolution.*`)
+
 ### `overrideValidation.ts` (~603 lines)
 Override method validation logic:
 - validateOverrideMethod, validateOverrideMethodInternal, isOverrideMethodApplicable
@@ -124,17 +137,21 @@ typeEvaluator.ts  (17,415 lines — closure: state, caches, core dispatch)
   ├── import * as AssignFunctions from './typeEvaluator/assignFunctions'
   ├── import * as OverrideValidation from './typeEvaluator/overrideValidation'
   ├── import * as ExpressionEval from './typeEvaluator/expressionEvaluation'
-  └── import * as TypeVarHandling from './typeEvaluator/typeVarHandling'
-        evaluatorCore.ts (~4,305 lines)
+  ├── import * as TypeVarHandling from './typeEvaluator/typeVarHandling'
+  └── import * as MemberResolution from './typeEvaluator/memberResolution'
+        evaluatorCore.ts (~2,757 lines)
           ├── re-exports specialFormCreation.ts
           └── re-exports pureHelpers.ts
         expressionEvaluation.ts (~2,162 lines)
-          └── imports from evaluatorCore.ts
+          ├── imports from evaluatorCore.ts
+          └── imports from memberResolution.ts
         assignFunctions.ts (~1,843 lines)
           ├── imports from specialFormCreation.ts
           └── imports from evaluatorCore.ts
         specialFormCreation.ts (1,474 lines)
           └── imports from pureHelpers.ts
+        memberResolution.ts (~1,120 lines)
+          └── imports from evaluatorCore.ts
         typeVarHandling.ts (~1,108 lines)
           ├── imports from evaluatorCore.ts
           ├── imports from specialFormCreation.ts
@@ -170,12 +187,14 @@ No circular dependencies. All new modules use dual-import pattern in typeEvaluat
   - `overrideValidation.ts` (~603 lines) — override method validation
   - `expressionEvaluation.ts` (~2,162 lines) — expression type evaluation
   - `typeVarHandling.ts` (~1,108 lines) — TypeVar/variance/expansion logic
+  - `memberResolution.ts` (~1,120 lines) — member access, symbol resolution, binding
 - Current state:
   - `typeEvaluator.ts`: **17,415 lines** (down from ~28,000, **38% reduction**)
-  - `evaluatorCore.ts`: **~4,305 lines** (non-leaf core functions, re-exports)
+  - `evaluatorCore.ts`: **~2,757 lines** (76 functions: type specialization, comparisons, prefetched accessors)
   - `expressionEvaluation.ts`: **~2,162 lines**
   - `assignFunctions.ts`: **~1,843 lines**
   - `specialFormCreation.ts`: **1,474 lines**
+  - `memberResolution.ts`: **~1,120 lines**
   - `typeVarHandling.ts`: **~1,108 lines**
   - `collectionInference.ts`: **~1,039 lines**
   - `overrideValidation.ts`: **~603 lines**
@@ -183,16 +202,18 @@ No circular dependencies. All new modules use dual-import pattern in typeEvaluat
   - **200+ functions** delegated from typeEvaluator.ts to modules
   - All **2,323 tests** passing, typecheck clean
   - **Remaining ~150 non-delegated functions** blocked by closure variables (see architecture decisions below)
-  - **evaluatorCore.ts now at natural floor**: ~28 non-leaf functions called across modules, plus imports/constants/re-exports
+  - **evaluatorCore.ts remaining**: 76 functions (63 leaf, 13 non-leaf) — further extraction possible but diminishing returns
 
 ## Planned breakdown (future slices)
 
-### Near-term: Further module splitting of evaluatorCore.ts
-Split the remaining 10,883-line evaluatorCore.ts into topic-focused modules (same re-export pattern):
-- `assignmentLogic.ts` (~2,800 lines) — `assignFunction`, `assignClass`, `assignParam`, `assignFromUnionType`, `assignToUnionType`, `assignClassWithTypeArgs`, etc.
-- `collectionInference.ts` (~2,100 lines) — list/set/dict/comprehension type inference functions
-- `memberAccess.ts` (~2,200 lines) — `getTypeOfSuperCall`, `getDeclaredTypeForExpression`, `createSpecializedClassType`, `getTypeOfIterator`, etc.
-- `evaluatorCore.ts` (~3,800 lines) — remaining core functions, re-exports
+### Near-term: Continue evaluatorCore.ts leaf extraction (optional)
+evaluatorCore.ts has 76 functions (~2,757 lines). 63 are leaf functions that could be moved to existing or new modules:
+- Type specialization cluster (~850 lines): createSpecializedClassType (516), applyTypeArgToTypeVar (128), createSelfType (95), specializeTypeAlias (70) — non-leaf, must move together
+- Type comparison (~220 lines): isTypeComparable (127), isProperSubtype (44), createSubclass (52)
+- Validation (~180 lines): verifyRaiseExceptionType (81), verifyTypeVarDefaultIsCompatible (54), validateCallForClassInstance (63)
+- Utility/small functions (~400 lines): prefetched accessors, return type inference stack, builtIn helpers
+
+Diminishing returns — evaluatorCore at 2,757 lines is already manageable. The bigger unlock is the closure barrier.
 
 ### Medium-term: Closure variable barrier
 The remaining ~150 functions in typeEvaluator.ts are blocked by closure variables. Options:
