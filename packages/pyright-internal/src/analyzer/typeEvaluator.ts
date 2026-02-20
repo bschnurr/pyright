@@ -9783,7 +9783,7 @@ export function createTypeEvaluator(
         flags: EvalFlags,
         inferenceContext: InferenceContext
     ): TypeResult | undefined {
-        return TypeEvaluatorCore.getTypeOfListOrSetWithContextWithEvaluator(evaluatorInterface, node, flags, inferenceContext);
+        return CollectionInference.getTypeOfListOrSetWithContextWithEvaluator(evaluatorInterface, node, flags, inferenceContext);
     }
 
     function getExpectedEntryTypeForIterable(
@@ -9791,7 +9791,7 @@ export function createTypeEvaluator(
         expectedClassType: Type | undefined,
         inferenceContext?: InferenceContext
     ): Type | undefined {
-        return TypeEvaluatorCore.getExpectedEntryTypeForIterableWithEvaluator(
+        return CollectionInference.getExpectedEntryTypeForIterableWithEvaluator(
             evaluatorInterface,
             node,
             expectedClassType,
@@ -9805,7 +9805,7 @@ export function createTypeEvaluator(
         flags: EvalFlags,
         hasExpectedType: boolean
     ): TypeResult {
-        return TypeEvaluatorCore.getTypeOfListOrSetInferredWithEvaluator(evaluatorInterface, node, flags, hasExpectedType, prefetched);
+        return CollectionInference.getTypeOfListOrSetInferredWithEvaluator(evaluatorInterface, node, flags, hasExpectedType, prefetched);
     }
 
     function verifySetEntryOrDictKeyIsHashable(entry: ExpressionNode, type: Type, isDictKey: boolean) {
@@ -10101,7 +10101,7 @@ export function createTypeEvaluator(
         expectedValueOrElementType?: Type,
         expectedKeyType?: Type
     ): TypeResult {
-        return TypeEvaluatorCore.getElementTypeFromComprehensionWithEvaluator(
+        return CollectionInference.getElementTypeFromComprehensionWithEvaluator(
             evaluatorInterface,
             node,
             flags,
