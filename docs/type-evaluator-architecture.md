@@ -59,12 +59,27 @@ Special form type creation functions (originally `AddDiagnosticFn`-injected):
 - Type alias transforms: `adjustTypeArgsForTypeVarTupleWithEvaluator`, `transformTypeForTypeAliasWithEvaluator`, `adjustSourceParamDetailsForDestVariadicWithEvaluator`
 - Utility: `getBooleanValueFromNode`, `reportUseOfTypeCheckOnlySymbol`, `enforceClassTypeVarScopeCheck`
 
-### `evaluatorCore.ts` (10,883 lines)
+### `evaluatorCore.ts` (~8,938 lines)
 Core evaluation logic — re-exports functions from `specialFormCreation.ts` and `pureHelpers.ts` so the `TypeEvaluatorCore.*` import namespace in `typeEvaluator.ts` continues to work. Contains:
 - Expression type evaluation (~2,200 lines): getTypeOfSuperCall, getDeclaredTypeForExpression, createSpecializedClassType, getTypeOfIterator, etc.
-- Assignment/comparison logic (~2,800 lines): assignFunction, assignClass, assignParam, assignFromUnionType, assignToUnionType, etc.
-- Collection type inference (~2,100 lines): list/set/dict/comprehension inference, getKeyAndValueTypesFromDictionary, etc.
+- Assignment/comparison logic (~1,300 lines): assignFromUnionType, assignToUnionType, assignClassWithTypeArgs, assignClass, validateOverrideMethod, etc.
 - Member access/resolution, TypeVar handling, validation, diagnostics, etc.
+
+### `collectionInference.ts` (~1,036 lines)
+Collection type inference functions for dictionaries, lists, sets, comprehensions, and strings:
+- Dictionary: getKeyAndValueTypesFromDictionary, getTypeOfDictionaryWithContext, getTypeOfDictionaryInferred
+- List/Set: getTypeOfListOrSetWithContext, getTypeOfListOrSetInferred, getExpectedEntryTypeForIterable
+- Comprehension: getElementTypeFromComprehension
+- String: getTypeOfStringList, getTypeOfComprehension
+- Imported from `typeEvaluator.ts` via dual-import pattern (`CollectionInference.*`)
+
+### `assignFunctions.ts` (~955 lines)
+Function and parameter assignment/compatibility logic:
+- `assignFunctionWithEvaluator` (~850 lines) — core function-to-function type assignment
+- `assignParamWithEvaluator` (~83 lines) — parameter-level assignment
+- Local helper `getEffectiveReturnTypeForAssign`
+- Zero dependencies on evaluatorCore — cleanest module extraction
+- Imported from `typeEvaluator.ts` via dual-import pattern (`AssignFunctions.*`)
 
 ### `diagnostics.ts`
 Contains evaluator-specific diagnostics behavior that was formerly embedded in the evaluator closure:
@@ -81,12 +96,19 @@ Flow graph traversal hooks (delegating to `codeFlowEngine.ts`).
 ### Dependency diagram (current)
 ```
 typeEvaluator.ts  (17,415 lines — closure: state, caches, core dispatch)
-  └── import * as TypeEvaluatorCore from './typeEvaluator/evaluatorCore'
-        evaluatorCore.ts (10,883 lines)
+  ├── import * as TypeEvaluatorCore from './typeEvaluator/evaluatorCore'
+  ├── import * as CollectionInference from './typeEvaluator/collectionInference'
+  └── import * as AssignFunctions from './typeEvaluator/assignFunctions'
+        evaluatorCore.ts (~8,938 lines)
           ├── imports from specialFormCreation.ts (internal use)
           ├── imports from pureHelpers.ts (internal use)
           ├── re-exports specialFormCreation.ts (external visibility)
           └── re-exports pureHelpers.ts (external visibility)
+        collectionInference.ts (~1,036 lines)
+          ├── imports from evaluatorCore.ts (one-way, no cycle)
+          └── imports from pureHelpers.ts
+        assignFunctions.ts (~955 lines)
+          └── imports from specialFormCreation.ts only
         specialFormCreation.ts (1,474 lines)
           └── imports from pureHelpers.ts
         pureHelpers.ts (45 lines)
@@ -96,7 +118,8 @@ typeEvaluator.ts  (17,415 lines — closure: state, caches, core dispatch)
         diagnostics.ts (library: accepts DiagnosticsContext)
 ```
 
-No circular dependencies. All modules are imported by `evaluatorCore.ts` or `typeEvaluator.ts` but never import back.
+No circular dependencies. Dual-import pattern used for `collectionInference.ts` and `assignFunctions.ts`
+to avoid cycles (they import from evaluatorCore but evaluatorCore doesn't import from them).
 
 ## Progress tracking
 
@@ -107,16 +130,22 @@ No circular dependencies. All modules are imported by `evaluatorCore.ts` or `typ
 - **Phase 4**: TypeEvaluator param injection (22 functions).
 - **Phase 5**: Deeper extraction with context patterns (19 functions, ~2,900 lines).
 - **Phase 6**: Interface-method extraction (100+ functions, ~6,000+ lines across 17 batches).
-- **Phase 7**: Module splitting — `evaluatorCore.ts` split into `specialFormCreation.ts` (1,474 lines) and `pureHelpers.ts` (45 lines).
+- **Phase 7**: Module splitting — `evaluatorCore.ts` split into topic-focused modules:
+  - `specialFormCreation.ts` (1,474 lines) — special form type creation
+  - `pureHelpers.ts` (45 lines) — stateless shared utilities
+  - `collectionInference.ts` (~1,036 lines) — list/set/dict/comprehension inference (dual-import pattern)
+  - `assignFunctions.ts` (~955 lines) — function/param assignment logic (dual-import pattern)
 - Current state:
   - `typeEvaluator.ts`: **17,415 lines** (down from ~28,000, **38% reduction**)
-  - `evaluatorCore.ts`: **10,883 lines** (re-exports functions from sub-modules)
+  - `evaluatorCore.ts`: **~8,938 lines** (core evaluation, member access, validation)
   - `specialFormCreation.ts`: **1,474 lines**
+  - `collectionInference.ts`: **~1,036 lines**
+  - `assignFunctions.ts`: **~955 lines**
   - `pureHelpers.ts`: **45 lines**
   - **200+ functions** delegated from typeEvaluator.ts to modules
   - All **2,323 tests** passing, typecheck clean
   - **Remaining ~150 non-delegated functions** blocked by closure variables (see architecture decisions below)
-  - **Next module split candidates**: assignment logic (~2,800 lines), collection inference (~2,100 lines)
+  - **Next module split candidates**: member access/resolution (~2,200 lines), validation/override (~1,500 lines)
 
 ## Planned breakdown (future slices)
 
