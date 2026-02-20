@@ -190,6 +190,7 @@ import * as TypeEvaluatorCore from './typeEvaluator/evaluatorCore';
 import * as CollectionInference from './typeEvaluator/collectionInference';
 import * as AssignFunctions from './typeEvaluator/assignFunctions';
 import * as OverrideValidation from './typeEvaluator/overrideValidation';
+import * as ExpressionEval from './typeEvaluator/expressionEvaluation';
 import * as TypeEvaluatorFlowAnalysis from './typeEvaluator/flowAnalysis';
 import * as TypeEvaluatorNarrowing from './typeEvaluator/narrowing';
 import {
@@ -1468,7 +1469,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfEllipsis(flags: EvalFlags, typeResult: TypeResult | undefined, node: ExpressionNode) {
-        return TypeEvaluatorCore.getTypeOfEllipsisWithEvaluator(evaluatorInterface, flags, typeResult, node);
+        return ExpressionEval.getTypeOfEllipsisWithEvaluator(evaluatorInterface, flags, typeResult, node);
     }
 
     function getTypeOfNumber(node: NumberNode, typeResult: TypeResult | undefined) {
@@ -1483,7 +1484,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfUnpackOperator(node: UnpackNode, flags: EvalFlags, inferenceContext?: InferenceContext) {
-        return TypeEvaluatorCore.getTypeOfUnpackOperatorWithEvaluator(evaluatorInterface, node, flags, inferenceContext);
+        return ExpressionEval.getTypeOfUnpackOperatorWithEvaluator(evaluatorInterface, node, flags, inferenceContext);
     }
 
     function getTypeOfStringList(node: StringListNode, flags: EvalFlags): TypeResult {
@@ -1491,11 +1492,11 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfStringListAsType(node: StringListNode, flags: EvalFlags): TypeResult {
-        return TypeEvaluatorCore.getTypeOfStringListAsTypeWithEvaluator(evaluatorInterface, node, flags);
+        return ExpressionEval.getTypeOfStringListAsTypeWithEvaluator(evaluatorInterface, node, flags);
     }
 
     function getTypeOfString(node: StringNode | FormatStringNode): TypeResult {
-        return TypeEvaluatorCore.getTypeOfStringWithEvaluator(evaluatorInterface, node, prefetched);
+        return ExpressionEval.getTypeOfStringWithEvaluator(evaluatorInterface, node, prefetched);
     }
 
     function stripLiteralValue(type: Type): Type {
@@ -1925,7 +1926,7 @@ export function createTypeEvaluator(
 
     // Determines whether the specified expression is a symbol with a declared type.
     function getDeclaredTypeForExpression(expression: ExpressionNode, usage?: EvaluatorUsage): Type | undefined {
-        return TypeEvaluatorCore.getDeclaredTypeForExpressionWithEvaluator(evaluatorInterface, expression, usage);
+        return ExpressionEval.getDeclaredTypeForExpressionWithEvaluator(evaluatorInterface, expression, usage);
     }
 
     // Applies an "await" operation to the specified type and returns
@@ -1944,7 +1945,7 @@ export function createTypeEvaluator(
         errorNode: ExpressionNode,
         emitNotIterableError = true
     ): TypeResult | undefined {
-        return TypeEvaluatorCore.getTypeOfIteratorWithEvaluator(evaluatorInterface, typeResult, isAsync, errorNode, prefetched, emitNotIterableError);
+        return ExpressionEval.getTypeOfIteratorWithEvaluator(evaluatorInterface, typeResult, isAsync, errorNode, prefetched, emitNotIterableError);
     }
 
     // Validates that the type is an iterable and returns the iterable type argument.
@@ -1954,7 +1955,7 @@ export function createTypeEvaluator(
         errorNode: ExpressionNode,
         emitNotIterableError = true
     ): TypeResult | undefined {
-        return TypeEvaluatorCore.getTypeOfIterableWithEvaluator(evaluatorInterface, typeResult, isAsync, errorNode, emitNotIterableError);
+        return ExpressionEval.getTypeOfIterableWithEvaluator(evaluatorInterface, typeResult, isAsync, errorNode, emitNotIterableError);
     }
 
     function isTypeHashable(type: Type): boolean {
@@ -5537,7 +5538,7 @@ export function createTypeEvaluator(
         selfType: ClassType | TypeVarType | undefined,
         usage: EvaluatorUsage
     ): TypeResult {
-        return TypeEvaluatorCore.getTypeOfIndexedObjectOrClassWithEvaluator(
+        return ExpressionEval.getTypeOfIndexedObjectOrClassWithEvaluator(
             evaluatorInterface,
             node,
             baseType,
@@ -5698,7 +5699,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeArg(node: ExpressionNode, flags: EvalFlags, supportsDictExpression: boolean): TypeResultWithNode {
-        return TypeEvaluatorCore.getTypeArgWithEvaluator(evaluatorInterface, node, flags, supportsDictExpression, prefetched);
+        return ExpressionEval.getTypeArgWithEvaluator(evaluatorInterface, node, flags, supportsDictExpression, prefetched);
     }
 
     function buildTupleTypesList(
@@ -5859,15 +5860,15 @@ export function createTypeEvaluator(
     // to determine the lambda's type. It needs to be inferred from the argument
     // types instead.
     function getTypeOfLambdaForCall(node: CallNode, inferenceContext: InferenceContext | undefined): TypeResult {
-        return TypeEvaluatorCore.getTypeOfLambdaForCallWithEvaluator(evaluatorInterface, node, inferenceContext);
+        return ExpressionEval.getTypeOfLambdaForCallWithEvaluator(evaluatorInterface, node, inferenceContext);
     }
 
     function getTypeOfTypeForm(node: CallNode, typeFormClass: ClassType): TypeResult {
-        return TypeEvaluatorCore.getTypeOfTypeFormWithEvaluator(evaluatorInterface, node, typeFormClass);
+        return ExpressionEval.getTypeOfTypeFormWithEvaluator(evaluatorInterface, node, typeFormClass);
     }
 
     function getTypeOfAssertType(node: CallNode, inferenceContext: InferenceContext | undefined): TypeResult {
-        return TypeEvaluatorCore.getTypeOfAssertTypeWithEvaluator(evaluatorInterface, node, inferenceContext);
+        return ExpressionEval.getTypeOfAssertTypeWithEvaluator(evaluatorInterface, node, inferenceContext);
     }
 
     function convertNodeToArg(node: ArgumentNode): ArgWithExpression {
@@ -5962,11 +5963,11 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfRevealLocals(node: CallNode) {
-        return TypeEvaluatorCore.getTypeOfRevealLocalsWithEvaluator(evaluatorInterface, node);
+        return ExpressionEval.getTypeOfRevealLocalsWithEvaluator(evaluatorInterface, node);
     }
 
     function getTypeOfSuperCall(node: CallNode): TypeResult {
-        return TypeEvaluatorCore.getTypeOfSuperCallWithEvaluator(evaluatorInterface, prefetched, node);
+        return ExpressionEval.getTypeOfSuperCallWithEvaluator(evaluatorInterface, prefetched, node);
     }
 
     // When evaluating a call, the errorNode is typically the call node, which
@@ -7230,7 +7231,7 @@ export function createTypeEvaluator(
 
     // Evaluates the type of the "cast" call.
     function evaluateCastCall(argList: Arg[], errorNode: ExpressionNode) {
-        return TypeEvaluatorCore.evaluateCastCallWithEvaluator(evaluatorInterface, argList, errorNode);
+        return ExpressionEval.evaluateCastCallWithEvaluator(evaluatorInterface, argList, errorNode);
     }
 
     // Expands any unpacked tuples within an argument list.
@@ -9585,7 +9586,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfConstant(node: ConstantNode, flags: EvalFlags): TypeResult {
-        return TypeEvaluatorCore.getTypeOfConstantWithEvaluator(evaluatorInterface, node, flags, prefetched);
+        return ExpressionEval.getTypeOfConstantWithEvaluator(evaluatorInterface, node, flags, prefetched);
     }
 
     function getTypeOfMagicMethodCall(
@@ -9596,7 +9597,7 @@ export function createTypeEvaluator(
         inferenceContext?: InferenceContext,
         diag?: DiagnosticAddendum
     ): TypeResult | undefined {
-        return TypeEvaluatorCore.getTypeOfMagicMethodCallWithEvaluator(evaluatorInterface, objType, methodName, argList, errorNode, prefetched, inferenceContext, diag);
+        return ExpressionEval.getTypeOfMagicMethodCallWithEvaluator(evaluatorInterface, objType, methodName, argList, errorNode, prefetched, inferenceContext, diag);
     }
 
     function getTypeOfDictionary(
@@ -9828,11 +9829,11 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfYield(node: YieldNode): TypeResult {
-        return TypeEvaluatorCore.getTypeOfYieldWithEvaluator(evaluatorInterface, node);
+        return ExpressionEval.getTypeOfYieldWithEvaluator(evaluatorInterface, node);
     }
 
     function getTypeOfYieldFrom(node: YieldFromNode): TypeResult {
-        return TypeEvaluatorCore.getTypeOfYieldFromWithEvaluator(evaluatorInterface, node);
+        return ExpressionEval.getTypeOfYieldFromWithEvaluator(evaluatorInterface, node);
     }
 
     function getTypeOfLambda(node: LambdaNode, inferenceContext: InferenceContext | undefined): TypeResult {
@@ -10113,7 +10114,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfSlice(node: SliceNode): TypeResult {
-        return TypeEvaluatorCore.getTypeOfSliceWithEvaluator(evaluatorInterface, node);
+        return ExpressionEval.getTypeOfSliceWithEvaluator(evaluatorInterface, node);
     }
 
     // Verifies that a type argument's type is not disallowed.
@@ -10158,7 +10159,7 @@ export function createTypeEvaluator(
 
     // Creates a type that represents a Literal.
     function createLiteralType(classType: ClassType, node: IndexNode, flags: EvalFlags): Type {
-        return TypeEvaluatorCore.createLiteralTypeWithEvaluator(evaluatorInterface, classType, node, flags, prefetched);
+        return ExpressionEval.createLiteralTypeWithEvaluator(evaluatorInterface, classType, node, flags, prefetched);
     }
 
     function createClassVarType(
@@ -14157,7 +14158,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfArg(arg: Arg, inferenceContext: InferenceContext | undefined): TypeResult {
-        return TypeEvaluatorCore.getTypeOfArgWithEvaluator(evaluatorInterface, arg, inferenceContext);
+        return ExpressionEval.getTypeOfArgWithEvaluator(evaluatorInterface, arg, inferenceContext);
     }
 
     // This function is like getTypeOfArg except that it is
@@ -14169,7 +14170,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfExpressionExpectingType(node: ExpressionNode, options?: ExpectedTypeOptions): TypeResult {
-        return TypeEvaluatorCore.getTypeOfExpressionExpectingTypeWithEvaluator(evaluatorInterface, node, options);
+        return ExpressionEval.getTypeOfExpressionExpectingTypeWithEvaluator(evaluatorInterface, node, options);
     }
 
     function getBuiltInType(node: ParseNode, name: string): Type {
@@ -15731,7 +15732,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfMember(member: ClassMember): Type {
-        return TypeEvaluatorCore.getTypeOfMemberWithEvaluator(evaluatorInterface, member);
+        return ExpressionEval.getTypeOfMemberWithEvaluator(evaluatorInterface, member);
     }
 
     function getTypeOfMemberInternal(
@@ -15740,7 +15741,7 @@ export function createTypeEvaluator(
         selfClass: ClassType | TypeVarType | undefined,
         flags: MemberAccessFlags
     ): TypeResult | undefined {
-        return TypeEvaluatorCore.getTypeOfMemberInternalWithEvaluator(
+        return ExpressionEval.getTypeOfMemberInternalWithEvaluator(
             evaluatorInterface,
             errorNode,
             member,

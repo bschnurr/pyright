@@ -16,7 +16,8 @@ import { ConstraintTracker } from '../constraintTracker';
 import { addConstraintsForExpectedType } from '../constraintSolver';
 import { getTypedDictMembersForClass, assignToTypedDict } from '../typedDicts';
 import { AssignTypeFlags } from '../typeEvaluatorTypes';
-import { convertSpecialFormToRuntimeValueWithPrefetched, getTypeOfStringListAsTypeWithEvaluator, verifySetEntryOrDictKeyIsHashableWithEvaluator, cloneBuiltinObjectWithLiteralWithEvaluator, inferTypeArgFromExpectedEntryTypeWithEvaluator, getTypeOfStringWithEvaluator, inferVarianceForClassWithEvaluator, evaluateComprehensionForIfWithEvaluator, solveAndApplyConstraintsWithEvaluator } from './evaluatorCore';
+import { convertSpecialFormToRuntimeValueWithPrefetched, verifySetEntryOrDictKeyIsHashableWithEvaluator, cloneBuiltinObjectWithLiteralWithEvaluator, inferTypeArgFromExpectedEntryTypeWithEvaluator, inferVarianceForClassWithEvaluator, evaluateComprehensionForIfWithEvaluator, solveAndApplyConstraintsWithEvaluator } from './evaluatorCore';
+import { getTypeOfStringListAsTypeWithEvaluator, getTypeOfStringWithEvaluator } from './expressionEvaluation';
 import { isTypeFormSupportedForNode } from './pureHelpers';
 import { makeTupleObject } from '../tuples';
 
