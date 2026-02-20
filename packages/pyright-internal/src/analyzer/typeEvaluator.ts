@@ -4996,87 +4996,15 @@ export function createTypeEvaluator(
         memberName: string,
         selfType?: ClassType | TypeVarType
     ): MemberAccessTypeResult | undefined {
-        const getAttributeAccessMember = (name: string) => {
-            return getTypeOfBoundMember(
-                errorNode,
-                classType,
-                name,
-                /* usage */ undefined,
-                /* diag */ undefined,
-                MemberAccessFlags.SkipInstanceMembers |
-                    MemberAccessFlags.SkipObjectBaseClass |
-                    MemberAccessFlags.SkipTypeBaseClass |
-                    MemberAccessFlags.SkipAttributeAccessOverride,
-                selfType
-            )?.type;
-        };
-
-        let accessMemberType: Type | undefined;
-        if (usage.method === 'get') {
-            accessMemberType = getAttributeAccessMember('__getattribute__') ?? getAttributeAccessMember('__getattr__');
-        } else if (usage.method === 'set') {
-            accessMemberType = getAttributeAccessMember('__setattr__');
-        } else {
-            assert(usage.method === 'del');
-            accessMemberType = getAttributeAccessMember('__delattr__');
-        }
-
-        if (!accessMemberType) {
-            return undefined;
-        }
-
-        const argList: Arg[] = [];
-
-        // Provide "name" argument.
-        argList.push({
-            argCategory: ArgCategory.Simple,
-            typeResult: {
-                type:
-                    prefetched?.strClass && isInstantiableClass(prefetched.strClass)
-                        ? ClassType.cloneWithLiteral(ClassType.cloneAsInstance(prefetched.strClass), memberName)
-                        : AnyType.create(),
-            },
-        });
-
-        if (usage.method === 'set') {
-            // Provide "value" argument.
-            argList.push({
-                argCategory: ArgCategory.Simple,
-                typeResult: {
-                    type: usage.setType?.type ?? UnknownType.create(),
-                    isIncomplete: !!usage.setType?.isIncomplete,
-                },
-            });
-        }
-
-        if (!isFunctionOrOverloaded(accessMemberType)) {
-            if (isAnyOrUnknown(accessMemberType)) {
-                return { type: accessMemberType };
-            }
-
-            // TODO - emit an error for this condition.
-            return undefined;
-        }
-
-        const callResult = validateCallArgs(
+        return TypeEvaluatorCore.applyAttributeAccessOverrideWithEvaluator(
+            evaluatorInterface,
             errorNode,
-            argList,
-            { type: accessMemberType },
-            /* constraints */ undefined,
-            /* skipUnknownArgCheck */ true,
-            /* inferenceContext */ undefined
+            classType,
+            usage,
+            memberName,
+            prefetched,
+            selfType
         );
-
-        let isAsymmetricAccessor = false;
-        if (usage.method === 'set') {
-            isAsymmetricAccessor = isClassWithAsymmetricAttributeAccessor(classType);
-        }
-
-        return {
-            type: callResult.returnType ?? UnknownType.create(),
-            typeErrors: callResult.argumentErrors,
-            isAsymmetricAccessor,
-        };
     }
 
     function getTypeOfIndex(node: IndexNode, flags = EvalFlags.None): TypeResult {
@@ -9893,141 +9821,7 @@ export function createTypeEvaluator(
     // in the Python specification: The static type checker will treat
     // the new type as if it were a subclass of the original type.
     function createNewType(errorNode: ExpressionNode, argList: Arg[]): ClassType | undefined {
-        const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
-        let className = '';
-
-        if (argList.length !== 2) {
-            addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.newTypeParamCount(), errorNode);
-            return undefined;
-        }
-
-        const nameArg = argList[0];
-        if (
-            nameArg.argCategory === ArgCategory.Simple &&
-            nameArg.valueExpression &&
-            nameArg.valueExpression.nodeType === ParseNodeType.StringList
-        ) {
-            className = nameArg.valueExpression.d.strings.map((s) => s.d.value).join('');
-        }
-
-        if (!className) {
-            addDiagnostic(DiagnosticRule.reportArgumentType, LocMessage.newTypeBadName(), argList[0].node ?? errorNode);
-            return undefined;
-        }
-
-        if (
-            errorNode.parent?.nodeType === ParseNodeType.Assignment &&
-            errorNode.parent.d.leftExpr.nodeType === ParseNodeType.Name &&
-            errorNode.parent.d.leftExpr.d.value !== className
-        ) {
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.newTypeNameMismatch(),
-                errorNode.parent.d.leftExpr
-            );
-            return undefined;
-        }
-
-        let baseClass = getTypeOfArgExpectingType(argList[1]).type;
-        let isBaseClassAny = false;
-
-        if (isAnyOrUnknown(baseClass)) {
-            baseClass = prefetched?.objectClass ?? UnknownType.create();
-
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.newTypeAnyOrUnknown(),
-                argList[1].node ?? errorNode
-            );
-
-            isBaseClassAny = true;
-        }
-
-        // Specifically disallow Annotated.
-        if (
-            baseClass.props?.specialForm &&
-            isClassInstance(baseClass.props.specialForm) &&
-            ClassType.isBuiltIn(baseClass.props.specialForm, 'Annotated')
-        ) {
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.newTypeNotAClass(),
-                argList[1].node || errorNode
-            );
-            return undefined;
-        }
-
-        if (!isInstantiableClass(baseClass)) {
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.newTypeNotAClass(),
-                argList[1].node || errorNode
-            );
-            return undefined;
-        }
-
-        if (ClassType.isProtocolClass(baseClass) || ClassType.isTypedDictClass(baseClass)) {
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.newTypeProtocolClass(),
-                argList[1].node || errorNode
-            );
-        } else if (baseClass.priv.literalValue !== undefined) {
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.newTypeLiteral(),
-                argList[1].node || errorNode
-            );
-        }
-
-        const classType = ClassType.createInstantiable(
-            className,
-            ParseTreeUtils.getClassFullName(errorNode, fileInfo.moduleName, className),
-            fileInfo.moduleName,
-            fileInfo.fileUri,
-            ClassTypeFlags.Final | ClassTypeFlags.NewTypeClass | ClassTypeFlags.ValidTypeAliasClass,
-            ParseTreeUtils.getTypeSourceId(errorNode),
-            /* declaredMetaclass */ undefined,
-            baseClass.shared.effectiveMetaclass
-        );
-        classType.shared.baseClasses.push(isBaseClassAny ? AnyType.create() : baseClass);
-        computeMroLinearization(classType);
-
-        if (!isBaseClassAny) {
-            // Synthesize an __init__ method that accepts only the specified type.
-            const initType = FunctionType.createSynthesizedInstance('__init__');
-            FunctionType.addParam(
-                initType,
-                FunctionParam.create(ParamCategory.Simple, AnyType.create(), FunctionParamFlags.TypeDeclared, 'self')
-            );
-            FunctionType.addParam(
-                initType,
-                FunctionParam.create(
-                    ParamCategory.Simple,
-                    ClassType.cloneAsInstance(baseClass),
-                    FunctionParamFlags.TypeDeclared,
-                    '_x'
-                )
-            );
-            initType.shared.declaredReturnType = getNoneType();
-            ClassType.getSymbolTable(classType).set(
-                '__init__',
-                Symbol.createWithType(SymbolFlags.ClassMember, initType)
-            );
-
-            // Synthesize a trivial __new__ method.
-            const newType = FunctionType.createSynthesizedInstance('__new__', FunctionTypeFlags.ConstructorMethod);
-            FunctionType.addParam(
-                newType,
-                FunctionParam.create(ParamCategory.Simple, AnyType.create(), FunctionParamFlags.TypeDeclared, 'cls')
-            );
-            FunctionType.addDefaultParams(newType);
-            newType.shared.declaredReturnType = ClassType.cloneAsInstance(classType);
-            newType.priv.constructorTypeVarScopeId = getTypeVarScopeId(classType);
-            ClassType.getSymbolTable(classType).set('__new__', Symbol.createWithType(SymbolFlags.ClassMember, newType));
-        }
-
-        return classType;
+        return TypeEvaluatorCore.createNewTypeWithEvaluator(evaluatorInterface, errorNode, argList, prefetched);
     }
 
     // Implements the semantics of the multi-parameter variant of the "type" call.
@@ -10854,42 +10648,12 @@ export function createTypeEvaluator(
         expectedClassType: Type | undefined,
         inferenceContext?: InferenceContext
     ): Type | undefined {
-        if (!inferenceContext) {
-            return undefined;
-        }
-
-        if (!expectedClassType || !isInstantiableClass(expectedClassType)) {
-            return undefined;
-        }
-
-        if (isAnyOrUnknown(inferenceContext.expectedType)) {
-            return inferenceContext.expectedType;
-        }
-
-        if (!isClassInstance(inferenceContext.expectedType)) {
-            return undefined;
-        }
-
-        const constraints = new ConstraintTracker();
-        if (
-            !addConstraintsForExpectedType(
-                evaluatorInterface,
-                ClassType.cloneAsInstance(expectedClassType),
-                inferenceContext.expectedType,
-                constraints,
-                ParseTreeUtils.getTypeVarScopesForNode(node),
-                node.start
-            )
-        ) {
-            return undefined;
-        }
-
-        const specializedListOrSet = solveAndApplyConstraints(expectedClassType, constraints) as ClassType;
-        if (!specializedListOrSet.priv.typeArgs) {
-            return undefined;
-        }
-
-        return specializedListOrSet.priv.typeArgs[0];
+        return TypeEvaluatorCore.getExpectedEntryTypeForIterableWithEvaluator(
+            evaluatorInterface,
+            node,
+            expectedClassType,
+            inferenceContext
+        );
     }
 
     // Attempts to infer the type of a list or set statement with no "expected type".
@@ -11323,74 +11087,13 @@ export function createTypeEvaluator(
         expectedValueOrElementType?: Type,
         expectedKeyType?: Type
     ): TypeResult {
-        let isIncomplete = false;
-        let typeErrors = false;
-
-        // "Execute" the list comprehensions from start to finish.
-        for (const forIfNode of node.d.forIfNodes) {
-            if (evaluateComprehensionForIf(forIfNode)) {
-                isIncomplete = true;
-            }
-        }
-
-        let type: Type = UnknownType.create();
-        if (node.d.expr.nodeType === ParseNodeType.DictionaryKeyEntry) {
-            // Create a tuple with the key/value types.
-            const keyTypeResult = getTypeOfExpression(
-                node.d.expr.d.keyExpr,
-                flags,
-                makeInferenceContext(expectedKeyType)
-            );
-            if (keyTypeResult.isIncomplete) {
-                isIncomplete = true;
-            }
-            if (keyTypeResult.typeErrors) {
-                typeErrors = true;
-            }
-            let keyType = keyTypeResult.type;
-            if (!expectedKeyType || !containsLiteralType(expectedKeyType)) {
-                keyType = stripLiteralValue(keyType);
-            }
-
-            const valueTypeResult = getTypeOfExpression(
-                node.d.expr.d.valueExpr,
-                flags,
-                makeInferenceContext(expectedValueOrElementType)
-            );
-            if (valueTypeResult.isIncomplete) {
-                isIncomplete = true;
-            }
-            if (valueTypeResult.typeErrors) {
-                typeErrors = true;
-            }
-            let valueType = valueTypeResult.type;
-            if (!expectedValueOrElementType || !containsLiteralType(expectedValueOrElementType)) {
-                valueType = stripLiteralValue(valueType);
-            }
-
-            type = makeTupleObject(evaluatorInterface, [
-                { type: keyType, isUnbounded: false },
-                { type: valueType, isUnbounded: false },
-            ]);
-        } else if (node.d.expr.nodeType === ParseNodeType.DictionaryExpandEntry) {
-            // The parser should have reported an error in this case because it's not allowed.
-            getTypeOfExpression(node.d.expr.d.expr, flags, makeInferenceContext(expectedValueOrElementType));
-        } else if (isExpressionNode(node)) {
-            const exprTypeResult = getTypeOfExpression(
-                node.d.expr as ExpressionNode,
-                flags,
-                makeInferenceContext(expectedValueOrElementType)
-            );
-            if (exprTypeResult.isIncomplete) {
-                isIncomplete = true;
-            }
-            if (exprTypeResult.typeErrors) {
-                typeErrors = true;
-            }
-            type = exprTypeResult.type;
-        }
-
-        return { type, isIncomplete, typeErrors };
+        return TypeEvaluatorCore.getElementTypeFromComprehensionWithEvaluator(
+            evaluatorInterface,
+            node,
+            flags,
+            expectedValueOrElementType,
+            expectedKeyType
+        );
     }
 
     function getTypeOfSlice(node: SliceNode): TypeResult {

@@ -11,7 +11,7 @@ import { PythonVersion, pythonVersion3_9, pythonVersion3_13 } from '../../common
 import { Diagnostic, DiagnosticAddendum } from '../../common/diagnostic';
 import { DiagnosticRule } from '../../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../../localization/localize';
-import { ArgCategory, ArgumentNode, AssignmentNode, CallNode, ComprehensionForIfNode, ConstantNode, ExpressionNode, FunctionNode, ImportAsNode, ImportFromAsNode, ImportFromNode, IndexNode, LambdaNode, NameNode, ParamCategory, ParameterNode, ParseNode, ParseNodeType, SliceNode, StringListNode, StringNode, TypeParameterNode, UnpackNode, YieldFromNode, YieldNode } from '../../parser/parseNodes';
+import { ArgCategory, ArgumentNode, AssignmentNode, CallNode, ComprehensionForIfNode, ComprehensionNode, ConstantNode, ExpressionNode, FunctionNode, ImportAsNode, ImportFromAsNode, ImportFromNode, IndexNode, isExpressionNode, LambdaNode, ListNode, NameNode, ParamCategory, ParameterNode, ParseNode, ParseNodeType, SetNode, SliceNode, StringListNode, StringNode, TypeParameterNode, UnpackNode, YieldFromNode, YieldNode } from '../../parser/parseNodes';
 import { KeywordType, OperatorType, StringTokenFlags } from '../../parser/tokenizerTypes';
 import { Parser, ParseOptions, ParseTextMode } from '../../parser/parser';
 import { TextRange } from '../../common/textRange';
@@ -26,15 +26,15 @@ import { Declaration, DeclarationType, FunctionDeclaration } from '../declaratio
 import { AbstractSymbol, Arg, ArgWithExpression, AssignTypeFlags, CallResult, EvalFlags, EvaluatorUsage, ExpectedTypeOptions, MagicMethodDeprecationInfo, MemberAccessDeprecationInfo, MemberAccessTypeResult, PrefetchedTypes, PrintTypeOptions, Reachability, SolveConstraintsOptions, SymbolDeclInfo, TypeEvaluator, TypeResult, TypeResultWithNode, ValidateTypeArgsOptions } from '../typeEvaluatorTypes';
 import * as ParseTreeUtils from '../parseTreeUtils';
 import { AnyType, ClassType, ClassTypeFlags, combineTypes, findSubtype, FunctionParam, FunctionParamFlags, FunctionType, FunctionTypeFlags, InheritanceChain, isAny, isAnyOrUnknown, isClass, isClassInstance, isFunction, isFunctionOrOverloaded, isInstantiableClass, isModule, isNever, isOverloaded, isParamSpec, isPositionOnlySeparator, isTypeVar, isTypeSame, isTypeVarTuple, isUnion, isUnknown, isUnpacked, isUnpackedClass, isUnpackedTypeVarTuple, LiteralValue, maxTypeRecursionCount, ModuleType, NeverType, OverloadedType, ParamSpecType, removeUnbound, TupleTypeArg, Type, TypeAliasInfo, TypeBase, TypeCategory, TypeCondition, TypeVarKind, TypeVarScopeId, TypeVarScopeType, TypeVarTupleType, TypeVarType, UnionType, UnknownType, Variance } from '../types';
-import { addConditionToType, applySolvedTypeVars, ApplyTypeVarOptions, areTypesSame, ClassMember, combineSameSizedTuples, combineVariances, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromAnyOrUnknown, derivesFromClassRecursive, derivesFromStdlibClass, doForEachSubtype, addTypeVarsToListIfUnique, explodeGenericClass, getDeclaredGeneratorReturnType, getGeneratorTypeArgs, getGeneratorYieldType, getSpecializedTupleType, getTypeCondition, getTypeVarArgsRecursive, getTypeVarScopeIds, getUnknownTypeForCallable, InferenceContext, invertVariance, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralLikeType, isLiteralType, isMetaclassInstance, isNoneInstance, isNoneTypeClass, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTupleIndexUnambiguous, isTypeAliasPlaceholder, isUnboundedTupleClass, isVarianceOfTypeArgCompatible, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeInferenceContext, makeTypeVarsBound, MapSubtypesOptions, mapSignatures, mapSubtypes, MemberAccessFlags, partiallySpecializeType, removeNoneFromUnion, requiresSpecialization, requiresTypeArgs, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeForBaseClass, specializeWithDefaultTypeArgs, specializeTupleClass, stripTypeForm, synthesizeTypeVarForSelfCls, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
+import { addConditionToType, applySolvedTypeVars, ApplyTypeVarOptions, areTypesSame, ClassMember, combineSameSizedTuples, combineVariances, computeMroLinearization, containsLiteralType, convertToInstance, convertToInstantiable, derivesFromAnyOrUnknown, derivesFromClassRecursive, derivesFromStdlibClass, doForEachSubtype, addTypeVarsToListIfUnique, explodeGenericClass, getDeclaredGeneratorReturnType, getGeneratorTypeArgs, getGeneratorYieldType, getSpecializedTupleType, getTypeCondition, getTypeVarArgsRecursive, getTypeVarScopeId, getTypeVarScopeIds, getUnknownTypeForCallable, InferenceContext, invertVariance, isEffectivelyInstantiable, isEllipsisType, isIncompleteUnknown, isInstantiableMetaclass, isLiteralLikeType, isLiteralType, isMetaclassInstance, isNoneInstance, isNoneTypeClass, isOptionalType, isPartlyUnknown, isSentinelLiteral, isTupleClass, isTupleIndexUnambiguous, isTypeAliasPlaceholder, isUnboundedTupleClass, isVarianceOfTypeArgCompatible, lookUpClassMember, lookUpObjectMember, makeFunctionTypeVarsBound, makeInferenceContext, makeTypeVarsBound, MapSubtypesOptions, mapSignatures, mapSubtypes, MemberAccessFlags, partiallySpecializeType, removeNoneFromUnion, requiresSpecialization, requiresTypeArgs, selfSpecializeClass, simplifyFunctionToParamSpec, sortTypes, specializeForBaseClass, specializeWithDefaultTypeArgs, specializeTupleClass, stripTypeForm, synthesizeTypeVarForSelfCls, transformPossibleRecursiveTypeAlias, validateTypeVarDefault } from '../typeUtils';
 import { getParamListDetails, ParamKind, ParamListDetails, VirtualParamDetails } from '../parameterUtils';
 import { ConstraintTracker } from '../constraintTracker';
 import { ConstraintSolution } from '../constraintSolution';
-import { solveConstraints } from '../constraintSolver';
+import { addConstraintsForExpectedType, solveConstraints } from '../constraintSolver';
 import { assignTupleTypeArgs, getSlicedTupleType, makeTupleObject } from '../tuples';
 import { Scope, ScopeType, SymbolWithScope } from '../scope';
 import { CodeFlowEngine } from '../codeFlowEngine';
-import { Symbol, SynthesizedTypeInfo } from '../symbol';
+import { Symbol, SymbolFlags, SynthesizedTypeInfo } from '../symbol';
 import { getDeclarationsWithUsesLocalNameRemoved, synthesizeAliasDeclaration } from '../declarationUtils';
 import { getBoundInitMethod, validateConstructorArgs } from '../constructors';
 import { isPrivateOrProtectedName } from '../symbolNameUtils';
@@ -10521,4 +10521,355 @@ export function evaluateCastCallWithEvaluator(
     }
 
     return convertToInstance(castToType);
+}
+
+export function createNewTypeWithEvaluator(
+    evaluator: TypeEvaluator,
+    errorNode: ExpressionNode,
+    argList: Arg[],
+    prefetched: Partial<PrefetchedTypes> | undefined
+): ClassType | undefined {
+    const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
+    let className = '';
+
+    if (argList.length !== 2) {
+        evaluator.addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.newTypeParamCount(), errorNode);
+        return undefined;
+    }
+
+    const nameArg = argList[0];
+    if (
+        nameArg.argCategory === ArgCategory.Simple &&
+        nameArg.valueExpression &&
+        nameArg.valueExpression.nodeType === ParseNodeType.StringList
+    ) {
+        className = nameArg.valueExpression.d.strings.map((s) => s.d.value).join('');
+    }
+
+    if (!className) {
+        evaluator.addDiagnostic(DiagnosticRule.reportArgumentType, LocMessage.newTypeBadName(), argList[0].node ?? errorNode);
+        return undefined;
+    }
+
+    if (
+        errorNode.parent?.nodeType === ParseNodeType.Assignment &&
+        errorNode.parent.d.leftExpr.nodeType === ParseNodeType.Name &&
+        errorNode.parent.d.leftExpr.d.value !== className
+    ) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.newTypeNameMismatch(),
+            errorNode.parent.d.leftExpr
+        );
+        return undefined;
+    }
+
+    let baseClass = getTypeOfArgExpectingTypeWithEvaluator(evaluator, argList[1]).type;
+    let isBaseClassAny = false;
+
+    if (isAnyOrUnknown(baseClass)) {
+        baseClass = prefetched?.objectClass ?? UnknownType.create();
+
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.newTypeAnyOrUnknown(),
+            argList[1].node ?? errorNode
+        );
+
+        isBaseClassAny = true;
+    }
+
+    if (
+        baseClass.props?.specialForm &&
+        isClassInstance(baseClass.props.specialForm) &&
+        ClassType.isBuiltIn(baseClass.props.specialForm, 'Annotated')
+    ) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.newTypeNotAClass(),
+            argList[1].node || errorNode
+        );
+        return undefined;
+    }
+
+    if (!isInstantiableClass(baseClass)) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.newTypeNotAClass(),
+            argList[1].node || errorNode
+        );
+        return undefined;
+    }
+
+    if (ClassType.isProtocolClass(baseClass) || ClassType.isTypedDictClass(baseClass)) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.newTypeProtocolClass(),
+            argList[1].node || errorNode
+        );
+    } else if (baseClass.priv.literalValue !== undefined) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.newTypeLiteral(),
+            argList[1].node || errorNode
+        );
+    }
+
+    const classType = ClassType.createInstantiable(
+        className,
+        ParseTreeUtils.getClassFullName(errorNode, fileInfo.moduleName, className),
+        fileInfo.moduleName,
+        fileInfo.fileUri,
+        ClassTypeFlags.Final | ClassTypeFlags.NewTypeClass | ClassTypeFlags.ValidTypeAliasClass,
+        ParseTreeUtils.getTypeSourceId(errorNode),
+        /* declaredMetaclass */ undefined,
+        baseClass.shared.effectiveMetaclass
+    );
+    classType.shared.baseClasses.push(isBaseClassAny ? AnyType.create() : baseClass);
+    computeMroLinearization(classType);
+
+    if (!isBaseClassAny) {
+        const initType = FunctionType.createSynthesizedInstance('__init__');
+        FunctionType.addParam(
+            initType,
+            FunctionParam.create(ParamCategory.Simple, AnyType.create(), FunctionParamFlags.TypeDeclared, 'self')
+        );
+        FunctionType.addParam(
+            initType,
+            FunctionParam.create(
+                ParamCategory.Simple,
+                ClassType.cloneAsInstance(baseClass),
+                FunctionParamFlags.TypeDeclared,
+                '_x'
+            )
+        );
+        initType.shared.declaredReturnType = evaluator.getNoneType();
+        ClassType.getSymbolTable(classType).set(
+            '__init__',
+            Symbol.createWithType(SymbolFlags.ClassMember, initType)
+        );
+
+        const newType = FunctionType.createSynthesizedInstance('__new__', FunctionTypeFlags.ConstructorMethod);
+        FunctionType.addParam(
+            newType,
+            FunctionParam.create(ParamCategory.Simple, AnyType.create(), FunctionParamFlags.TypeDeclared, 'cls')
+        );
+        FunctionType.addDefaultParams(newType);
+        newType.shared.declaredReturnType = ClassType.cloneAsInstance(classType);
+        newType.priv.constructorTypeVarScopeId = getTypeVarScopeId(classType);
+        ClassType.getSymbolTable(classType).set('__new__', Symbol.createWithType(SymbolFlags.ClassMember, newType));
+    }
+
+    return classType;
+}
+
+export function applyAttributeAccessOverrideWithEvaluator(
+    evaluator: TypeEvaluator,
+    errorNode: ExpressionNode,
+    classType: ClassType,
+    usage: EvaluatorUsage,
+    memberName: string,
+    prefetched: Partial<PrefetchedTypes> | undefined,
+    selfType?: ClassType | TypeVarType
+): MemberAccessTypeResult | undefined {
+    const getAttributeAccessMember = (name: string) => {
+        return evaluator.getTypeOfBoundMember(
+            errorNode,
+            classType,
+            name,
+            /* usage */ undefined,
+            /* diag */ undefined,
+            MemberAccessFlags.SkipInstanceMembers |
+                MemberAccessFlags.SkipObjectBaseClass |
+                MemberAccessFlags.SkipTypeBaseClass |
+                MemberAccessFlags.SkipAttributeAccessOverride,
+            selfType
+        )?.type;
+    };
+
+    let accessMemberType: Type | undefined;
+    if (usage.method === 'get') {
+        accessMemberType = getAttributeAccessMember('__getattribute__') ?? getAttributeAccessMember('__getattr__');
+    } else if (usage.method === 'set') {
+        accessMemberType = getAttributeAccessMember('__setattr__');
+    } else {
+        assert(usage.method === 'del');
+        accessMemberType = getAttributeAccessMember('__delattr__');
+    }
+
+    if (!accessMemberType) {
+        return undefined;
+    }
+
+    const argList: Arg[] = [];
+
+    argList.push({
+        argCategory: ArgCategory.Simple,
+        typeResult: {
+            type:
+                prefetched?.strClass && isInstantiableClass(prefetched.strClass)
+                    ? ClassType.cloneWithLiteral(ClassType.cloneAsInstance(prefetched.strClass), memberName)
+                    : AnyType.create(),
+        },
+    });
+
+    if (usage.method === 'set') {
+        argList.push({
+            argCategory: ArgCategory.Simple,
+            typeResult: {
+                type: usage.setType?.type ?? UnknownType.create(),
+                isIncomplete: !!usage.setType?.isIncomplete,
+            },
+        });
+    }
+
+    if (!isFunctionOrOverloaded(accessMemberType)) {
+        if (isAnyOrUnknown(accessMemberType)) {
+            return { type: accessMemberType };
+        }
+
+        return undefined;
+    }
+
+    const callResult = evaluator.validateCallArgs(
+        errorNode,
+        argList,
+        { type: accessMemberType },
+        /* constraints */ undefined,
+        /* skipUnknownArgCheck */ true,
+        /* inferenceContext */ undefined
+    );
+
+    let isAsymmetricAccessor = false;
+    if (usage.method === 'set') {
+        isAsymmetricAccessor = isClassWithAsymmetricAttributeAccessorWithEvaluator(evaluator, classType);
+    }
+
+    return {
+        type: callResult.returnType ?? UnknownType.create(),
+        typeErrors: callResult.argumentErrors,
+        isAsymmetricAccessor,
+    };
+}
+
+export function getElementTypeFromComprehensionWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: ComprehensionNode,
+    flags: EvalFlags,
+    expectedValueOrElementType?: Type,
+    expectedKeyType?: Type
+): TypeResult {
+    let isIncomplete = false;
+    let typeErrors = false;
+
+    for (const forIfNode of node.d.forIfNodes) {
+        if (evaluateComprehensionForIfWithEvaluator(evaluator, forIfNode)) {
+            isIncomplete = true;
+        }
+    }
+
+    let type: Type = UnknownType.create();
+    if (node.d.expr.nodeType === ParseNodeType.DictionaryKeyEntry) {
+        const keyTypeResult = evaluator.getTypeOfExpression(
+            node.d.expr.d.keyExpr,
+            flags,
+            makeInferenceContext(expectedKeyType)
+        );
+        if (keyTypeResult.isIncomplete) {
+            isIncomplete = true;
+        }
+        if (keyTypeResult.typeErrors) {
+            typeErrors = true;
+        }
+        let keyType = keyTypeResult.type;
+        if (!expectedKeyType || !containsLiteralType(expectedKeyType)) {
+            keyType = evaluator.stripLiteralValue(keyType);
+        }
+
+        const valueTypeResult = evaluator.getTypeOfExpression(
+            node.d.expr.d.valueExpr,
+            flags,
+            makeInferenceContext(expectedValueOrElementType)
+        );
+        if (valueTypeResult.isIncomplete) {
+            isIncomplete = true;
+        }
+        if (valueTypeResult.typeErrors) {
+            typeErrors = true;
+        }
+        let valueType = valueTypeResult.type;
+        if (!expectedValueOrElementType || !containsLiteralType(expectedValueOrElementType)) {
+            valueType = evaluator.stripLiteralValue(valueType);
+        }
+
+        type = makeTupleObject(evaluator, [
+            { type: keyType, isUnbounded: false },
+            { type: valueType, isUnbounded: false },
+        ]);
+    } else if (node.d.expr.nodeType === ParseNodeType.DictionaryExpandEntry) {
+        evaluator.getTypeOfExpression(node.d.expr.d.expr, flags, makeInferenceContext(expectedValueOrElementType));
+    } else if (isExpressionNode(node)) {
+        const exprTypeResult = evaluator.getTypeOfExpression(
+            node.d.expr as ExpressionNode,
+            flags,
+            makeInferenceContext(expectedValueOrElementType)
+        );
+        if (exprTypeResult.isIncomplete) {
+            isIncomplete = true;
+        }
+        if (exprTypeResult.typeErrors) {
+            typeErrors = true;
+        }
+        type = exprTypeResult.type;
+    }
+
+    return { type, isIncomplete, typeErrors };
+}
+
+export function getExpectedEntryTypeForIterableWithEvaluator(
+    evaluator: TypeEvaluator,
+    node: ListNode | SetNode | ComprehensionNode,
+    expectedClassType: Type | undefined,
+    inferenceContext?: InferenceContext
+): Type | undefined {
+    if (!inferenceContext) {
+        return undefined;
+    }
+
+    if (!expectedClassType || !isInstantiableClass(expectedClassType)) {
+        return undefined;
+    }
+
+    if (isAnyOrUnknown(inferenceContext.expectedType)) {
+        return inferenceContext.expectedType;
+    }
+
+    if (!isClassInstance(inferenceContext.expectedType)) {
+        return undefined;
+    }
+
+    const constraints = new ConstraintTracker();
+    if (
+        !addConstraintsForExpectedType(
+            evaluator,
+            ClassType.cloneAsInstance(expectedClassType),
+            inferenceContext.expectedType,
+            constraints,
+            ParseTreeUtils.getTypeVarScopesForNode(node),
+            node.start
+        )
+    ) {
+        return undefined;
+    }
+
+    const specializedListOrSet = solveAndApplyConstraintsWithEvaluator(
+        evaluator,
+        expectedClassType,
+        constraints
+    ) as ClassType;
+    if (!specializedListOrSet.priv.typeArgs) {
+        return undefined;
+    }
+
+    return specializedListOrSet.priv.typeArgs[0];
 }
