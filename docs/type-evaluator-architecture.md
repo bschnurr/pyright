@@ -45,63 +45,99 @@ incrementally evolve.
 
 ## Current module layout
 
-Extracted modules live under:
+Extracted modules live under `packages/pyright-internal/src/analyzer/typeEvaluator/`:
 
-- `packages/pyright-internal/src/analyzer/typeEvaluator/`
+### `pureHelpers.ts` (45 lines)
+Stateless utility functions shared across modules with no TypeEvaluator dependency:
+- `isTypeFormSupportedForNode` — checks if experimental TypeForm features are enabled
+- `applyUnpackToTupleLikeType` — applies unpack to tuple-like types
+
+### `specialFormCreation.ts` (1,474 lines)
+Special form type creation functions (originally `AddDiagnosticFn`-injected):
+- `createXxxFromArgs` functions: ClassVar, Final, Annotated, Callable, Optional, TypeForm, TypeGuard, Unpack, Concatenate, Generic, Union, Required/ReadOnly
+- Validation helpers: `validateTypeVarTupleIsUnpackedCheck`, `validateTypeArgCheck`, `transformTypeArgsForParamSpecCheck`, `verifyGenericTypeParamsCheck`, `validateTypeParamDefaultCheck`, `validateAnnotatedMetadataCheck`
+- Type alias transforms: `adjustTypeArgsForTypeVarTupleWithEvaluator`, `transformTypeForTypeAliasWithEvaluator`, `adjustSourceParamDetailsForDestVariadicWithEvaluator`
+- Utility: `getBooleanValueFromNode`, `reportUseOfTypeCheckOnlySymbol`, `enforceClassTypeVarScopeCheck`
+
+### `evaluatorCore.ts` (10,883 lines)
+Core evaluation logic — re-exports functions from `specialFormCreation.ts` and `pureHelpers.ts` so the `TypeEvaluatorCore.*` import namespace in `typeEvaluator.ts` continues to work. Contains:
+- Expression type evaluation (~2,200 lines): getTypeOfSuperCall, getDeclaredTypeForExpression, createSpecializedClassType, getTypeOfIterator, etc.
+- Assignment/comparison logic (~2,800 lines): assignFunction, assignClass, assignParam, assignFromUnionType, assignToUnionType, etc.
+- Collection type inference (~2,100 lines): list/set/dict/comprehension inference, getKeyAndValueTypesFromDictionary, etc.
+- Member access/resolution, TypeVar handling, validation, diagnostics, etc.
 
 ### `diagnostics.ts`
-
 Contains evaluator-specific diagnostics behavior that was formerly embedded in the evaluator closure:
-
 - Suppression stack management (`suppressDiagnostics`)
 - Emission helpers (`addDiagnostic`, `addInformation`, `addDeprecated`, `addUnreachableCode`)
 - Suppression queries (`isDiagnosticSuppressedForNode`, `canSkipDiagnosticForNode`)
 
-This module accepts a `DiagnosticsContext` so it can operate without importing the evaluator.
+### `narrowing.ts`
+Type narrowing: isinstance/truthiness/equality narrowing, TypeGuard/TypeIs, discriminated unions, etc.
+
+### `flowAnalysis.ts`
+Flow graph traversal hooks (delegating to `codeFlowEngine.ts`).
+
+### Dependency diagram (current)
+```
+typeEvaluator.ts  (17,415 lines — closure: state, caches, core dispatch)
+  └── import * as TypeEvaluatorCore from './typeEvaluator/evaluatorCore'
+        evaluatorCore.ts (10,883 lines)
+          ├── imports from specialFormCreation.ts (internal use)
+          ├── imports from pureHelpers.ts (internal use)
+          ├── re-exports specialFormCreation.ts (external visibility)
+          └── re-exports pureHelpers.ts (external visibility)
+        specialFormCreation.ts (1,474 lines)
+          └── imports from pureHelpers.ts
+        pureHelpers.ts (45 lines)
+          └── no evaluator dependencies
+        narrowing.ts (library: called BY core)
+        flowAnalysis.ts (library: called BY core)
+        diagnostics.ts (library: accepts DiagnosticsContext)
+```
+
+No circular dependencies. All modules are imported by `evaluatorCore.ts` or `typeEvaluator.ts` but never import back.
 
 ## Progress tracking
 
-- Completed:
-  - `diagnostics.ts` extraction.
-  - `flowAnalysis.ts` helpers (flow graph delegators, constrained typevar narrowing, `printControlFlowGraph`).
-  - `narrowing.ts` helpers for assignment-based narrowing, literal/type-guard stripping, truthiness handling (including direct-reference and `not` matching), `None`/ellipsis comparisons, class/literal equality comparisons (including equality matchers), discriminated equality helpers (tuple/dict/member), tuple length/containment/TypedDict-key narrowing, len(x) and `in`-operator comparison matching, call-expression matching for isinstance/issubclass, bool, and TypeGuard/TypeIs, literal enumeration, `type(x) is y` matching/narrowing, `X is <literal/class>` matching, indexed-literal and member-access discriminated matching, isinstance/issubclass narrowing (including class-type parsing and name-scope checks), aliased-condition and assignment-expression narrowing, and user-defined TypeGuard/TypeIs narrowing.
-  - `evaluatorCore.ts` extraction (89 exported functions, ~2,688 lines):
-    - **Phase 2** (pure helpers, no closure deps): Return-type-inference context stack (7), symbol resolution stack (5), declaration helpers (3), type alias helpers (4), type checking helpers (3), utility helpers (12), `expandTypedKwargsForFunction`, `setConstraintsForFreeTypeVarsInType`.
-    - **Phase 3a** (prefetched context injection): Prefetched type accessors (8), `parseStringAsTypeAnnotationNode`, `convertSpecialFormToRuntimeValueWithPrefetched`.
-    - **Phase 3b** (`AddDiagnosticFn` callback injection): 20 functions including `createSpecialTypeFromArgs`, `createCallableTypeFromArgs`, `createAnnotatedTypeFromArgs`, `createOptionalTypeFromArgs`, `createTypeFormTypeFromArgs`, `createTypeGuardTypeFromArgs`, `createUnionTypeFromArgs`.
-    - **Phase 4** (`TypeEvaluator` param injection): 22 functions including `adjustTypeArgsForTypeVarTuple` (144), `transformTypeForTypeAlias` (125), `isTypeComparable` (129), `adjustSourceParamDetailsForDestVariadic` (97), `createRequiredOrReadOnlyType` (96), `getTypeOfExpressionExpectingType` (82), `computeEffectiveMetaclass` (63), `isUnambiguousInference` (59), `convertToTypeFormType` (51), `assignConditionalTypeToTypeVar` (66), `createSubclass` (49), `isTypeHashable` (45), `isProperSubtype` (39), `isOverrideMethodApplicable` (37), `expandPromotionTypes` (34), `assignRecursiveTypeAliasToSelf` (34), `getTypeOfSlice` (41), `transformVariadicParamType` (41), `getTypeOfYieldFrom` (30), `isPossibleTypeDictFactoryCall` (32), `validateTypeIsInstantiable` (45), `reportPossibleUnknownAssignment` (43).
+- **Phase 1**: Invariant checklist documented.
+- **Phase 2**: Pure helpers extraction (34 functions, ~550 lines).
+- **Phase 3a**: Prefetched context injection (10 functions).
+- **Phase 3b**: AddDiagnosticFn injection (20 functions).
+- **Phase 4**: TypeEvaluator param injection (22 functions).
+- **Phase 5**: Deeper extraction with context patterns (19 functions, ~2,900 lines).
+- **Phase 6**: Interface-method extraction (100+ functions, ~6,000+ lines across 17 batches).
+- **Phase 7**: Module splitting — `evaluatorCore.ts` split into `specialFormCreation.ts` (1,474 lines) and `pureHelpers.ts` (45 lines).
 - Current state:
-  - `typeEvaluator.ts` reduced from ~28,000 to ~18,145 lines (~9,855 lines extracted or removed, ~35% reduction).
-  - `evaluatorCore.ts` now contains **~125+ exported functions** (~7,282 lines).
-  - **Phase 5** (deeper extraction) — established context-injection patterns:
-    - `codeFlowEngine: CodeFlowEngine` + `isFlowPathBetweenNodes` callback for flow-dependent functions
-    - `evaluator: TypeEvaluator` with expanded interface (added optional params to several methods)
-  - **Phase 6** (interface-method extraction) — discovered that many "blocking" methods (`addDiagnostic`, `getBuiltInType`, `getObjectType`, etc.) are already on the `TypeEvaluator` interface. This unlocked extraction of functions that call these through `evaluator.xxx(...)`.
-  - Phase 5 extractions (batches 1-7): ~2,900 lines across 19 functions
-  - Phase 6 extractions (batches 1-4): ~2,080 lines across 13 functions
-    - Batch 1: `expandArgList` (55), `specializeTypeAliasWithDefaults` (68), `inferVarianceForClass` (88), `getTypeOfMagicMethodCall` (122), `getTypeOfAwaitable` (55), `createSelfType` (95) — total ~485 lines
-    - Batch 2: `getTypeOfSuperCall` (326), `getDeclaredTypeForExpression` (239), `getTypeOfIndexedObjectOrClass` (224), `getAliasedSymbolTypeForName` (85) — total ~875 lines
-    - Batch 3: `getTypeOfIterator` (137), `getTypeOfStringListAsType` (69) — total ~206 lines
-    - Batch 4: `createSpecializedClassType` (513) — total ~513 lines
-  - **Remaining extraction blockers** (~90 functions, ~8,000 lines):
-    1. Functions using `getTypeOfBoundMember` with `recursionCount` not on interface
-    2. Functions using `pushSymbolResolution` / `popSymbolResolution` / `effectiveTypeCache` closure state
-    3. Functions using `writeTypeCache` / `readTypeCache` / `isTypeCached` closure cache
-    4. Functions using `speculativeTypeTracker` / `disableSpeculativeMode` closure state
-    5. Functions using `deferredClassCompletions` closure state
-    6. Functions calling other non-interface inner functions (cascading deps)
+  - `typeEvaluator.ts`: **17,415 lines** (down from ~28,000, **38% reduction**)
+  - `evaluatorCore.ts`: **10,883 lines** (re-exports functions from sub-modules)
+  - `specialFormCreation.ts`: **1,474 lines**
+  - `pureHelpers.ts`: **45 lines**
+  - **200+ functions** delegated from typeEvaluator.ts to modules
+  - All **2,323 tests** passing, typecheck clean
+  - **Remaining ~150 non-delegated functions** blocked by closure variables (see architecture decisions below)
+  - **Next module split candidates**: assignment logic (~2,800 lines), collection inference (~2,100 lines)
 
 ## Planned breakdown (future slices)
 
-- `evaluatorCore.ts` — main entrypoints (e.g. `getTypeOfExpression`, `getTypeOfExpressionCore`)
-- `narrowing.ts` — `isinstance` / truthiness / equality narrowing (truthiness, equality, isinstance, and user-defined TypeGuard/TypeIs extracted)
-- `flowAnalysis.ts` — flow graph traversal hooks (delegating to `codeFlowEngine.ts`)
-- `symbolScope.ts` — symbol lookup by scope (e.g. `lookUpSymbolRecursive`)
+### Near-term: Further module splitting of evaluatorCore.ts
+Split the remaining 10,883-line evaluatorCore.ts into topic-focused modules (same re-export pattern):
+- `assignmentLogic.ts` (~2,800 lines) — `assignFunction`, `assignClass`, `assignParam`, `assignFromUnionType`, `assignToUnionType`, `assignClassWithTypeArgs`, etc.
+- `collectionInference.ts` (~2,100 lines) — list/set/dict/comprehension type inference functions
+- `memberAccess.ts` (~2,200 lines) — `getTypeOfSuperCall`, `getDeclaredTypeForExpression`, `createSpecializedClassType`, `getTypeOfIterator`, etc.
+- `evaluatorCore.ts` (~3,800 lines) — remaining core functions, re-exports
+
+### Medium-term: Closure variable barrier
+The remaining ~150 functions in typeEvaluator.ts are blocked by closure variables. Options:
+- **Option A: TypeEvaluatorContext class** — bundle all closure state into a class
+- **Option B: Expand TypeEvaluator interface** — add missing state accessors
+- **Option C: Internal EvaluatorState object** — non-exported context bundle
+
+### Long-term: Full visitor architecture
 - `expressionVisitors.ts` — per-expression-node handling (Name, Attribute, Call, Await, ...)
 - `statementVisitors.ts` — per-statement handling (assignment, if, match, try, loops)
 - `patternMatching.ts` — evaluator glue around existing `analyzer/patternMatching.ts`
-- `typeEvaluatorIndex.ts` — factory/build + exports (entry point; can merge with API if both become wiring)
-- `typeEvaluatorAPI.ts` — public interface type + thin wrapper (optional; merge into Index if redundant)
+- `typeEvaluatorIndex.ts` — factory/build + exports
 
 ### Recommended extraction order
 
