@@ -59,13 +59,23 @@ Special form type creation functions (originally `AddDiagnosticFn`-injected):
 - Type alias transforms: `adjustTypeArgsForTypeVarTupleWithEvaluator`, `transformTypeForTypeAliasWithEvaluator`, `adjustSourceParamDetailsForDestVariadicWithEvaluator`
 - Utility: `getBooleanValueFromNode`, `reportUseOfTypeCheckOnlySymbol`, `enforceClassTypeVarScopeCheck`
 
-### `evaluatorCore.ts` (~7,483 lines)
+### `evaluatorCore.ts` (~4,305 lines)
 Core evaluation logic — re-exports functions from `specialFormCreation.ts` and `pureHelpers.ts` so the `TypeEvaluatorCore.*` import namespace in `typeEvaluator.ts` continues to work. Contains:
-- Expression type evaluation (~2,200 lines): getTypeOfSuperCall, getDeclaredTypeForExpression, createSpecializedClassType, getTypeOfIterator, etc.
-- TypeVar/type form handling, type comparisons, member access, symbol resolution
-- Miscellaneous helpers and validation
+- Non-leaf functions called by multiple modules (createSpecializedClassType, applyConditionFilter, etc.)
+- Type comparisons (isTypeHashable, isTypeComparable, isProperSubtype)
+- Member access helpers, symbol resolution, validation utilities
+- Constants (typePromotions map), prefetched type accessors
 
-### `collectionInference.ts` (~1,037 lines)
+### `expressionEvaluation.ts` (~2,162 lines)
+Expression type evaluation functions:
+- getTypeOfSuperCall, getDeclaredTypeForExpression, getTypeOfIndexedObjectOrClass
+- getTypeOfIterator, getTypeOfMagicMethodCall, createLiteralType
+- getTypeOfSlice, getTypeOfYieldFrom, getTypeOfYield, getTypeOfUnpackOperator
+- getTypeOfIterable, getTypeArg, getTypeOfLambdaForCall, getTypeOfMember
+- getTypeOfAssertType, getTypeOfTypeForm, evaluateCastCall, etc.
+- Imported from `typeEvaluator.ts` via dual-import pattern (`ExpressionEval.*`)
+
+### `collectionInference.ts` (~1,039 lines)
 Collection type inference functions for dictionaries, lists, sets, comprehensions, and strings:
 - Dictionary: getKeyAndValueTypesFromDictionary, getTypeOfDictionaryWithContext, getTypeOfDictionaryInferred
 - List/Set: getTypeOfListOrSetWithContext, getTypeOfListOrSetInferred, getExpectedEntryTypeForIterable
@@ -75,24 +85,23 @@ Collection type inference functions for dictionaries, lists, sets, comprehension
 
 ### `assignFunctions.ts` (~1,843 lines)
 All type assignment/compatibility logic:
-- `assignFunctionWithEvaluator` (~850 lines) — function-to-function type assignment
-- `assignFromUnionTypeWithEvaluator` (~274 lines) — union source assignment
-- `assignToUnionTypeWithEvaluator` (~191 lines) — union destination assignment
-- `assignClassWithEvaluator` (~177 lines) — class-to-class assignment
-- `assignClassWithTypeArgsWithEvaluator` (~127 lines) — class type args assignment
-- `assignParamWithEvaluator` (~83 lines) — parameter-level assignment
-- `assignConditionalTypeToTypeVarWithEvaluator` (~71 lines)
-- `assignRecursiveTypeAliasToSelfWithEvaluator` (~36 lines)
-- Local helper `getEffectiveReturnTypeForAssign`
-- Zero dependencies on evaluatorCore — cleanest module extraction
+- assignFunction, assignFromUnionType, assignToUnionType, assignClass
+- assignClassWithTypeArgs, assignParam, assignConditionalTypeToTypeVar
+- assignRecursiveTypeAliasToSelf
 - Imported from `typeEvaluator.ts` via dual-import pattern (`AssignFunctions.*`)
+
+### `typeVarHandling.ts` (~1,108 lines)
+TypeVar, TypeVarTuple, variance inference, type form, and expansion logic:
+- createTypeVarType, createTypeVarTupleType (type var creation)
+- inferVarianceForClass, inferVarianceForTypeAlias (variance inference)
+- makeTopLevelTypeVarsConcrete, mapSubtypesExpandTypeVars (expansion)
+- expandArgList, expandArgTypes, expandTypedKwargsForFunction
+- convertToTypeFormType, addTypeFormForSymbol, expandPromotionTypes
+- Imported from `typeEvaluator.ts` via dual-import pattern (`TypeVarHandling.*`)
 
 ### `overrideValidation.ts` (~603 lines)
 Override method validation logic:
-- `validateOverrideMethodWithEvaluator` (~136 lines) — entry point for override validation
-- `validateOverrideMethodInternalWithEvaluator` (~412 lines) — detailed override checking
-- `isOverrideMethodApplicableWithEvaluator` (~40 lines) — applicability check
-- Zero internal callers in evaluatorCore — leaf functions
+- validateOverrideMethod, validateOverrideMethodInternal, isOverrideMethodApplicable
 - Imported from `typeEvaluator.ts` via dual-import pattern (`OverrideValidation.*`)
 
 ### `diagnostics.ts`
@@ -113,31 +122,36 @@ typeEvaluator.ts  (17,415 lines — closure: state, caches, core dispatch)
   ├── import * as TypeEvaluatorCore from './typeEvaluator/evaluatorCore'
   ├── import * as CollectionInference from './typeEvaluator/collectionInference'
   ├── import * as AssignFunctions from './typeEvaluator/assignFunctions'
-  └── import * as OverrideValidation from './typeEvaluator/overrideValidation'
-        evaluatorCore.ts (~7,483 lines)
-          ├── imports from specialFormCreation.ts (internal use)
-          ├── imports from pureHelpers.ts (internal use)
-          ├── re-exports specialFormCreation.ts (external visibility)
-          └── re-exports pureHelpers.ts (external visibility)
-        collectionInference.ts (~1,037 lines)
-          ├── imports from evaluatorCore.ts (one-way, no cycle)
-          └── imports from pureHelpers.ts
+  ├── import * as OverrideValidation from './typeEvaluator/overrideValidation'
+  ├── import * as ExpressionEval from './typeEvaluator/expressionEvaluation'
+  └── import * as TypeVarHandling from './typeEvaluator/typeVarHandling'
+        evaluatorCore.ts (~4,305 lines)
+          ├── re-exports specialFormCreation.ts
+          └── re-exports pureHelpers.ts
+        expressionEvaluation.ts (~2,162 lines)
+          └── imports from evaluatorCore.ts
         assignFunctions.ts (~1,843 lines)
           ├── imports from specialFormCreation.ts
-          └── imports from evaluatorCore.ts (typePromotions constant only)
-        overrideValidation.ts (~603 lines)
-          └── no evaluatorCore imports (fully independent)
+          └── imports from evaluatorCore.ts
         specialFormCreation.ts (1,474 lines)
           └── imports from pureHelpers.ts
+        typeVarHandling.ts (~1,108 lines)
+          ├── imports from evaluatorCore.ts
+          ├── imports from specialFormCreation.ts
+          └── imports from pureHelpers.ts
+        collectionInference.ts (~1,039 lines)
+          ├── imports from evaluatorCore.ts
+          ├── imports from expressionEvaluation.ts
+          ├── imports from typeVarHandling.ts
+          └── imports from pureHelpers.ts
+        overrideValidation.ts (~603 lines)
+          └── no evaluatorCore imports
         pureHelpers.ts (45 lines)
           └── no evaluator dependencies
-        narrowing.ts (library: called BY core)
-        flowAnalysis.ts (library: called BY core)
-        diagnostics.ts (library: accepts DiagnosticsContext)
+        narrowing.ts, flowAnalysis.ts, diagnostics.ts (pre-existing libraries)
 ```
 
-No circular dependencies. Dual-import pattern used for `collectionInference.ts`, `assignFunctions.ts`,
-and `overrideValidation.ts` to avoid cycles.
+No circular dependencies. All new modules use dual-import pattern in typeEvaluator.ts.
 
 ## Progress tracking
 
@@ -151,21 +165,25 @@ and `overrideValidation.ts` to avoid cycles.
 - **Phase 7**: Module splitting — `evaluatorCore.ts` split into topic-focused modules:
   - `specialFormCreation.ts` (1,474 lines) — special form type creation
   - `pureHelpers.ts` (45 lines) — stateless shared utilities
-  - `collectionInference.ts` (~1,037 lines) — list/set/dict/comprehension inference (dual-import pattern)
-  - `assignFunctions.ts` (~1,843 lines) — all type assignment/compatibility logic (dual-import pattern)
-  - `overrideValidation.ts` (~603 lines) — override method validation (dual-import pattern)
+  - `collectionInference.ts` (~1,039 lines) — collection type inference
+  - `assignFunctions.ts` (~1,843 lines) — type assignment/compatibility logic
+  - `overrideValidation.ts` (~603 lines) — override method validation
+  - `expressionEvaluation.ts` (~2,162 lines) — expression type evaluation
+  - `typeVarHandling.ts` (~1,108 lines) — TypeVar/variance/expansion logic
 - Current state:
   - `typeEvaluator.ts`: **17,415 lines** (down from ~28,000, **38% reduction**)
-  - `evaluatorCore.ts`: **~7,483 lines** (core evaluation, member access, TypeVar handling)
+  - `evaluatorCore.ts`: **~4,305 lines** (non-leaf core functions, re-exports)
+  - `expressionEvaluation.ts`: **~2,162 lines**
   - `assignFunctions.ts`: **~1,843 lines**
   - `specialFormCreation.ts`: **1,474 lines**
-  - `collectionInference.ts`: **~1,037 lines**
+  - `typeVarHandling.ts`: **~1,108 lines**
+  - `collectionInference.ts`: **~1,039 lines**
   - `overrideValidation.ts`: **~603 lines**
   - `pureHelpers.ts`: **45 lines**
   - **200+ functions** delegated from typeEvaluator.ts to modules
   - All **2,323 tests** passing, typecheck clean
   - **Remaining ~150 non-delegated functions** blocked by closure variables (see architecture decisions below)
-  - **Next module split candidates**: expression type evaluation, TypeVar/type form handling, member resolution
+  - **evaluatorCore.ts now at natural floor**: ~28 non-leaf functions called across modules, plus imports/constants/re-exports
 
 ## Planned breakdown (future slices)
 
