@@ -558,7 +558,15 @@ function getTypeVarType(
                 if (!entry.upperBound || evaluator.assignType(entry.upperBound, lowerNoLiterals)) {
                     if (TypeVarType.hasConstraints(typeVar)) {
                         // Does it still match a value constraint?
-                        if (typeVar.shared.constraints.some((constraint) => isTypeSame(lowerNoLiterals, constraint))) {
+                        const constraints = typeVar.shared.constraints;
+                        let matchesConstraint = false;
+                        for (let i = 0; i < constraints.length; i++) {
+                            if (isTypeSame(lowerNoLiterals, constraints[i])) {
+                                matchesConstraint = true;
+                                break;
+                            }
+                        }
+                        if (matchesConstraint) {
                             lowerBound = lowerNoLiterals;
                         }
                     } else {
@@ -1107,19 +1115,25 @@ function assignConstrainedTypeVar(
         // If the type is a union, see if the entire union is assignable to one
         // of the constraints.
         if (!constrainedType && isUnion(concreteSrcType)) {
-            constrainedType = destType.shared.constraints.find((constraint) => {
+            const constraints = destType.shared.constraints;
+            for (let i = 0; i < constraints.length; i++) {
                 const adjustedConstraint = TypeBase.isInstantiable(destType)
-                    ? convertToInstantiable(constraint)
-                    : constraint;
-                return evaluator.assignType(
-                    adjustedConstraint,
-                    concreteSrcType,
-                    /* diag */ undefined,
-                    /* constraints */ undefined,
-                    AssignTypeFlags.Default,
-                    recursionCount
-                );
-            });
+                    ? convertToInstantiable(constraints[i])
+                    : constraints[i];
+                if (
+                    evaluator.assignType(
+                        adjustedConstraint,
+                        concreteSrcType,
+                        /* diag */ undefined,
+                        /* constraints */ undefined,
+                        AssignTypeFlags.Default,
+                        recursionCount
+                    )
+                ) {
+                    constrainedType = constraints[i];
+                    break;
+                }
+            }
         }
     }
 

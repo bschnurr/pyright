@@ -133,6 +133,8 @@ export interface TypeSameOptions {
 const _defaultTypeSameOptions: TypeSameOptions = {};
 const _honorTypeFormOptions: TypeSameOptions = { honorTypeForm: true };
 const _honorTypeFormPseudoGenericOptions: TypeSameOptions = { ignorePseudoGeneric: true, honorTypeForm: true };
+const _ignoreConditionsOptions: TypeSameOptions = { ignoreConditions: true };
+const _skipElideRedundantLiteralsOptions: CombineTypesOptions = { skipElideRedundantLiterals: true };
 
 export interface TypeAliasSharedInfo {
     name: string;
@@ -2681,7 +2683,7 @@ export namespace UnionType {
     export function containsType(
         unionType: UnionType,
         subtype: Type,
-        options: TypeSameOptions = {},
+        options: TypeSameOptions = _defaultTypeSameOptions,
         exclusionSet?: Set<number>,
         recursionCount = 0
     ): boolean {
@@ -2702,20 +2704,19 @@ export namespace UnionType {
             }
         }
 
-        const foundIndex = unionType.priv.subtypes.findIndex((t, i) => {
+        const subtypes = unionType.priv.subtypes;
+        for (let i = 0; i < subtypes.length; i++) {
             if (exclusionSet?.has(i)) {
-                return false;
+                continue;
             }
 
-            return isTypeSame(t, subtype, options, recursionCount);
-        });
-
-        if (foundIndex < 0) {
-            return false;
+            if (isTypeSame(subtypes[i], subtype, options, recursionCount)) {
+                exclusionSet?.add(i);
+                return true;
+            }
         }
 
-        exclusionSet?.add(foundIndex);
-        return true;
+        return false;
     }
 
     export function addTypeAliasSource(unionType: UnionType, typeAliasSource: Type) {
@@ -3941,7 +3942,7 @@ export function isSameWithoutLiteralValue(destType: Type, srcType: Type): boolea
     if (isClassInstance(srcType) && srcType.priv.literalValue !== undefined) {
         // Strip the literal.
         srcType = ClassType.cloneWithLiteral(srcType, /* value */ undefined);
-        return isTypeSame(destType, srcType, { ignoreConditions: true });
+        return isTypeSame(destType, srcType, _ignoreConditionsOptions);
     }
 
     return false;

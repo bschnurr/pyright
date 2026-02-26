@@ -242,6 +242,21 @@ const maxTupleTypeArgRecursionDepth = 10;
 // Shared empty options object to avoid allocating a new {} on every call
 // from the ~25 call sites that use the default.
 const _defaultApplyTypeVarOptions: ApplyTypeVarOptions = {};
+const _ignoreTypeFlagsOptions: TypeSameOptions = { ignoreTypeFlags: true };
+
+// Special built-in classes that require type arguments even though typeParams is empty.
+const _specialBuiltInClassNames = new Set([
+    'Tuple',
+    'Callable',
+    'Generic',
+    'Type',
+    'Optional',
+    'Union',
+    'Literal',
+    'Annotated',
+    'TypeGuard',
+    'TypeIs',
+]);
 
 // Tracks whether a function signature has been seen before within
 // an expression. For example, in the expression "foo(foo, foo)", the
@@ -1594,7 +1609,11 @@ export function makeTypeVarsFree(type: Type, scopeIds: TypeVarScopeId[]): Type {
 
 // Specializes a (potentially generic) type by substituting
 // type variables from a type var map.
-export function applySolvedTypeVars(type: Type, solution: ConstraintSolution, options: ApplyTypeVarOptions = _defaultApplyTypeVarOptions): Type {
+export function applySolvedTypeVars(
+    type: Type,
+    solution: ConstraintSolution,
+    options: ApplyTypeVarOptions = _defaultApplyTypeVarOptions
+): Type {
     // Use a shortcut if constraints is empty and no transform is necessary.
     if (solution.isEmpty() && !options.replaceUnsolved) {
         return type;
@@ -2055,7 +2074,14 @@ export function addTypeVarsToListIfUnique(list1: TypeVarType[], list2: TypeVarTy
             continue;
         }
 
-        if (!list1.find((type1) => isTypeSame(type1, type2))) {
+        let found = false;
+        for (let i = 0; i < list1.length; i++) {
+            if (isTypeSame(list1[i], type2)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
             list1.push(type2);
         }
     }
@@ -2226,7 +2252,14 @@ export function specializeForBaseClass(srcType: ClassType, baseClass: ClassType)
 }
 
 export function derivesFromStdlibClass(classType: ClassType, className: string) {
-    return classType.shared.mro.some((mroClass) => isClass(mroClass) && ClassType.isBuiltIn(mroClass, className));
+    const mro = classType.shared.mro;
+    for (let i = 0; i < mro.length; i++) {
+        const mroClass = mro[i];
+        if (isClass(mroClass) && ClassType.isBuiltIn(mroClass, className)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // If ignoreUnknown is true, an unknown base class is ignored when
@@ -2322,17 +2355,31 @@ export function getGeneratorYieldType(declaredReturnType: Type, isAsync: boolean
 }
 
 export function isInstantiableMetaclass(type: Type): boolean {
-    return (
-        isInstantiableClass(type) &&
-        type.shared.mro.some((mroClass) => isClass(mroClass) && ClassType.isBuiltIn(mroClass, 'type'))
-    );
+    if (!isInstantiableClass(type)) {
+        return false;
+    }
+    const mro = type.shared.mro;
+    for (let i = 0; i < mro.length; i++) {
+        const mroClass = mro[i];
+        if (isClass(mroClass) && ClassType.isBuiltIn(mroClass, 'type')) {
+            return true;
+        }
+    }
+    return false;
 }
 
 export function isMetaclassInstance(type: Type): boolean {
-    return (
-        isClassInstance(type) &&
-        type.shared.mro.some((mroClass) => isClass(mroClass) && ClassType.isBuiltIn(mroClass, 'type'))
-    );
+    if (!isClassInstance(type)) {
+        return false;
+    }
+    const mro = type.shared.mro;
+    for (let i = 0; i < mro.length; i++) {
+        const mroClass = mro[i];
+        if (isClass(mroClass) && ClassType.isBuiltIn(mroClass, 'type')) {
+            return true;
+        }
+    }
+    return false;
 }
 
 export function isEffectivelyInstantiable(type: Type, options?: IsInstantiableOptions, recursionCount = 0): boolean {
@@ -2922,20 +2969,7 @@ export function requiresTypeArgs(classType: ClassType) {
     // There are a few built-in special classes that require
     // type arguments even though typeParams is empty.
     if (ClassType.isSpecialBuiltIn(classType)) {
-        const specialClasses = [
-            'Tuple',
-            'Callable',
-            'Generic',
-            'Type',
-            'Optional',
-            'Union',
-            'Literal',
-            'Annotated',
-            'TypeGuard',
-            'TypeIs',
-        ];
-
-        if (specialClasses.some((t) => t === (classType.priv.aliasName || classType.shared.name))) {
+        if (_specialBuiltInClassNames.has(classType.priv.aliasName || classType.shared.name)) {
             return true;
         }
     }
@@ -3591,24 +3625,30 @@ export class TypeVarTransformer {
 
         if (isFunction(type)) {
             // Prevent recursion.
-            if (this._pendingFunctionTransformations.some((t) => t === type)) {
-                return type;
+            const pending = this._pendingFunctionTransformations;
+            for (let i = 0; i < pending.length; i++) {
+                if (pending[i] === type) {
+                    return type;
+                }
             }
 
-            this._pendingFunctionTransformations.push(type);
+            pending.push(type);
             const result = this.transformTypeVarsInFunctionType(type, recursionCount);
-            this._pendingFunctionTransformations.pop();
+            pending.pop();
 
             return result;
         }
 
         if (isOverloaded(type)) {
             // Prevent recursion.
-            if (this._pendingFunctionTransformations.some((t) => t === type)) {
-                return type;
+            const pending = this._pendingFunctionTransformations;
+            for (let i = 0; i < pending.length; i++) {
+                if (pending[i] === type) {
+                    return type;
+                }
             }
 
-            this._pendingFunctionTransformations.push(type);
+            pending.push(type);
 
             let requiresUpdate = false;
 
@@ -4465,8 +4505,10 @@ class ApplySolvedTypeVarsTransformer extends TypeVarTransformer {
 
         const exemptTypeVars = this._options.replaceUnsolved?.unsolvedExemptTypeVars;
         if (exemptTypeVars) {
-            if (exemptTypeVars.some((t) => isTypeSame(t, typeVar, { ignoreTypeFlags: true }))) {
-                return false;
+            for (let i = 0; i < exemptTypeVars.length; i++) {
+                if (isTypeSame(exemptTypeVars[i], typeVar, _ignoreTypeFlagsOptions)) {
+                    return false;
+                }
             }
         }
 
@@ -4497,8 +4539,12 @@ class UnificationTypeTransformer extends TypeVarTransformer {
     }
 
     private _isTypeVarLive(typeVar: TypeVarType) {
-        return this._liveTypeVarScopes.some(
-            (scopeId) => typeVar.priv.scopeId === scopeId || typeVar.priv.freeTypeVar?.priv.scopeId === scopeId
-        );
+        const scopes = this._liveTypeVarScopes;
+        for (let i = 0; i < scopes.length; i++) {
+            if (typeVar.priv.scopeId === scopes[i] || typeVar.priv.freeTypeVar?.priv.scopeId === scopes[i]) {
+                return true;
+            }
+        }
+        return false;
     }
 }
