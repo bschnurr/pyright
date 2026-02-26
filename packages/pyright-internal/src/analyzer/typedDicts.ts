@@ -367,7 +367,7 @@ export function synthesizeTypedDictClassMethods(
         FunctionType.addKeywordOnlyParamSeparator(initOverride2);
     }
 
-    entries.knownItems.forEach((entry, name) => {
+    for (const [name, entry] of entries.knownItems) {
         FunctionType.addParam(
             initOverride1,
             FunctionParam.create(
@@ -393,7 +393,7 @@ export function synthesizeTypedDictClassMethods(
         if (!entry.isReadOnly) {
             allEntriesAreReadOnly = false;
         }
-    });
+    }
 
     if (entries.extraItems && !isNever(entries.extraItems.valueType)) {
         FunctionType.addParam(
@@ -605,7 +605,7 @@ export function synthesizeTypedDictClassMethods(
             const tuplesToCombine: Type[] = [];
             const tupleClass = evaluator.getBuiltInType(node, 'tuple');
 
-            entries.knownItems.forEach((entry, name) => {
+            for (const [name, entry] of entries.knownItems) {
                 if (!entry.isReadOnly) {
                     // For writable entries, add a tuple entry.
                     if (tupleClass && isInstantiableClass(tupleClass) && strClass && isInstantiableClass(strClass)) {
@@ -632,7 +632,7 @@ export function synthesizeTypedDictClassMethods(
                         )
                     );
                 }
-            });
+            }
 
             const iterableClass = evaluator.getTypingType(node, 'Iterable');
             if (iterableClass && isInstantiableClass(iterableClass)) {
@@ -663,7 +663,7 @@ export function synthesizeTypedDictClassMethods(
         const popOverloads: FunctionType[] = [];
         const setDefaultOverloads: FunctionType[] = [];
 
-        entries.knownItems.forEach((entry, name) => {
+        for (const [name, entry] of entries.knownItems) {
             const nameLiteralType = ClassType.cloneAsInstance(ClassType.cloneWithLiteral(strClass, name));
 
             getOverloads.push(
@@ -688,7 +688,7 @@ export function synthesizeTypedDictClassMethods(
             if (!entry.isReadOnly) {
                 setDefaultOverloads.push(createSetDefaultMethod(nameLiteralType, entry.valueType));
             }
-        });
+        }
 
         const strType = ClassType.cloneAsInstance(strClass);
 
@@ -786,12 +786,14 @@ export function synthesizeTypedDictClassMethods(
             // If we know that there can be no more items, we can provide
             // a more accurate key type consisting of all known keys.
             if (entries.extraItems && isNever(entries.extraItems.valueType)) {
-                keyValueType = combineTypes(
-                    Array.from(entries.knownItems.keys()).map((key) => ClassType.cloneWithLiteral(strType, key))
-                );
+                const keyTypes: Type[] = [];
+                for (const key of entries.knownItems.keys()) {
+                    keyTypes.push(ClassType.cloneWithLiteral(strType, key));
+                }
+                keyValueType = combineTypes(keyTypes);
             }
 
-            ['items', 'keys', 'values'].forEach((methodName) => {
+            for (const methodName of ['items', 'keys', 'values']) {
                 const method = FunctionType.createSynthesizedInstance(methodName);
                 FunctionType.addParam(method, selfParam);
 
@@ -808,7 +810,7 @@ export function synthesizeTypedDictClassMethods(
 
                     symbolTable.set(methodName, Symbol.createWithType(SymbolFlags.ClassMember, method));
                 }
-            });
+            }
         }
     }
 }
@@ -843,7 +845,7 @@ export function getTypedDictMembersForClass(
 
     // Create a specialized copy of the entries so the caller can mutate them.
     const entries = new Map<string, TypedDictEntry>();
-    classType.shared.typedDictEntries!.knownItems.forEach((value, key) => {
+    for (const [key, value] of classType.shared.typedDictEntries!.knownItems) {
         const tdEntry = { ...value };
         tdEntry.valueType = applySolvedTypeVars(tdEntry.valueType, solution);
 
@@ -860,15 +862,15 @@ export function getTypedDictMembersForClass(
         }
 
         entries.set(key, tdEntry);
-    });
+    }
 
     // Apply narrowed types on top of existing entries if present.
     if (allowNarrowed && classType.priv.typedDictNarrowedEntries) {
-        classType.priv.typedDictNarrowedEntries.forEach((value, key) => {
+        for (const [key, value] of classType.priv.typedDictNarrowedEntries) {
             const tdEntry = { ...value };
             tdEntry.valueType = applySolvedTypeVars(tdEntry.valueType, solution);
             entries.set(key, tdEntry);
-        });
+        }
     }
 
     let extraItems = classType.shared.typedDictEntries?.extraItems;
@@ -896,9 +898,9 @@ export function getTypedDictMappingEquivalent(evaluator: TypeEvaluator, classTyp
     const entries = getTypedDictMembersForClass(evaluator, classType);
     const typesToCombine: Type[] = [];
 
-    entries.knownItems.forEach((entry) => {
+    for (const [, entry] of entries.knownItems) {
         typesToCombine.push(entry.valueType);
-    });
+    }
 
     if (entries.extraItems) {
         typesToCombine.push(entries.extraItems.valueType);
@@ -939,7 +941,7 @@ export function getTypedDictDictEquivalent(
     let dictValueType = entries.extraItems.valueType;
 
     let isEquivalentToDict = true;
-    entries.knownItems.forEach((entry) => {
+    for (const [, entry] of entries.knownItems) {
         if (entry.isReadOnly || entry.isRequired) {
             isEquivalentToDict = false;
         }
@@ -958,7 +960,7 @@ export function getTypedDictDictEquivalent(
         ) {
             isEquivalentToDict = false;
         }
-    });
+    }
 
     if (!isEquivalentToDict) {
         return undefined;
@@ -976,14 +978,14 @@ function getTypedDictFieldsFromDictSyntax(
     const entrySet = new Set<string>();
     const fileInfo = AnalyzerNodeInfo.getFileInfo(entryDict);
 
-    entryDict.d.items.forEach((entry) => {
+    for (const entry of entryDict.d.items) {
         if (entry.nodeType !== ParseNodeType.DictionaryKeyEntry) {
             evaluator.addDiagnostic(
                 DiagnosticRule.reportGeneralTypeIssues,
                 LocMessage.typedDictSecondArgDictEntry(),
                 entry
             );
-            return;
+            continue;
         }
 
         if (entry.d.keyExpr.nodeType !== ParseNodeType.StringList) {
@@ -992,7 +994,7 @@ function getTypedDictFieldsFromDictSyntax(
                 LocMessage.typedDictEntryName(),
                 entry.d.keyExpr
             );
-            return;
+            continue;
         }
 
         const entryName = entry.d.keyExpr.d.strings.map((s) => s.d.value).join('');
@@ -1002,7 +1004,7 @@ function getTypedDictFieldsFromDictSyntax(
                 LocMessage.typedDictEmptyName(),
                 entry.d.keyExpr
             );
-            return;
+            continue;
         }
 
         if (entrySet.has(entryName)) {
@@ -1011,7 +1013,7 @@ function getTypedDictFieldsFromDictSyntax(
                 LocMessage.typedDictEntryUnique(),
                 entry.d.keyExpr
             );
-            return;
+            continue;
         }
 
         // Record names in a set to detect duplicates.
@@ -1032,7 +1034,7 @@ function getTypedDictFieldsFromDictSyntax(
         newSymbol.addDeclaration(declaration);
 
         classFields.set(entryName, newSymbol);
-    });
+    }
 
     // Set the type in the type cache for the dict node so it doesn't
     // get evaluated again.
@@ -1051,7 +1053,7 @@ function getTypedDictMembersForClassRecursive(
     }
     recursionCount++;
 
-    classType.shared.baseClasses.forEach((baseClassType) => {
+    for (const baseClassType of classType.shared.baseClasses) {
         if (isInstantiableClass(baseClassType) && ClassType.isTypedDictClass(baseClassType)) {
             const specializedBaseClassType = partiallySpecializeType(
                 baseClassType,
@@ -1064,7 +1066,7 @@ function getTypedDictMembersForClassRecursive(
             // in these cases because they will be reported within that class.
             getTypedDictMembersForClassRecursive(evaluator, specializedBaseClassType, entries, recursionCount);
         }
-    });
+    }
 
     const solution = buildSolutionFromSpecializedClass(classType);
 
@@ -1090,7 +1092,7 @@ function getTypedDictMembersForClassRecursive(
     }
 
     // Add any new typed dict entries from this class.
-    ClassType.getSymbolTable(classType).forEach((symbol, name) => {
+    for (const [name, symbol] of ClassType.getSymbolTable(classType)) {
         if (!symbol.isIgnoredForProtocolMatch()) {
             // Only variables (not functions, classes, etc.) are considered.
             const lastDecl = getLastTypedDeclarationForSymbol(symbol);
@@ -1122,7 +1124,7 @@ function getTypedDictMembersForClassRecursive(
                 entries.knownItems.set(name, tdEntry);
             }
         }
-    });
+    }
 }
 
 export function getEffectiveExtraItemsEntryType(evaluator: TypeEvaluator, classType: ClassType): TypedDictEntry {
@@ -1165,11 +1167,11 @@ export function assignTypedDictToTypedDict(
     const srcEntries = getTypedDictMembersForClass(evaluator, srcType, /* allowNarrowed */ true);
     const extraSrcEntries = srcEntries.extraItems ?? getEffectiveExtraItemsEntryType(evaluator, srcType);
 
-    destEntries.knownItems.forEach((destEntry, name) => {
+    for (const [name, destEntry] of destEntries.knownItems) {
         // If we've already determined that the types are inconsistent and
         // the caller isn't interested in detailed diagnostics, skip the remainder.
         if (!typesAreConsistent && !diag) {
-            return;
+            continue;
         }
 
         const srcEntry = srcEntries.knownItems.get(name);
@@ -1240,7 +1242,7 @@ export function assignTypedDictToTypedDict(
                 typesAreConsistent = false;
             }
         }
-    });
+    }
 
     // If the types are not consistent and the caller isn't interested
     // in detailed diagnostics, don't do additional work.
@@ -1253,10 +1255,10 @@ export function assignTypedDictToTypedDict(
     if (ClassType.isTypedDictEffectivelyClosed(destType)) {
         const extraDestEntries = destEntries.extraItems ?? getEffectiveExtraItemsEntryType(evaluator, destType);
 
-        srcEntries.knownItems.forEach((srcEntry, name) => {
+        for (const [name, srcEntry] of srcEntries.knownItems) {
             // Have we already checked this item in the loop above?
             if (destEntries.knownItems.has(name)) {
-                return;
+                continue;
             }
 
             if (!destEntries.extraItems) {
@@ -1308,7 +1310,7 @@ export function assignTypedDictToTypedDict(
                     typesAreConsistent = false;
                 }
             }
-        });
+        }
 
         const subDiag = diag?.createAddendum();
         if (
@@ -1376,7 +1378,8 @@ export function assignToTypedDict(
 
     const tdEntries = getTypedDictMembersForClass(evaluator, genericClassType);
 
-    keyTypes.forEach((keyTypeResult, index) => {
+    for (let index = 0; index < keyTypes.length; index++) {
+        const keyTypeResult = keyTypes[index];
         const keyType = keyTypeResult.type;
         if (!isClassInstance(keyType) || !ClassType.isBuiltIn(keyType, 'str') || !isLiteralType(keyType)) {
             isMatch = false;
@@ -1460,14 +1463,14 @@ export function assignToTypedDict(
                 symbolEntry.isProvided = true;
             }
         }
-    });
+    }
 
     if (!isMatch) {
         return undefined;
     }
 
     // See if any required keys are missing.
-    tdEntries.knownItems.forEach((entry, name) => {
+    for (const [name, entry] of tdEntries.knownItems) {
         if (entry.isRequired && !entry.isProvided) {
             if (diagAddendum) {
                 diagAddendum.addMessage(
@@ -1479,7 +1482,7 @@ export function assignToTypedDict(
             }
             isMatch = false;
         }
-    });
+    }
 
     if (!isMatch) {
         return undefined;
@@ -1645,9 +1648,9 @@ export function narrowForKeyAssignment(classType: ClassType, key: string) {
 }
 
 function isRequiredTypedDictVariable(evaluator: TypeEvaluator, symbol: Symbol) {
-    return symbol.getDeclarations().some((decl) => {
+    for (const decl of symbol.getDeclarations()) {
         if (decl.type !== DeclarationType.Variable || !decl.typeAnnotationNode) {
-            return false;
+            continue;
         }
 
         const annotatedType = evaluator.getTypeOfExpressionExpectingType(decl.typeAnnotationNode, {
@@ -1656,14 +1659,17 @@ function isRequiredTypedDictVariable(evaluator: TypeEvaluator, symbol: Symbol) {
             allowReadOnly: true,
         });
 
-        return !!annotatedType.isRequired;
-    });
+        if (annotatedType.isRequired) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function isNotRequiredTypedDictVariable(evaluator: TypeEvaluator, symbol: Symbol) {
-    return symbol.getDeclarations().some((decl) => {
+    for (const decl of symbol.getDeclarations()) {
         if (decl.type !== DeclarationType.Variable || !decl.typeAnnotationNode) {
-            return false;
+            continue;
         }
 
         const annotatedType = evaluator.getTypeOfExpressionExpectingType(decl.typeAnnotationNode, {
@@ -1672,14 +1678,17 @@ function isNotRequiredTypedDictVariable(evaluator: TypeEvaluator, symbol: Symbol
             allowReadOnly: true,
         });
 
-        return !!annotatedType.isNotRequired;
-    });
+        if (annotatedType.isNotRequired) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function isReadOnlyTypedDictVariable(evaluator: TypeEvaluator, symbol: Symbol) {
-    return symbol.getDeclarations().some((decl) => {
+    for (const decl of symbol.getDeclarations()) {
         if (decl.type !== DeclarationType.Variable || !decl.typeAnnotationNode) {
-            return false;
+            continue;
         }
 
         const annotatedType = evaluator.getTypeOfExpressionExpectingType(decl.typeAnnotationNode, {
@@ -1688,6 +1697,9 @@ function isReadOnlyTypedDictVariable(evaluator: TypeEvaluator, symbol: Symbol) {
             allowReadOnly: true,
         });
 
-        return !!annotatedType.isReadOnly;
-    });
+        if (annotatedType.isReadOnly) {
+            return true;
+        }
+    }
+    return false;
 }
