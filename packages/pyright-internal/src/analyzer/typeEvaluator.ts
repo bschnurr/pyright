@@ -4354,12 +4354,20 @@ export function createTypeEvaluator(
 
                     if (transformedType) {
                         // Apply the type condition if it's associated with a constrained TypeVar.
-                        const typeCondition = getTypeCondition(subtype)?.filter((condition) =>
-                            TypeVarType.hasConstraints(condition.typeVar)
-                        );
-
-                        if (typeCondition && typeCondition.length > 0) {
-                            transformedType = addConditionToType(transformedType, typeCondition);
+                        const rawConditions = getTypeCondition(subtype);
+                        if (rawConditions) {
+                            let filteredConditions: TypeCondition[] | undefined;
+                            for (let ci = 0; ci < rawConditions.length; ci++) {
+                                if (TypeVarType.hasConstraints(rawConditions[ci].typeVar)) {
+                                    if (!filteredConditions) {
+                                        filteredConditions = [];
+                                    }
+                                    filteredConditions.push(rawConditions[ci]);
+                                }
+                            }
+                            if (filteredConditions) {
+                                transformedType = addConditionToType(transformedType, filteredConditions);
+                            }
                         }
 
                         // This code path can often produce many duplicate subtypes. We can
@@ -8622,15 +8630,17 @@ export function createTypeEvaluator(
             );
         }
 
-        const argList = ParseTreeUtils.getArgsByRuntimeOrder(node).map((arg) => {
-            const functionArg: Arg = {
+        const runtimeArgs = ParseTreeUtils.getArgsByRuntimeOrder(node);
+        const argList: Arg[] = new Array(runtimeArgs.length);
+        for (let i = 0; i < runtimeArgs.length; i++) {
+            const arg = runtimeArgs[i];
+            argList[i] = {
                 valueExpression: arg.d.valueExpr,
                 argCategory: arg.d.argCategory,
                 node: arg,
                 name: arg.d.name,
             };
-            return functionArg;
-        });
+        }
 
         let typeResult: TypeResult = { type: UnknownType.create() };
 
@@ -9374,7 +9384,15 @@ export function createTypeEvaluator(
         for (let expandedTypesIndex = 0; expandedTypesIndex < expandedArgTypes.length; expandedTypesIndex++) {
             let matchedOverload: FunctionType | undefined;
             const argTypeOverride = expandedArgTypes[expandedTypesIndex];
-            const hasArgTypeOverride = argTypeOverride.some((a) => a !== undefined);
+
+            let hasArgTypeOverride = false;
+            for (let ai = 0; ai < argTypeOverride.length; ai++) {
+                if (argTypeOverride[ai] !== undefined) {
+                    hasArgTypeOverride = true;
+                    break;
+                }
+            }
+
             let possibleMatchResults: MatchedOverloadInfo[] = [];
             let possibleMatchInvolvesIncompleteUnknown = false;
             isDefinitiveMatchFound = false;
@@ -9384,15 +9402,20 @@ export function createTypeEvaluator(
 
                 let matchResults = argParamMatches[overloadIndex];
                 if (hasArgTypeOverride) {
-                    matchResults = { ...argParamMatches[overloadIndex] };
-                    matchResults.argParams = matchResults.argParams.map((argParam, argIndex) => {
-                        if (!argTypeOverride[argIndex]) {
-                            return argParam;
+                    const srcArgParams = argParamMatches[overloadIndex].argParams;
+                    const newArgParams = new Array(srcArgParams.length);
+                    for (let argIndex = 0; argIndex < srcArgParams.length; argIndex++) {
+                        const override = argTypeOverride[argIndex];
+                        if (!override) {
+                            newArgParams[argIndex] = srcArgParams[argIndex];
+                        } else {
+                            const argParamCopy = { ...srcArgParams[argIndex] };
+                            argParamCopy.argType = override;
+                            newArgParams[argIndex] = argParamCopy;
                         }
-                        const argParamCopy = { ...argParam };
-                        argParamCopy.argType = argTypeOverride[argIndex];
-                        return argParamCopy;
-                    });
+                    }
+                    matchResults = { ...argParamMatches[overloadIndex] };
+                    matchResults.argParams = newArgParams;
                 }
 
                 // Clone the constraints so we don't modify the original.
@@ -9918,13 +9941,14 @@ export function createTypeEvaluator(
         // Expand entry indexToExpand.
         const newExpandedArgTypes: (Type | undefined)[][] = [];
 
-        expandedArgTypes.forEach((preExpandedTypes) => {
-            expandedTypes.forEach((subtype) => {
-                const expandedTypes = [...preExpandedTypes];
-                expandedTypes[indexToExpand] = subtype;
-                newExpandedArgTypes.push(expandedTypes);
-            });
-        });
+        for (let i = 0; i < expandedArgTypes.length; i++) {
+            const preExpandedTypes = expandedArgTypes[i];
+            for (let j = 0; j < expandedTypes.length; j++) {
+                const copy = preExpandedTypes.slice();
+                copy[indexToExpand] = expandedTypes[j];
+                newExpandedArgTypes.push(copy);
+            }
+        }
 
         return newExpandedArgTypes;
     }
@@ -10092,7 +10116,8 @@ export function createTypeEvaluator(
                     inferenceContext
                 );
 
-                return { ...dummyCallResult, returnType: expandedCallType };
+                dummyCallResult.returnType = expandedCallType;
+                return dummyCallResult;
             }
 
             case TypeCategory.Function: {
@@ -12179,28 +12204,52 @@ export function createTypeEvaluator(
         // We'll do two phases. The first one establishes constraints for type
         // variables. The second perform type validation using the solved
         // types. We can skip the first pass if there are no type vars to solve.
-        const typeVarCount = matchResults.argParams.filter((arg) => arg.requiresTypeVarMatching).length;
+        const argParams = matchResults.argParams;
+        let typeVarCount = 0;
+        for (let k = 0; k < argParams.length; k++) {
+            if (argParams[k].requiresTypeVarMatching) {
+                typeVarCount++;
+            }
+        }
+
+        // Hoist the typeResult object outside the loop — it's the same for every arg.
+        const typeResultForValidation: TypeResult<FunctionType> = {
+            type,
+            isIncomplete: matchResults.isTypeIncomplete,
+        };
+
         if (typeVarCount > 0) {
             // Do up to two passes.
             let passCount = Math.min(typeVarCount, 2);
 
+            // Pre-build the first-pass options (skipReportError + isArgFirstPass vary by pass).
+            const firstPassOptions: ValidateArgTypeOptions = {
+                skipUnknownArgCheck,
+                isArgFirstPass: true,
+                conditionFilter: typeCondition,
+                skipReportError: true,
+            };
+            const laterPassOptions: ValidateArgTypeOptions = {
+                skipUnknownArgCheck,
+                conditionFilter: typeCondition,
+                skipReportError: true,
+            };
+
             for (let i = 0; i < passCount; i++) {
                 useSpeculativeMode(speculativeNode, () => {
-                    matchResults.argParams.forEach((argParam) => {
+                    const opts = passCount > 1 && i === 0 ? firstPassOptions : laterPassOptions;
+
+                    for (let j = 0; j < argParams.length; j++) {
+                        const argParam = argParams[j];
                         if (!argParam.requiresTypeVarMatching) {
-                            return;
+                            continue;
                         }
 
                         const argResult = validateArgType(
                             argParam,
                             constraints,
-                            { type, isIncomplete: matchResults.isTypeIncomplete },
-                            {
-                                skipUnknownArgCheck,
-                                isArgFirstPass: passCount > 1 && i === 0,
-                                conditionFilter: typeCondition,
-                                skipReportError: true,
-                            }
+                            typeResultForValidation,
+                            opts
                         );
 
                         if (argResult.isTypeIncomplete) {
@@ -12212,7 +12261,7 @@ export function createTypeEvaluator(
                         if (i === 0 && passCount < 2 && argResult.skippedBareTypeVarExpectedType) {
                             passCount++;
                         }
-                    });
+                    }
                 });
             }
         }
@@ -12223,15 +12272,18 @@ export function createTypeEvaluator(
         let condition: TypeCondition[] = [];
         const argResults: ArgResult[] = [];
 
-        matchResults.argParams.forEach((argParam, argParamIndex) => {
+        const secondPassOptions: ValidateArgTypeOptions = {
+            skipUnknownArgCheck,
+            conditionFilter: typeCondition,
+        };
+
+        for (let argParamIndex = 0; argParamIndex < argParams.length; argParamIndex++) {
+            const argParam = argParams[argParamIndex];
             const argResult = validateArgType(
                 argParam,
                 constraints,
-                { type, isIncomplete: matchResults.isTypeIncomplete },
-                {
-                    skipUnknownArgCheck,
-                    conditionFilter: typeCondition,
-                }
+                typeResultForValidation,
+                secondPassOptions
             );
 
             argResults.push(argResult);
@@ -12242,7 +12294,7 @@ export function createTypeEvaluator(
                 // Add the inverse index so earlier parameters represent larger errors.
                 // This will help the heuristics in the overload error paths to pick the
                 // most likely intended overload if none of them match.
-                argumentMatchScore += 1 + (matchResults.argParams.length - argParamIndex);
+                argumentMatchScore += 1 + (argParams.length - argParamIndex);
             }
 
             if (argResult.isTypeIncomplete) {
@@ -12288,7 +12340,7 @@ export function createTypeEvaluator(
                     }
                 }
             }
-        });
+        }
 
         let paramSpecConstraints: (ConstraintTracker | undefined)[] = [];
 
@@ -12414,17 +12466,31 @@ export function createTypeEvaluator(
                 let typeVarsInReturnType = getTypeVarArgsRecursive(returnType);
 
                 // Remove any type variables that appear in the function's input parameters.
-                functionType.shared.parameters.forEach((param, index) => {
+                const params = functionType.shared.parameters;
+                for (let pi = 0; pi < params.length; pi++) {
+                    const param = params[pi];
                     if (FunctionParam.isTypeDeclared(param)) {
                         const typeVarsInInputParam = getTypeVarArgsRecursive(
-                            FunctionType.getParamType(functionType, index)
+                            FunctionType.getParamType(functionType, pi)
                         );
-                        typeVarsInReturnType = typeVarsInReturnType.filter(
-                            (returnTypeVar) =>
-                                !typeVarsInInputParam.some((inputTypeVar) => isTypeSame(returnTypeVar, inputTypeVar))
-                        );
+
+                        const filtered: TypeVarType[] = [];
+                        for (let ri = 0; ri < typeVarsInReturnType.length; ri++) {
+                            const returnTypeVar = typeVarsInReturnType[ri];
+                            let found = false;
+                            for (let ii = 0; ii < typeVarsInInputParam.length; ii++) {
+                                if (isTypeSame(returnTypeVar, typeVarsInInputParam[ii])) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if (!found) {
+                                filtered.push(returnTypeVar);
+                            }
+                        }
+                        typeVarsInReturnType = filtered;
                     }
-                });
+                }
 
                 return typeVarsInReturnType;
             }
@@ -12448,9 +12514,21 @@ export function createTypeEvaluator(
         }
 
         // What type variables are referenced in the callable return type? Do not include any live type variables.
-        const typeParams = getTypeVarArgsRecursive(returnType).filter(
-            (t) => !liveTypeVarScopes.some((scopeId) => t.priv.scopeId === scopeId)
-        );
+        const allTypeVars = getTypeVarArgsRecursive(returnType);
+        const typeParams: TypeVarType[] = [];
+        for (let ti = 0; ti < allTypeVars.length; ti++) {
+            const t = allTypeVars[ti];
+            let isLive = false;
+            for (let si = 0; si < liveTypeVarScopes.length; si++) {
+                if (t.priv.scopeId === liveTypeVarScopes[si]) {
+                    isLive = true;
+                    break;
+                }
+            }
+            if (!isLive) {
+                typeParams.push(t);
+            }
+        }
 
         // If there are no unsolved type variables, we're done. If there are
         // unsolved type variables, rescope them to the callable.
@@ -12466,7 +12544,9 @@ export function createTypeEvaluator(
         const newScopeId = ParseTreeUtils.getScopeIdForNode(callNode);
         const solution = new ConstraintSolution();
 
-        const newTypeParams = typeParams.map((typeVar) => {
+        const newTypeParams: TypeVarType[] = new Array(typeParams.length);
+        for (let nti = 0; nti < typeParams.length; nti++) {
+            const typeVar = typeParams[nti];
             const newTypeParam = TypeVarType.cloneForScopeId(
                 typeVar,
                 newScopeId,
@@ -12474,8 +12554,8 @@ export function createTypeEvaluator(
                 TypeVarScopeType.Function
             );
             solution.setType(typeVar, newTypeParam);
-            return newTypeParam;
-        });
+            newTypeParams[nti] = newTypeParam;
+        }
 
         return applySolvedTypeVars(
             FunctionType.cloneWithNewTypeVarScopeId(
