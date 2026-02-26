@@ -320,6 +320,7 @@ import {
     getTypeVarScopeIds,
     getUnknownForTypeVar,
     getUnknownTypeForCallable,
+    hasTypeVarScopeId,
     InferenceContext,
     invertVariance,
     isDescriptorInstance,
@@ -9827,7 +9828,7 @@ export function createTypeEvaluator(
             );
         }
 
-        let expandedArgTypes: (Type | undefined)[][] | undefined = [argList.map((arg) => undefined)];
+        let expandedArgTypes: (Type | undefined)[][] | undefined = [new Array<Type | undefined>(argList.length)];
 
         while (true) {
             const callResult = validateOverloadsWithExpandedTypes(
@@ -10986,7 +10987,7 @@ export function createTypeEvaluator(
                 // spec? We need to handle these two cases differently.
                 const paramSpecScopeId = varArgListParamType.priv.scopeId;
 
-                if (getTypeVarScopeIds(overload).some((id) => id === paramSpecScopeId)) {
+                if (hasTypeVarScopeId(overload, paramSpecScopeId)) {
                     paramSpecArgList = [];
                     paramSpecTarget = TypeVarType.cloneForParamSpecAccess(varArgListParamType, /* access */ undefined);
                 } else {
@@ -10996,7 +10997,7 @@ export function createTypeEvaluator(
                 }
             }
         } else if (paramSpec) {
-            if (getTypeVarScopeIds(overload).some((id) => id === paramSpec.priv.scopeId)) {
+            if (hasTypeVarScopeId(overload, paramSpec.priv.scopeId)) {
                 hasParamSpecArgsKwargs = true;
                 paramSpecArgList = [];
                 paramSpecTarget = paramSpec;
@@ -11873,10 +11874,14 @@ export function createTypeEvaluator(
                 !isTypeVarTupleFullyMatched
             ) {
                 const paramType = paramDetails.params[paramDetails.argsIndex].type;
-                const variadicArgs = validateArgTypeParams.filter((argParam) => argParam.mapsToVarArgList);
 
                 if (isUnpacked(paramType) && (!isTypeVarTuple(paramType) || !paramType.priv.isInUnion)) {
-                    const tupleTypeArgs: TupleTypeArg[] = variadicArgs.map((argParam) => {
+                    const tupleTypeArgs: TupleTypeArg[] = [];
+                    for (let vai = 0; vai < validateArgTypeParams.length; vai++) {
+                        const argParam = validateArgTypeParams[vai];
+                        if (!argParam.mapsToVarArgList) {
+                            continue;
+                        }
                         const argType = getTypeOfArg(argParam.argument, /* inferenceContext */ undefined).type;
 
                         const containsTypeVarTuple =
@@ -11902,11 +11907,11 @@ export function createTypeEvaluator(
                             reportedArgError = true;
                         }
 
-                        return {
+                        tupleTypeArgs.push({
                             type: argType,
                             isUnbounded: argParam.argument.argCategory === ArgCategory.UnpackedList,
-                        };
-                    });
+                        });
+                    }
 
                     let specializedTuple: Type | undefined;
                     if (tupleTypeArgs.length === 1 && !tupleTypeArgs[0].isUnbounded) {
@@ -11937,10 +11942,14 @@ export function createTypeEvaluator(
                         mapsToVarArgList: true,
                     };
 
-                    validateArgTypeParams = [
-                        ...validateArgTypeParams.filter((argParam) => !argParam.mapsToVarArgList),
-                        combinedArg,
-                    ];
+                    const nonVariadicParams: ValidateArgTypeParams[] = [];
+                    for (let vpi = 0; vpi < validateArgTypeParams.length; vpi++) {
+                        if (!validateArgTypeParams[vpi].mapsToVarArgList) {
+                            nonVariadicParams.push(validateArgTypeParams[vpi]);
+                        }
+                    }
+                    nonVariadicParams.push(combinedArg);
+                    validateArgTypeParams = nonVariadicParams;
                 }
             }
         }
@@ -12245,12 +12254,7 @@ export function createTypeEvaluator(
                             continue;
                         }
 
-                        const argResult = validateArgType(
-                            argParam,
-                            constraints,
-                            typeResultForValidation,
-                            opts
-                        );
+                        const argResult = validateArgType(argParam, constraints, typeResultForValidation, opts);
 
                         if (argResult.isTypeIncomplete) {
                             isTypeIncomplete = true;
@@ -12279,12 +12283,7 @@ export function createTypeEvaluator(
 
         for (let argParamIndex = 0; argParamIndex < argParams.length; argParamIndex++) {
             const argParam = argParams[argParamIndex];
-            const argResult = validateArgType(
-                argParam,
-                constraints,
-                typeResultForValidation,
-                secondPassOptions
-            );
+            const argResult = validateArgType(argParam, constraints, typeResultForValidation, secondPassOptions);
 
             argResults.push(argResult);
 

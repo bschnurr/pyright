@@ -1134,6 +1134,21 @@ export function getTypeVarScopeIds(type: Type): TypeVarScopeId[] {
     return scopeIds;
 }
 
+// Checks whether the type has a specific scope ID without allocating an array.
+// This is an optimized alternative to `getTypeVarScopeIds(type).some(id => id === targetId)`.
+export function hasTypeVarScopeId(type: Type, targetId: TypeVarScopeId | undefined): boolean {
+    if (targetId === undefined) {
+        return false;
+    }
+    if (getTypeVarScopeId(type) === targetId) {
+        return true;
+    }
+    if (isFunction(type) && type.priv.constructorTypeVarScopeId === targetId) {
+        return true;
+    }
+    return false;
+}
+
 // Specializes the class with "Unknown" type args (or the equivalent for ParamSpecs
 // or TypeVarTuples).
 export function specializeWithUnknownTypeArgs(type: ClassType, tupleClassType?: ClassType): ClassType {

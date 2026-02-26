@@ -214,6 +214,18 @@ interface TypeVarUsageInfo {
 // functions to be emitted.
 const isPrintCodeComplexityEnabled = false;
 
+// Pre-allocated constant sets for hot-path membership checks.
+const simpleUnusedExpressionTypes = new Set([
+    ParseNodeType.UnaryOperation,
+    ParseNodeType.BinaryOperation,
+    ParseNodeType.Number,
+    ParseNodeType.Constant,
+    ParseNodeType.Name,
+    ParseNodeType.Tuple,
+]);
+const varianceExemptMethods = new Set(['__init__', '__new__']);
+const lspExemptMethods = new Set(['__init__', '__new__', '__init_subclass__', '__post_init__']);
+
 export class Checker extends ParseTreeWalker {
     private readonly _moduleNode: ModuleNode;
     private readonly _fileInfo: AnalyzerFileInfo;
@@ -600,15 +612,13 @@ export class Checker extends ParseTreeWalker {
                 const annotationNode = param.d.annotation || param.d.annotationComment;
                 if (annotationNode && index < functionTypeResult.functionType.shared.parameters.length) {
                     const paramType = FunctionType.getParamType(functionTypeResult.functionType, index);
-                    const exemptMethods = ['__init__', '__new__'];
-
                     if (
                         containingClassNode &&
                         isTypeVar(paramType) &&
                         paramType.priv.scopeType === TypeVarScopeType.Class &&
                         paramType.shared.declaredVariance === Variance.Covariant &&
                         !paramType.shared.isSynthesized &&
-                        !exemptMethods.some((name) => name === functionTypeResult.functionType.shared.name)
+                        !varianceExemptMethods.has(functionTypeResult.functionType.shared.name)
                     ) {
                         this._evaluator.addDiagnostic(
                             DiagnosticRule.reportGeneralTypeIssues,
@@ -1942,18 +1952,9 @@ export class Checker extends ParseTreeWalker {
             return;
         }
 
-        const simpleExpressionTypes = [
-            ParseNodeType.UnaryOperation,
-            ParseNodeType.BinaryOperation,
-            ParseNodeType.Number,
-            ParseNodeType.Constant,
-            ParseNodeType.Name,
-            ParseNodeType.Tuple,
-        ];
-
         let reportAsUnused = false;
 
-        if (simpleExpressionTypes.some((nodeType) => nodeType === node.nodeType)) {
+        if (simpleUnusedExpressionTypes.has(node.nodeType)) {
             reportAsUnused = true;
         } else if (
             node.nodeType === ParseNodeType.List ||
@@ -6526,8 +6527,7 @@ export class Checker extends ParseTreeWalker {
 
     // Determines whether the name is exempt from Liskov Substitution Principle rules.
     private _isMethodExemptFromLsp(name: string): boolean {
-        const exemptMethods = ['__init__', '__new__', '__init_subclass__', '__post_init__'];
-        return exemptMethods.some((n) => n === name);
+        return lspExemptMethods.has(name);
     }
 
     // Determines whether the type is a function or overloaded function with an @override
