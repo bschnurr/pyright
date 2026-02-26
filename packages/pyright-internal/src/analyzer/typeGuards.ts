@@ -108,6 +108,8 @@ export interface TypeNarrowingResult {
 
 export type TypeNarrowingCallback = (type: Type) => TypeNarrowingResult | undefined;
 
+const _supportedContainerNames = ['list', 'set', 'frozenset', 'deque', 'tuple', 'dict', 'defaultdict', 'OrderedDict'];
+
 // Given a reference expression and a test expression, returns a callback that
 // can be used to narrow the type described by the reference expression.
 // If the specified flow node is not associated with the test expression,
@@ -1228,7 +1230,8 @@ export function getIsInstanceClassTypes(
     // Create a helper function that returns a list of class types or
     // undefined if any of the types are not valid.
     const addClassTypesToList = (types: Type[]) => {
-        types.forEach((subtype) => {
+        for (let i = 0; i < types.length; i++) {
+            let subtype = types[i];
             if (isClass(subtype)) {
                 subtype = specializeWithUnknownTypeArgs(subtype, evaluator.getTupleClassType());
 
@@ -1260,7 +1263,7 @@ export function getIsInstanceClassTypes(
             } else {
                 foundNonClassType = true;
             }
-        });
+        }
     };
 
     const addClassTypesRecursive = (type: Type, recursionCount = 0) => {
@@ -1270,9 +1273,9 @@ export function getIsInstanceClassTypes(
 
         if (isClass(type) && TypeBase.isInstance(type) && isTupleClass(type)) {
             if (type.priv.tupleTypeArgs) {
-                type.priv.tupleTypeArgs.forEach((tupleEntry) => {
+                for (const tupleEntry of type.priv.tupleTypeArgs) {
                     addClassTypesRecursive(tupleEntry.type, recursionCount + 1);
-                });
+                }
             }
         } else {
             doForEachSubtype(type, (subtype) => {
@@ -1346,7 +1349,11 @@ function narrowTypeForInstanceOrSubclassInternal(
 
             // Handle metaclass instances specially.
             if (isMetaclassInstance(subtype) && !isTypeInstance) {
-                adjFilterTypes = filterTypes.map((filterType) => convertToInstantiable(filterType));
+                const converted: Type[] = new Array(filterTypes.length);
+                for (let i = 0; i < filterTypes.length; i++) {
+                    converted[i] = convertToInstantiable(filterTypes[i]);
+                }
+                adjFilterTypes = converted;
             } else {
                 adjSubtype = convertToInstance(subtype);
 
@@ -1766,7 +1773,11 @@ function narrowTypeForInstance(
             }
         }
 
-        return filteredTypes.map((t) => convertToInstance(t));
+        const result: Type[] = new Array(filteredTypes.length);
+        for (let i = 0; i < filteredTypes.length; i++) {
+            result[i] = convertToInstance(filteredTypes[i]);
+        }
+        return result;
     };
 
     const isFilterTypeCallbackProtocol = (filterType: Type) => {
@@ -1888,9 +1899,11 @@ function narrowTypeForInstance(
                 // If this is a positive test and the effective type is Any or
                 // Unknown, we can assume that the type matches one of the
                 // specified types.
-                anyOrUnknownSubstitutions.push(
-                    combineTypes(filterTypes.map((classType) => convertToInstance(classType)))
-                );
+                const instanceTypes: Type[] = new Array(filterTypes.length);
+                for (let i = 0; i < filterTypes.length; i++) {
+                    instanceTypes[i] = convertToInstance(filterTypes[i]);
+                }
+                anyOrUnknownSubstitutions.push(combineTypes(instanceTypes));
 
                 anyOrUnknown.push(subtype);
                 return undefined;
@@ -2078,7 +2091,7 @@ function narrowTypeForTupleLength(
 function expandUnboundedTupleElement(tupleType: ClassType, elementsToAdd: number, keepUnbounded: boolean) {
     const tupleTypeArgs: TupleTypeArg[] = [];
 
-    tupleType.priv.tupleTypeArgs!.forEach((typeArg) => {
+    for (const typeArg of tupleType.priv.tupleTypeArgs!) {
         if (!typeArg.isUnbounded) {
             tupleTypeArgs.push(typeArg);
         } else {
@@ -2090,7 +2103,7 @@ function expandUnboundedTupleElement(tupleType: ClassType, elementsToAdd: number
                 tupleTypeArgs.push(typeArg);
             }
         }
-    });
+    }
 
     return specializeTupleClass(tupleType, tupleTypeArgs);
 }
@@ -2128,7 +2141,7 @@ function narrowTypeForContainerType(
     // Determine which tuple types can be eliminated. Only "None" and
     // literal types can be handled here.
     const typesToEliminate: Type[] = [];
-    containerType.priv.tupleTypeArgs.forEach((tupleEntry) => {
+    for (const tupleEntry of containerType.priv.tupleTypeArgs) {
         if (!tupleEntry.isUnbounded) {
             if (isNoneInstance(tupleEntry.type)) {
                 typesToEliminate.push(tupleEntry.type);
@@ -2136,7 +2149,7 @@ function narrowTypeForContainerType(
                 typesToEliminate.push(tupleEntry.type);
             }
         }
-    });
+    }
 
     if (typesToEliminate.length === 0) {
         return referenceType;
@@ -2149,14 +2162,27 @@ function narrowTypeForContainerType(
             // (for bool or enum), we can eliminate all others in a negative test.
             const allLiteralTypes = enumerateLiteralsForType(evaluator, referenceSubtype);
             if (allLiteralTypes && allLiteralTypes.length > 0) {
-                return combineTypes(
-                    allLiteralTypes.filter((type) => !typesToEliminate.some((t) => isTypeSame(t, type)))
-                );
+                const surviving: Type[] = [];
+                for (const type of allLiteralTypes) {
+                    let shouldEliminate = false;
+                    for (const t of typesToEliminate) {
+                        if (isTypeSame(t, type)) {
+                            shouldEliminate = true;
+                            break;
+                        }
+                    }
+                    if (!shouldEliminate) {
+                        surviving.push(type);
+                    }
+                }
+                return combineTypes(surviving);
             }
         }
 
-        if (typesToEliminate.some((t) => isTypeSame(t, referenceSubtype))) {
-            return undefined;
+        for (const t of typesToEliminate) {
+            if (isTypeSame(t, referenceSubtype)) {
+                return undefined;
+            }
         }
 
         return referenceSubtype;
@@ -2165,8 +2191,7 @@ function narrowTypeForContainerType(
 
 export function getElementTypeForContainerNarrowing(containerType: Type) {
     // We support contains narrowing only for certain built-in types that have been specialized.
-    const supportedContainers = ['list', 'set', 'frozenset', 'deque', 'tuple', 'dict', 'defaultdict', 'OrderedDict'];
-    if (!isClassInstance(containerType) || !ClassType.isBuiltIn(containerType, supportedContainers)) {
+    if (!isClassInstance(containerType) || !ClassType.isBuiltIn(containerType, _supportedContainerNames)) {
         return undefined;
     }
 
@@ -2176,7 +2201,11 @@ export function getElementTypeForContainerNarrowing(containerType: Type) {
 
     let elementType = containerType.priv.typeArgs[0];
     if (isTupleClass(containerType) && containerType.priv.tupleTypeArgs) {
-        elementType = combineTypes(containerType.priv.tupleTypeArgs.map((t) => t.type));
+        const tupleTypes: Type[] = new Array(containerType.priv.tupleTypeArgs.length);
+        for (let i = 0; i < containerType.priv.tupleTypeArgs.length; i++) {
+            tupleTypes[i] = containerType.priv.tupleTypeArgs[i].type;
+        }
+        elementType = combineTypes(tupleTypes);
     }
 
     return elementType;
