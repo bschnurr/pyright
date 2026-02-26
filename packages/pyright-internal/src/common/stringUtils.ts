@@ -12,7 +12,7 @@ import { compareComparableValues, Comparison } from './core';
 // Determines if typed string matches a symbol
 // name. Characters must appear in order.
 // Return true if all typed characters are in symbol.
-// Uses a fast ASCII path to avoid toLocaleLowerCase() allocations
+// Uses inline ASCII matching to avoid toLocaleLowerCase() allocations
 // for the common case of ASCII-only Python identifiers.
 export function isPatternInSymbol(typedValue: string, symbolName: string): boolean {
     const typedLength = typedValue.length;
@@ -26,28 +26,21 @@ export function isPatternInSymbol(typedValue: string, symbolName: string): boole
         return false;
     }
 
-    // Fast path: if both strings are pure ASCII, do case-insensitive
-    // subsequence matching inline using charCodeAt, avoiding
-    // toLocaleLowerCase() string allocations.
-    if (_isAscii(typedValue) && _isAscii(symbolName)) {
-        let typedPos = 0;
-        let symbolPos = 0;
-        while (typedPos < typedLength && symbolPos < symbolLength) {
-            if (_asciiLower(typedValue.charCodeAt(typedPos)) === _asciiLower(symbolName.charCodeAt(symbolPos))) {
-                typedPos++;
-            }
-            symbolPos++;
-        }
-        return typedPos === typedLength;
-    }
-
-    // Slow path: fall back to toLocaleLowerCase() for non-ASCII identifiers.
-    const typedLower = typedValue.toLocaleLowerCase();
-    const symbolLower = symbolName.toLocaleLowerCase();
+    // Try ASCII-only matching first. If we encounter a non-ASCII char,
+    // bail to the locale-aware fallback. For ASCII chars (0-127),
+    // _asciiLower is equivalent to toLocaleLowerCase(), so partial
+    // progress is valid and doesn't need to be re-done.
     let typedPos = 0;
     let symbolPos = 0;
     while (typedPos < typedLength && symbolPos < symbolLength) {
-        if (typedLower[typedPos] === symbolLower[symbolPos]) {
+        const tc = typedValue.charCodeAt(typedPos);
+        const sc = symbolName.charCodeAt(symbolPos);
+        if (tc > 127 || sc > 127) {
+            // Non-ASCII encountered; fall back to locale-aware path
+            // starting from where we left off.
+            return _slowPatternMatch(typedValue, symbolName, typedPos, symbolPos);
+        }
+        if (_asciiLower(tc) === _asciiLower(sc)) {
             typedPos++;
         }
         symbolPos++;
@@ -55,13 +48,19 @@ export function isPatternInSymbol(typedValue: string, symbolName: string): boole
     return typedPos === typedLength;
 }
 
-function _isAscii(s: string): boolean {
-    for (let i = 0; i < s.length; i++) {
-        if (s.charCodeAt(i) > 127) {
-            return false;
+function _slowPatternMatch(typedValue: string, symbolName: string, typedPos: number, symbolPos: number): boolean {
+    // Continue from the current positions using locale-aware comparison.
+    const typedLower = typedValue.toLocaleLowerCase();
+    const symbolLower = symbolName.toLocaleLowerCase();
+    const typedLength = typedLower.length;
+    const symbolLength = symbolLower.length;
+    while (typedPos < typedLength && symbolPos < symbolLength) {
+        if (typedLower[typedPos] === symbolLower[symbolPos]) {
+            typedPos++;
         }
+        symbolPos++;
     }
-    return true;
+    return typedPos === typedLength;
 }
 
 function _asciiLower(charCode: number): number {

@@ -7,7 +7,6 @@
  * Representation of types used during type analysis within Python.
  */
 
-import { partition } from '../common/collectionUtils';
 import { assert } from '../common/debug';
 import { Uri } from '../common/uri/uri';
 import { ArgumentNode, ExpressionNode, NameNode, ParamCategory, TypeAnnotationNode } from '../parser/parseNodes';
@@ -3742,18 +3741,43 @@ export interface CombineTypesOptions {
 // are combined into a UnionType. NeverTypes are filtered out.
 // If no types remain in the end, a NeverType is returned.
 export function combineTypes(subtypes: Type[], options?: CombineTypesOptions): Type {
-    let neverTypes: NeverType[];
-
-    // Filter out any Never or NoReturn types.
-    [neverTypes, subtypes] = partition<Type, NeverType>(subtypes, isNever);
-
-    if (subtypes.length === 0) {
-        if (neverTypes.length > 0) {
-            // Prefer NoReturn over Never. This approach preserves type alias
-            // information if present.
-            return neverTypes.find((t) => t.priv.isNoReturn) ?? neverTypes[0];
+    // Fast path: check if any Never types exist before allocating partition arrays.
+    let hasNever = false;
+    for (let i = 0; i < subtypes.length; i++) {
+        if (isNever(subtypes[i])) {
+            hasNever = true;
+            break;
         }
+    }
 
+    if (hasNever) {
+        // Slow path: separate Never types from non-Never. Only allocates when needed.
+        const neverTypes: NeverType[] = [];
+        const filtered: Type[] = [];
+        for (let i = 0; i < subtypes.length; i++) {
+            if (isNever(subtypes[i])) {
+                neverTypes.push(subtypes[i] as NeverType);
+            } else {
+                filtered.push(subtypes[i]);
+            }
+        }
+        subtypes = filtered;
+
+        if (subtypes.length === 0) {
+            if (neverTypes.length > 0) {
+                // Prefer NoReturn over Never. This approach preserves type alias
+                // information if present.
+                for (let i = 0; i < neverTypes.length; i++) {
+                    if (neverTypes[i].priv.isNoReturn) {
+                        return neverTypes[i];
+                    }
+                }
+                return neverTypes[0];
+            }
+
+            return NeverType.createNever();
+        }
+    } else if (subtypes.length === 0) {
         return NeverType.createNever();
     }
 
@@ -3799,24 +3823,10 @@ export function combineTypes(subtypes: Type[], options?: CombineTypesOptions): T
 
     expandedTypes = expandedTypes ?? subtypes;
 
-    // Sort all of the literal and empty types to the end.
-    expandedTypes = expandedTypes.sort((type1, type2) => {
-        if (isClass(type1) && type1.priv.literalValue !== undefined) {
-            return 1;
-        }
-
-        if (isClass(type2) && type2.priv.literalValue !== undefined) {
-            return -1;
-        }
-
-        if (isClassInstance(type1) && type1.priv.isEmptyContainer) {
-            return 1;
-        } else if (isClassInstance(type2) && type2.priv.isEmptyContainer) {
-            return -1;
-        }
-
-        return 0;
-    });
+    // Partition: move literal and empty-container types to end (O(n) vs O(n log n) sort).
+    // We need non-literal types first so _addTypeIfUnique can properly elide
+    // redundant literals.
+    _partitionLiteralsToEnd(expandedTypes);
 
     // If removing all NoReturn types results in no remaining types,
     // convert it to an unknown.
@@ -3830,18 +3840,20 @@ export function combineTypes(subtypes: Type[], options?: CombineTypesOptions): T
     }
 
     let hitMaxSubtypeCount = false;
+    const maxSubtypeCount = options?.maxSubtypeCount;
+    const elideRedundantLiterals = !options?.skipElideRedundantLiterals;
 
-    expandedTypes.forEach((subtype, index) => {
-        if (index === 0) {
-            UnionType.addType(newUnionType, subtype as UnionableType);
+    for (let i = 0; i < expandedTypes.length; i++) {
+        if (i === 0) {
+            UnionType.addType(newUnionType, expandedTypes[i] as UnionableType);
         } else {
-            if (options?.maxSubtypeCount === undefined || newUnionType.priv.subtypes.length < options.maxSubtypeCount) {
-                _addTypeIfUnique(newUnionType, subtype as UnionableType, !options?.skipElideRedundantLiterals);
+            if (maxSubtypeCount === undefined || newUnionType.priv.subtypes.length < maxSubtypeCount) {
+                _addTypeIfUnique(newUnionType, expandedTypes[i] as UnionableType, elideRedundantLiterals);
             } else {
                 hitMaxSubtypeCount = true;
             }
         }
-    });
+    }
 
     if (hitMaxSubtypeCount) {
         return AnyType.create();
@@ -3853,6 +3865,46 @@ export function combineTypes(subtypes: Type[], options?: CombineTypesOptions): T
     }
 
     return newUnionType;
+}
+
+// In-place partition: move non-literal/non-empty types to front,
+// literals and empty containers to end. Preserves relative order
+// within each group (stable partition).
+function _partitionLiteralsToEnd(types: Type[]): void {
+    // Count non-trailing types to decide if partitioning is needed.
+    let hasTrailing = false;
+    for (let i = 0; i < types.length; i++) {
+        const t = types[i];
+        if ((isClass(t) && t.priv.literalValue !== undefined) || (isClassInstance(t) && t.priv.isEmptyContainer)) {
+            hasTrailing = true;
+            break;
+        }
+    }
+
+    if (!hasTrailing) {
+        return;
+    }
+
+    // Stable partition: collect non-trailing first, then trailing.
+    const front: Type[] = [];
+    const back: Type[] = [];
+    for (let i = 0; i < types.length; i++) {
+        const t = types[i];
+        if ((isClass(t) && t.priv.literalValue !== undefined) || (isClassInstance(t) && t.priv.isEmptyContainer)) {
+            back.push(t);
+        } else {
+            front.push(t);
+        }
+    }
+
+    // Write back in-place.
+    let idx = 0;
+    for (let i = 0; i < front.length; i++) {
+        types[idx++] = front[i];
+    }
+    for (let i = 0; i < back.length; i++) {
+        types[idx++] = back[i];
+    }
 }
 
 // Determines whether the dest type is the same as the source type with
