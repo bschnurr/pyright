@@ -3867,43 +3867,25 @@ export function combineTypes(subtypes: Type[], options?: CombineTypesOptions): T
     return newUnionType;
 }
 
-// In-place partition: move non-literal/non-empty types to front,
+// In-place stable partition: move non-literal/non-empty types to front,
 // literals and empty containers to end. Preserves relative order
-// within each group (stable partition).
+// within each group. Uses O(1) extra space.
 function _partitionLiteralsToEnd(types: Type[]): void {
-    // Count non-trailing types to decide if partitioning is needed.
-    let hasTrailing = false;
+    let writePos = 0;
+
     for (let i = 0; i < types.length; i++) {
         const t = types[i];
-        if ((isClass(t) && t.priv.literalValue !== undefined) || (isClassInstance(t) && t.priv.isEmptyContainer)) {
-            hasTrailing = true;
-            break;
+        if (!((isClass(t) && t.priv.literalValue !== undefined) || (isClassInstance(t) && t.priv.isEmptyContainer))) {
+            // This is a "front" item — shift it to writePos.
+            if (i !== writePos) {
+                const frontItem = types[i];
+                for (let j = i; j > writePos; j--) {
+                    types[j] = types[j - 1];
+                }
+                types[writePos] = frontItem;
+            }
+            writePos++;
         }
-    }
-
-    if (!hasTrailing) {
-        return;
-    }
-
-    // Stable partition: collect non-trailing first, then trailing.
-    const front: Type[] = [];
-    const back: Type[] = [];
-    for (let i = 0; i < types.length; i++) {
-        const t = types[i];
-        if ((isClass(t) && t.priv.literalValue !== undefined) || (isClassInstance(t) && t.priv.isEmptyContainer)) {
-            back.push(t);
-        } else {
-            front.push(t);
-        }
-    }
-
-    // Write back in-place.
-    let idx = 0;
-    for (let i = 0; i < front.length; i++) {
-        types[idx++] = front[i];
-    }
-    for (let i = 0; i < back.length; i++) {
-        types[idx++] = back[i];
     }
 }
 

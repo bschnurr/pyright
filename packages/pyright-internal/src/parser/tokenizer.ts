@@ -880,27 +880,14 @@ export class Tokenizer {
     }
 
     private _tryIdentifier(): boolean {
-        const swallowRemainingChars = () => {
-            while (true) {
-                if (isIdentifierChar(this._cs.currentChar)) {
-                    this._cs.moveNext();
-                } else if (isIdentifierChar(this._cs.currentChar, this._cs.nextChar)) {
-                    this._cs.moveNext();
-                    this._cs.moveNext();
-                } else {
-                    break;
-                }
-            }
-        };
-
         const start = this._cs.position;
         if (isIdentifierStartChar(this._cs.currentChar)) {
             this._cs.moveNext();
-            swallowRemainingChars();
+            this._swallowIdentifierChars();
         } else if (isIdentifierStartChar(this._cs.currentChar, this._cs.nextChar)) {
             this._cs.moveNext();
             this._cs.moveNext();
-            swallowRemainingChars();
+            this._swallowIdentifierChars();
         }
 
         if (this._cs.position > start) {
@@ -929,6 +916,19 @@ export class Tokenizer {
         }
 
         return false;
+    }
+
+    private _swallowIdentifierChars(): void {
+        while (true) {
+            if (isIdentifierChar(this._cs.currentChar)) {
+                this._cs.moveNext();
+            } else if (isIdentifierChar(this._cs.currentChar, this._cs.nextChar)) {
+                this._cs.moveNext();
+                this._cs.moveNext();
+            } else {
+                break;
+            }
+        }
     }
 
     private _tryNumber(): boolean {

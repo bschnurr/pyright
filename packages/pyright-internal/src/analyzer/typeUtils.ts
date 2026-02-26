@@ -473,16 +473,17 @@ export function mapSignatures(
     const newSignatures: FunctionType[] = [];
     let changeMade = false;
 
-    OverloadedType.getOverloads(type).forEach((overload, index) => {
-        const newOverload = callback(overload);
-        if (newOverload !== overload) {
+    const overloads = OverloadedType.getOverloads(type);
+    for (let i = 0; i < overloads.length; i++) {
+        const newOverload = callback(overloads[i]);
+        if (newOverload !== overloads[i]) {
             changeMade = true;
         }
 
         if (newOverload) {
             newSignatures.push(newOverload);
         }
-    });
+    }
 
     if (newSignatures.length === 0) {
         return undefined;
@@ -579,9 +580,7 @@ export function cleanIncompleteUnknown(type: Type, recursionCount = 0): Type {
 
 // Sorts types into a deterministic order.
 export function sortTypes(types: Type[]): Type[] {
-    return types.slice(0).sort((a, b) => {
-        return compareTypes(a, b);
-    });
+    return types.slice(0).sort(compareTypes);
 }
 
 function compareTypes(a: Type, b: Type, recursionCount = 0): number {
@@ -768,6 +767,11 @@ function compareTypes(a: Type, b: Type, recursionCount = 0): number {
     return 1;
 }
 
+// Reusable single-element array to avoid per-call [type] allocations
+// in doForEachSubtype for non-union types. Contents are overwritten
+// on each call, so callers must not retain a reference.
+const _singletonSubtypeArray: Type[] = [undefined as unknown as Type];
+
 export function doForEachSubtype(
     type: Type,
     callback: (type: Type, index: number, allSubtypes: Type[]) => void,
@@ -775,19 +779,25 @@ export function doForEachSubtype(
 ): void {
     if (isUnion(type)) {
         const subtypes = sortSubtypes ? sortTypes(type.priv.subtypes) : type.priv.subtypes;
-        subtypes.forEach((subtype, index) => {
-            callback(subtype, index, subtypes);
-        });
+        for (let i = 0; i < subtypes.length; i++) {
+            callback(subtypes[i], i, subtypes);
+        }
     } else {
-        callback(type, 0, [type]);
+        // Reuse a single-element array to avoid per-call allocation.
+        _singletonSubtypeArray[0] = type;
+        callback(type, 0, _singletonSubtypeArray);
     }
 }
 
 export function someSubtypes(type: Type, callback: (type: Type) => boolean): boolean {
     if (isUnion(type)) {
-        return type.priv.subtypes.some((subtype) => {
-            return callback(subtype);
-        });
+        const subtypes = type.priv.subtypes;
+        for (let i = 0; i < subtypes.length; i++) {
+            if (callback(subtypes[i])) {
+                return true;
+            }
+        }
+        return false;
     } else {
         return callback(type);
     }
@@ -795,9 +805,13 @@ export function someSubtypes(type: Type, callback: (type: Type) => boolean): boo
 
 export function allSubtypes(type: Type, callback: (type: Type) => boolean): boolean {
     if (isUnion(type)) {
-        return type.priv.subtypes.every((subtype) => {
-            callback(subtype);
-        });
+        const subtypes = type.priv.subtypes;
+        for (let i = 0; i < subtypes.length; i++) {
+            if (!callback(subtypes[i])) {
+                return false;
+            }
+        }
+        return true;
     } else {
         return callback(type);
     }
@@ -810,9 +824,10 @@ export function doForEachSignature(
     if (isFunction(type)) {
         callback(type, 0);
     } else {
-        OverloadedType.getOverloads(type).forEach((overload, index) => {
-            callback(overload, index);
-        });
+        const overloads = OverloadedType.getOverloads(type);
+        for (let i = 0; i < overloads.length; i++) {
+            callback(overloads[i], i);
+        }
     }
 }
 
