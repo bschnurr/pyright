@@ -11,21 +11,62 @@ import { compareComparableValues, Comparison } from './core';
 
 // Determines if typed string matches a symbol
 // name. Characters must appear in order.
-// Return true if all typed characters are in symbol
+// Return true if all typed characters are in symbol.
+// Uses a fast ASCII path to avoid toLocaleLowerCase() allocations
+// for the common case of ASCII-only Python identifiers.
 export function isPatternInSymbol(typedValue: string, symbolName: string): boolean {
+    const typedLength = typedValue.length;
+    const symbolLength = symbolName.length;
+
+    if (typedLength === 0) {
+        return true;
+    }
+
+    if (typedLength > symbolLength) {
+        return false;
+    }
+
+    // Fast path: if both strings are pure ASCII, do case-insensitive
+    // subsequence matching inline using charCodeAt, avoiding
+    // toLocaleLowerCase() string allocations.
+    if (_isAscii(typedValue) && _isAscii(symbolName)) {
+        let typedPos = 0;
+        let symbolPos = 0;
+        while (typedPos < typedLength && symbolPos < symbolLength) {
+            if (_asciiLower(typedValue.charCodeAt(typedPos)) === _asciiLower(symbolName.charCodeAt(symbolPos))) {
+                typedPos++;
+            }
+            symbolPos++;
+        }
+        return typedPos === typedLength;
+    }
+
+    // Slow path: fall back to toLocaleLowerCase() for non-ASCII identifiers.
     const typedLower = typedValue.toLocaleLowerCase();
     const symbolLower = symbolName.toLocaleLowerCase();
-    const typedLength = typedLower.length;
-    const symbolLength = symbolLower.length;
     let typedPos = 0;
     let symbolPos = 0;
     while (typedPos < typedLength && symbolPos < symbolLength) {
         if (typedLower[typedPos] === symbolLower[symbolPos]) {
-            typedPos += 1;
+            typedPos++;
         }
-        symbolPos += 1;
+        symbolPos++;
     }
     return typedPos === typedLength;
+}
+
+function _isAscii(s: string): boolean {
+    for (let i = 0; i < s.length; i++) {
+        if (s.charCodeAt(i) > 127) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function _asciiLower(charCode: number): number {
+    // A-Z (65-90) → a-z (97-122) by setting bit 5
+    return charCode >= 65 && charCode <= 90 ? charCode | 0x20 : charCode;
 }
 
 // This is a simple, non-cryptographic hash function for text.
