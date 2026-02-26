@@ -131,6 +131,8 @@ export interface TypeSameOptions {
 }
 
 const _defaultTypeSameOptions: TypeSameOptions = {};
+const _honorTypeFormOptions: TypeSameOptions = { honorTypeForm: true };
+const _honorTypeFormPseudoGenericOptions: TypeSameOptions = { ignorePseudoGeneric: true, honorTypeForm: true };
 
 export interface TypeAliasSharedInfo {
     name: string;
@@ -3831,7 +3833,7 @@ export function combineTypes(subtypes: Type[], options?: CombineTypesOptions): T
 
     // Expand all union types.
     let expandedTypes: Type[] | undefined;
-    const typeAliasSources = new Set<UnionType>();
+    let typeAliasSources: Set<UnionType> | undefined;
 
     for (let i = 0; i < subtypes.length; i++) {
         const subtype = subtypes[i];
@@ -3842,10 +3844,10 @@ export function combineTypes(subtypes: Type[], options?: CombineTypesOptions): T
             expandedTypes = expandedTypes.concat(subtype.priv.subtypes);
 
             if (subtype.props?.typeAliasInfo) {
-                typeAliasSources.add(subtype);
+                (typeAliasSources ??= new Set<UnionType>()).add(subtype);
             } else if (subtype.priv.typeAliasSources) {
                 subtype.priv.typeAliasSources.forEach((subtype) => {
-                    typeAliasSources.add(subtype);
+                    (typeAliasSources ??= new Set<UnionType>()).add(subtype);
                 });
             }
         } else if (expandedTypes) {
@@ -3867,7 +3869,7 @@ export function combineTypes(subtypes: Type[], options?: CombineTypesOptions): T
     }
 
     const newUnionType = UnionType.create();
-    if (typeAliasSources.size > 0) {
+    if (typeAliasSources && typeAliasSources.size > 0) {
         newUnionType.priv.typeAliasSources = typeAliasSources;
     }
 
@@ -3991,7 +3993,7 @@ function _addTypeIfUnique(unionType: UnionType, typeToAdd: UnionableType, elideR
         const type = unionType.priv.subtypes[i];
 
         // Does this type already exist in the types array?
-        if (isTypeSame(type, typeToAdd, { honorTypeForm: true })) {
+        if (isTypeSame(type, typeToAdd, _honorTypeFormOptions)) {
             return;
         }
 
@@ -4002,7 +4004,7 @@ function _addTypeIfUnique(unionType: UnionType, typeToAdd: UnionableType, elideR
         // we can hit recursive cases (where a pseudo-generic class is
         // parameterized with its own class) ad infinitum.
         if (isPseudoGeneric) {
-            if (isTypeSame(type, typeToAdd, { ignorePseudoGeneric: true, honorTypeForm: true })) {
+            if (isTypeSame(type, typeToAdd, _honorTypeFormPseudoGenericOptions)) {
                 unionType.priv.subtypes[i] = ClassType.specialize(
                     typeToAdd,
                     typeToAdd.shared.typeParams.map(() => UnknownType.create())

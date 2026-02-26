@@ -239,6 +239,10 @@ export interface AddConditionOptions {
 // large enough that we should never hit it in legitimate circumstances.
 const maxTupleTypeArgRecursionDepth = 10;
 
+// Shared empty options object to avoid allocating a new {} on every call
+// from the ~25 call sites that use the default.
+const _defaultApplyTypeVarOptions: ApplyTypeVarOptions = {};
+
 // Tracks whether a function signature has been seen before within
 // an expression. For example, in the expression "foo(foo, foo)", the
 // signature for "foo" will be seen three times at three different
@@ -1590,7 +1594,7 @@ export function makeTypeVarsFree(type: Type, scopeIds: TypeVarScopeId[]): Type {
 
 // Specializes a (potentially generic) type by substituting
 // type variables from a type var map.
-export function applySolvedTypeVars(type: Type, solution: ConstraintSolution, options: ApplyTypeVarOptions = {}): Type {
+export function applySolvedTypeVars(type: Type, solution: ConstraintSolution, options: ApplyTypeVarOptions = _defaultApplyTypeVarOptions): Type {
     // Use a shortcut if constraints is empty and no transform is necessary.
     if (solution.isEmpty() && !options.replaceUnsolved) {
         return type;
