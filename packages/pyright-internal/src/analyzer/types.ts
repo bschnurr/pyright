@@ -130,6 +130,8 @@ export interface TypeSameOptions {
     treatAnySameAsUnknown?: boolean;
 }
 
+const _defaultTypeSameOptions: TypeSameOptions = {};
+
 export interface TypeAliasSharedInfo {
     name: string;
     fullName: string;
@@ -3181,7 +3183,13 @@ export function isAnyOrUnknown(type: Type): type is AnyType | UnknownType {
     }
 
     if (isUnion(type)) {
-        return type.priv.subtypes.find((subtype) => !isAnyOrUnknown(subtype)) === undefined;
+        const subtypes = type.priv.subtypes;
+        for (let i = 0; i < subtypes.length; i++) {
+            if (!isAnyOrUnknown(subtypes[i])) {
+                return false;
+            }
+        }
+        return true;
     }
 
     return false;
@@ -3201,7 +3209,13 @@ export function isPossiblyUnbound(type: Type): boolean {
     }
 
     if (isUnion(type)) {
-        return type.priv.subtypes.find((subtype) => isPossiblyUnbound(subtype)) !== undefined;
+        const subtypes = type.priv.subtypes;
+        for (let i = 0; i < subtypes.length; i++) {
+            if (isPossiblyUnbound(subtypes[i])) {
+                return true;
+            }
+        }
+        return false;
     }
 
     return false;
@@ -3313,7 +3327,12 @@ export function getTypeAliasInfo(type: Type) {
 // Determines whether two types are the same. If ignorePseudoGeneric is true,
 // type arguments for "pseudo-generic" classes (non-generic classes whose init
 // methods are not annotated and are therefore treated as generic) are ignored.
-export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = {}, recursionCount = 0): boolean {
+export function isTypeSame(
+    type1: Type,
+    type2: Type,
+    options: TypeSameOptions = _defaultTypeSameOptions,
+    recursionCount = 0
+): boolean {
     if (type1 === type2) {
         return true;
     }
@@ -3359,6 +3378,9 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
         }
     }
 
+    // Pre-compute options with ignoreTypeFlags forced to false (used in many branches).
+    const typeArgOptions = options.ignoreTypeFlags ? { ...options, ignoreTypeFlags: false } : options;
+
     switch (type1.category) {
         case TypeCategory.Class: {
             const classType2 = type2 as ClassType;
@@ -3386,7 +3408,7 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
                             !isTypeSame(
                                 type1TupleTypeArgs[i].type,
                                 type2TupleTypeArgs[i].type,
-                                { ...options, ignoreTypeFlags: false },
+                                typeArgOptions,
                                 recursionCount
                             )
                         ) {
@@ -3407,7 +3429,7 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
                         const typeArg1 = i < type1TypeArgs.length ? type1TypeArgs[i] : UnknownType.create();
                         const typeArg2 = i < type2TypeArgs.length ? type2TypeArgs[i] : UnknownType.create();
 
-                        if (!isTypeSame(typeArg1, typeArg2, { ...options, ignoreTypeFlags: false }, recursionCount)) {
+                        if (!isTypeSame(typeArg1, typeArg2, typeArgOptions, recursionCount)) {
                             return false;
                         }
                     }
@@ -3485,7 +3507,7 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
 
                 const param1Type = FunctionType.getParamType(type1, i);
                 const param2Type = FunctionType.getParamType(functionType2, i);
-                if (!isTypeSame(param1Type, param2Type, { ...options, ignoreTypeFlags: false }, recursionCount)) {
+                if (!isTypeSame(param1Type, param2Type, typeArgOptions, recursionCount)) {
                     return false;
                 }
             }
@@ -3511,7 +3533,7 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
                 if (
                     !return1Type ||
                     !return2Type ||
-                    !isTypeSame(return1Type, return2Type, { ...options, ignoreTypeFlags: false }, recursionCount)
+                    !isTypeSame(return1Type, return2Type, typeArgOptions, recursionCount)
                 ) {
                     return false;
                 }
@@ -3581,7 +3603,7 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
                     const typeArg1 = i < type1TypeArgs.length ? type1TypeArgs[i] : AnyType.create();
                     const typeArg2 = i < type2TypeArgs.length ? type2TypeArgs[i] : AnyType.create();
 
-                    if (!isTypeSame(typeArg1, typeArg2, { ...options, ignoreTypeFlags: false }, recursionCount)) {
+                    if (!isTypeSame(typeArg1, typeArg2, typeArgOptions, recursionCount)) {
                         return false;
                     }
                 }
@@ -3617,10 +3639,7 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
             const boundType1 = type1.shared.boundType;
             const boundType2 = type2TypeVar.shared.boundType;
             if (boundType1) {
-                if (
-                    !boundType2 ||
-                    !isTypeSame(boundType1, boundType2, { ...options, ignoreTypeFlags: false }, recursionCount)
-                ) {
+                if (!boundType2 || !isTypeSame(boundType1, boundType2, typeArgOptions, recursionCount)) {
                     return false;
                 }
             } else {
@@ -3636,14 +3655,7 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
             }
 
             for (let i = 0; i < constraints1.length; i++) {
-                if (
-                    !isTypeSame(
-                        constraints1[i],
-                        constraints2[i],
-                        { ...options, ignoreTypeFlags: false },
-                        recursionCount
-                    )
-                ) {
+                if (!isTypeSame(constraints1[i], constraints2[i], typeArgOptions, recursionCount)) {
                     return false;
                 }
             }
@@ -3701,8 +3713,24 @@ export function removeUnbound(type: Type): Type {
 
 export function removeFromUnion(type: Type, removeFilter: (type: Type) => boolean) {
     if (isUnion(type)) {
-        const remainingTypes = type.priv.subtypes.filter((t) => !removeFilter(t));
-        if (remainingTypes.length < type.priv.subtypes.length) {
+        const subtypes = type.priv.subtypes;
+
+        // Fast check: see if any subtypes need removal before allocating.
+        let hasRemoval = false;
+        for (let i = 0; i < subtypes.length; i++) {
+            if (removeFilter(subtypes[i])) {
+                hasRemoval = true;
+                break;
+            }
+        }
+
+        if (hasRemoval) {
+            const remainingTypes: Type[] = [];
+            for (let i = 0; i < subtypes.length; i++) {
+                if (!removeFilter(subtypes[i])) {
+                    remainingTypes.push(subtypes[i]);
+                }
+            }
             const newType = combineTypes(remainingTypes);
 
             if (isUnion(newType)) {
@@ -3718,9 +3746,13 @@ export function removeFromUnion(type: Type, removeFilter: (type: Type) => boolea
 
 export function findSubtype(type: Type, filter: (type: UnionableType | NeverType) => boolean) {
     if (isUnion(type)) {
-        return type.priv.subtypes.find((subtype) => {
-            return filter(subtype);
-        });
+        const subtypes = type.priv.subtypes;
+        for (let i = 0; i < subtypes.length; i++) {
+            if (filter(subtypes[i])) {
+                return subtypes[i];
+            }
+        }
+        return undefined;
     }
 
     return filter(type) ? type : undefined;
