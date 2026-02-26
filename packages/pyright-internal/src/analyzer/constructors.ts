@@ -229,11 +229,11 @@ export function validateConstructorArgs(
     // If we weren't able to validate the args, analyze the expressions here
     // to mark symbols referenced and report expression evaluation errors.
     if (!validatedArgExpressions) {
-        argList.forEach((arg) => {
+        for (const arg of argList) {
             if (arg.valueExpression && !evaluator.isSpeculativeModeInUse(arg.valueExpression)) {
                 evaluator.getTypeOfExpression(arg.valueExpression);
             }
-        });
+        }
     }
 
     return returnResult;
@@ -506,7 +506,13 @@ function validateInitMethod(
         { type: initMethodType },
         constraints,
         skipUnknownArgCheck,
-        inferenceContext ? { ...inferenceContext, returnTypeOverride } : undefined
+        inferenceContext
+            ? {
+                  expectedType: inferenceContext.expectedType,
+                  isTypeIncomplete: inferenceContext.isTypeIncomplete,
+                  returnTypeOverride,
+              }
+            : undefined
     );
 
     let adjustedClassType = type;
@@ -840,15 +846,26 @@ function createFunctionFromNewMethod(
         // If there are no parameters that include class-scoped type parameters,
         // self-specialize the class because the type arguments for the class
         // can't be solved if there are no parameters to supply them.
-        const hasParamsWithTypeVars = newSubtype.shared.parameters.some((param, index) => {
-            if (index === 0 || !param.name) {
-                return false;
+        let hasParamsWithTypeVars = false;
+        for (let paramIdx = 1; paramIdx < newSubtype.shared.parameters.length; paramIdx++) {
+            const param = newSubtype.shared.parameters[paramIdx];
+            if (!param.name) {
+                continue;
             }
-
-            const paramType = FunctionType.getParamType(newSubtype, index);
+            const paramType = FunctionType.getParamType(newSubtype, paramIdx);
             const typeVars = getTypeVarArgsRecursive(paramType);
-            return typeVars.some((typeVar) => typeVar.priv.scopeId === getTypeVarScopeId(classType));
-        });
+            let found = false;
+            for (const typeVar of typeVars) {
+                if (typeVar.priv.scopeId === getTypeVarScopeId(classType)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found) {
+                hasParamsWithTypeVars = true;
+                break;
+            }
+        }
 
         const boundNew = evaluator.bindFunctionToClassOrObject(
             hasParamsWithTypeVars ? selfSpecializeClass(classType) : classType,
@@ -886,12 +903,12 @@ function createFunctionFromNewMethod(
     }
 
     const newOverloads: FunctionType[] = [];
-    OverloadedType.getOverloads(newType).forEach((overload) => {
+    for (const overload of OverloadedType.getOverloads(newType)) {
         const converted = convertNewToConstructor(overload);
         if (converted) {
             newOverloads.push(converted);
         }
-    });
+    }
 
     if (newOverloads.length === 0) {
         return undefined;
@@ -973,14 +990,14 @@ function createFunctionFromInitMethod(
                 // on its default value (typically Unknown) in the resulting specialized type.
                 const typeVarsInParams: TypeVarType[] = [];
 
-                convertedInit.shared.parameters.forEach((param, index) => {
-                    const paramType = FunctionType.getParamType(convertedInit, index);
+                for (let paramIdx = 0; paramIdx < convertedInit.shared.parameters.length; paramIdx++) {
+                    const paramType = FunctionType.getParamType(convertedInit, paramIdx);
                     addTypeVarsToListIfUnique(typeVarsInParams, getTypeVarArgsRecursive(paramType));
-                });
+                }
 
-                typeVarsInParams.forEach((typeVar) => {
+                for (const typeVar of typeVarsInParams) {
                     constraints.setBounds(typeVar, typeVar);
-                });
+                }
 
                 returnType = evaluator.solveAndApplyConstraints(objectType, constraints, {
                     replaceUnsolved: {
@@ -1016,12 +1033,12 @@ function createFunctionFromInitMethod(
     }
 
     const initOverloads: FunctionType[] = [];
-    OverloadedType.getOverloads(initType).forEach((overload) => {
+    for (const overload of OverloadedType.getOverloads(initType)) {
         const converted = convertInitToConstructor(overload);
         if (converted) {
             initOverloads.push(converted);
         }
-    });
+    }
 
     if (initOverloads.length === 0) {
         return undefined;
