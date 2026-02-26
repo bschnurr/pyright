@@ -70,7 +70,14 @@ export function getFunctionInfoFromDecorators(
         // Several magic methods are treated as class methods implicitly
         // by the runtime. Check for these here.
         const implicitClassMethods = ['__init_subclass__', '__class_getitem__'];
-        if (implicitClassMethods.some((name) => node.d.name.d.value === name)) {
+        let isImplicitClassMethod = false;
+        for (const name of implicitClassMethods) {
+            if (node.d.name.d.value === name) {
+                isImplicitClassMethod = true;
+                break;
+            }
+        }
+        if (isImplicitClassMethod) {
             flags |= FunctionTypeFlags.ClassMethod;
         }
     }
@@ -451,22 +458,28 @@ function getTypeOfDecorator(evaluator: TypeEvaluator, node: DecoratorNode, funct
     // and just *args and **kwargs parameters, assume that it
     // preserves the type of the input function.
     if (isFunction(returnType) && !returnType.shared.declaredReturnType) {
-        if (
-            !returnType.shared.parameters.some((param, index) => {
-                // Don't allow * or / separators or params with declared types.
-                if (!param.name || FunctionParam.isTypeDeclared(param)) {
-                    return true;
-                }
+        let hasDisqualifyingParam = false;
+        const params = returnType.shared.parameters;
+        for (let index = 0; index < params.length; index++) {
+            const param = params[index];
+            // Don't allow * or / separators or params with declared types.
+            if (!param.name || FunctionParam.isTypeDeclared(param)) {
+                hasDisqualifyingParam = true;
+                break;
+            }
 
-                // Allow *args or **kwargs parameters.
-                if (param.category !== ParamCategory.Simple) {
-                    return false;
-                }
+            // Allow *args or **kwargs parameters.
+            if (param.category !== ParamCategory.Simple) {
+                continue;
+            }
 
-                // Allow inferred "self" or "cls" parameters.
-                return index !== 0 || !FunctionParam.isTypeInferred(param);
-            })
-        ) {
+            // Allow inferred "self" or "cls" parameters.
+            if (index !== 0 || !FunctionParam.isTypeInferred(param)) {
+                hasDisqualifyingParam = true;
+                break;
+            }
+        }
+        if (!hasDisqualifyingParam) {
             return functionOrClassType;
         }
     }
@@ -476,8 +489,15 @@ function getTypeOfDecorator(evaluator: TypeEvaluator, node: DecoratorNode, funct
     // function.
     if (isPartlyUnknown(returnType)) {
         if (isFunction(decoratorTypeResult.type)) {
+            let hasTypeDeclaredParam = false;
+            for (const param of decoratorTypeResult.type.shared.parameters) {
+                if (FunctionParam.isTypeDeclared(param)) {
+                    hasTypeDeclaredParam = true;
+                    break;
+                }
+            }
             if (
-                !decoratorTypeResult.type.shared.parameters.find((param) => FunctionParam.isTypeDeclared(param)) &&
+                !hasTypeDeclaredParam &&
                 decoratorTypeResult.type.shared.declaredReturnType === undefined
             ) {
                 return functionOrClassType;
@@ -505,7 +525,10 @@ export function addOverloadsToFunctionType(evaluator: TypeEvaluator, node: Funct
         const decls = symbolWithScope.symbol.getDeclarations();
 
         // Find this function's declaration.
-        const declIndex = decls.findIndex((decl) => decl === functionDecl);
+        let declIndex = -1;
+        if (functionDecl) {
+            declIndex = decls.indexOf(functionDecl);
+        }
         if (declIndex > 0) {
             // Evaluate all of the previous function declarations. They will
             // be cached. We do it in this order to avoid a stack overflow due
@@ -561,12 +584,15 @@ export function addOverloadsToFunctionType(evaluator: TypeEvaluator, node: Funct
             // have their own docstrings.
             if (implementation && isFunction(implementation) && implementation.shared.docString) {
                 const docString = implementation.shared.docString;
-                overloadedTypes = overloadedTypes.map((overload) => {
+                const newOverloadedTypes: FunctionType[] = [];
+                for (const overload of overloadedTypes) {
                     if (FunctionType.isOverloaded(overload) && !overload.shared.docString) {
-                        return FunctionType.cloneWithDocString(overload, docString);
+                        newOverloadedTypes.push(FunctionType.cloneWithDocString(overload, docString));
+                    } else {
+                        newOverloadedTypes.push(overload);
                     }
-                    return overload;
-                });
+                }
+                overloadedTypes = newOverloadedTypes;
             }
 
             // PEP 702 indicates that if the implementation of an overloaded
@@ -574,12 +600,15 @@ export function addOverloadsToFunctionType(evaluator: TypeEvaluator, node: Funct
             // treated as deprecated as well.
             if (implementation && isFunction(implementation) && implementation.shared.deprecatedMessage !== undefined) {
                 const deprecationMessage = implementation.shared.deprecatedMessage;
-                overloadedTypes = overloadedTypes.map((overload) => {
+                const newOverloadedTypes: FunctionType[] = [];
+                for (const overload of overloadedTypes) {
                     if (FunctionType.isOverloaded(overload) && overload.shared.deprecatedMessage === undefined) {
-                        return FunctionType.cloneWithDeprecatedMessage(overload, deprecationMessage);
+                        newOverloadedTypes.push(FunctionType.cloneWithDeprecatedMessage(overload, deprecationMessage));
+                    } else {
+                        newOverloadedTypes.push(overload);
                     }
-                    return overload;
-                });
+                }
+                overloadedTypes = newOverloadedTypes;
             }
 
             return OverloadedType.create(overloadedTypes, implementation);
@@ -598,7 +627,10 @@ export function getDeprecatedMessageFromCall(node: CallNode): string {
         node.d.args[0].d.valueExpr.nodeType === ParseNodeType.StringList
     ) {
         const stringListNode = node.d.args[0].d.valueExpr;
-        const message = stringListNode.d.strings.map((s) => s.d.value).join('');
+        let message = '';
+        for (const s of stringListNode.d.strings) {
+            message += s.d.value;
+        }
         return convertDocStringToPlainText(message);
     }
 
