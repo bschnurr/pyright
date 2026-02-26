@@ -24,9 +24,12 @@ import {
     isTypeVarTuple,
     isUnpackedClass,
     Type,
+    TypeSameOptions,
     TypeVarType,
 } from './types';
 import { doForEachSubtype, partiallySpecializeType } from './typeUtils';
+
+const _ignoreTypeFlagsOptions: TypeSameOptions = { ignoreTypeFlags: true };
 
 export function isTypedKwargs(param: FunctionParam, effectiveParamType: Type): boolean {
     return (
@@ -356,7 +359,7 @@ export function isParamSpecArgs(paramSpec: TypeVarType, argType: Type) {
         if (
             isParamSpec(argSubtype) &&
             argSubtype.priv.paramSpecAccess === 'args' &&
-            isTypeSame(argSubtype, paramSpec, { ignoreTypeFlags: true })
+            isTypeSame(argSubtype, paramSpec, _ignoreTypeFlagsOptions)
         ) {
             return;
         }
@@ -390,7 +393,7 @@ export function isParamSpecKwargs(paramSpec: TypeVarType, argType: Type) {
         if (
             isParamSpec(argSubtype) &&
             argSubtype.priv.paramSpecAccess === 'kwargs' &&
-            isTypeSame(argSubtype, paramSpec, { ignoreTypeFlags: true })
+            isTypeSame(argSubtype, paramSpec, _ignoreTypeFlagsOptions)
         ) {
             return;
         }

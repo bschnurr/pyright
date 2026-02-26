@@ -42,6 +42,7 @@ import {
     TupleTypeArg,
     Type,
     TypeBase,
+    TypeSameOptions,
     TypeVarKind,
     TypeVarScopeId,
     TypeVarType,
@@ -76,6 +77,8 @@ import {
 // many subtypes. For performance reasons, we need to cap this at some
 // point. This constant determines the cap.
 const maxSubtypeCountForTypeVarLowerBound = 64;
+
+const _ignoreTypeFlagsOptions: TypeSameOptions = { ignoreTypeFlags: true };
 
 // This debugging switch enables logging of the constraints before and
 // after it is updated by the constraint solver.
@@ -288,7 +291,7 @@ function solveTypeVarRecursive(
 
             for (const typeVar of typeVars) {
                 // Don't attempt to replace a TypeVar with itself.
-                if (isTypeSame(typeVar, entry.typeVar, { ignoreTypeFlags: true })) {
+                if (isTypeSame(typeVar, entry.typeVar, _ignoreTypeFlagsOptions)) {
                     continue;
                 }
 
@@ -702,7 +705,7 @@ function assignUnconstrainedTypeVar(
         // Update the upper bound.
         if (!curUpperBound || isTypeSame(destType, curUpperBound)) {
             newUpperBound = adjSrcType;
-        } else if (!isTypeSame(curUpperBound, adjSrcType, {}, recursionCount)) {
+        } else if (!isTypeSame(curUpperBound, adjSrcType, undefined, recursionCount)) {
             if (
                 evaluator.assignType(
                     curUpperBound,
@@ -764,7 +767,7 @@ function assignUnconstrainedTypeVar(
         if (!curLowerBound || isTypeSame(destType, curLowerBound)) {
             // There was previously no lower bound. We've now established one.
             newLowerBound = adjSrcType;
-        } else if (isTypeSame(curLowerBound, adjSrcType, {}, recursionCount)) {
+        } else if (isTypeSame(curLowerBound, adjSrcType, undefined, recursionCount)) {
             // If this is an invariant context and there is currently no upper bound
             // established, use the "no literals" version of the lower bound rather
             // than a version that has literals.
@@ -906,7 +909,7 @@ function assignUnconstrainedTypeVar(
 
         // Make sure we don't exceed the upper bound.
         if (curUpperBound && newLowerBound) {
-            if (!isTypeSame(curUpperBound, newLowerBound, {}, recursionCount)) {
+            if (!isTypeSame(curUpperBound, newLowerBound, undefined, recursionCount)) {
                 if (
                     !evaluator.assignType(
                         curUpperBound,
@@ -1209,7 +1212,7 @@ function assignParamSpec(
 
                 if (existingTypeWithoutArgsKwargs.shared.parameters.length === 0 && existingTypeParamSpec) {
                     // If there's an existing entry that matches, that's fine.
-                    if (isTypeSame(existingTypeParamSpec, adjSrcType, {}, recursionCount)) {
+                    if (isTypeSame(existingTypeParamSpec, adjSrcType, undefined, recursionCount)) {
                         return;
                     }
                 }

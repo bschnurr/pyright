@@ -24854,7 +24854,7 @@ export function createTypeEvaluator(
                 srcType.priv.tupleTypeArgs &&
                 srcType.priv.tupleTypeArgs.length === 1
             ) {
-                if (isTypeSame(destType, srcType.priv.tupleTypeArgs[0].type, {}, recursionCount)) {
+                if (isTypeSame(destType, srcType.priv.tupleTypeArgs[0].type, undefined, recursionCount)) {
                     return true;
                 }
             }
@@ -25588,7 +25588,7 @@ export function createTypeEvaluator(
     ): boolean {
         // Start by checking for an exact match. This is needed to handle unions
         // that contain recursive type aliases.
-        if (isTypeSame(srcType, destType, {}, recursionCount)) {
+        if (isTypeSame(srcType, destType, undefined, recursionCount)) {
             return true;
         }
 
@@ -25628,7 +25628,7 @@ export function createTypeEvaluator(
                     remainingDestSubtypes.push(destSubtype);
                 } else {
                     const srcTypeIndex = remainingSrcSubtypes.findIndex((srcSubtype) =>
-                        isTypeSame(srcSubtype, destSubtype, {}, recursionCount)
+                        isTypeSame(srcSubtype, destSubtype, undefined, recursionCount)
                     );
 
                     if (srcTypeIndex >= 0) {

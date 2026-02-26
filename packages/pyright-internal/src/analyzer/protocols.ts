@@ -32,6 +32,7 @@ import {
     OverloadedType,
     Type,
     TypeBase,
+    TypeSameOptions,
     TypeVarType,
     UnknownType,
     Variance,
@@ -50,6 +51,8 @@ import {
     selfSpecializeClass,
     synthesizeTypeVarForSelfCls,
 } from './typeUtils';
+
+const _typeArgExplicitFormOptions: TypeSameOptions = { honorIsTypeArgExplicit: true, honorTypeForm: true };
 
 interface ProtocolAssignmentStackEntry {
     srcType: ClassType;
@@ -268,8 +271,8 @@ function getProtocolCompatibility(
         }
 
         if (
-            isTypeSame(entry.destType, destType, { honorIsTypeArgExplicit: true, honorTypeForm: true }) &&
-            isTypeSame(entry.srcType, srcType, { honorIsTypeArgExplicit: true, honorTypeForm: true }) &&
+            isTypeSame(entry.destType, destType, _typeArgExplicitFormOptions) &&
+            isTypeSame(entry.srcType, srcType, _typeArgExplicitFormOptions) &&
             isConstraintTrackerSame(constraints, entry.preConstraints)
         ) {
             return entry;

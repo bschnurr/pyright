@@ -11,7 +11,9 @@
 
 import { assert } from '../common/debug';
 import { getComplexityScoreForType } from './typeComplexity';
-import { Type, TypeVarScopeId, TypeVarType, isTypeSame } from './types';
+import { Type, TypeSameOptions, TypeVarScopeId, TypeVarType, isTypeSame } from './types';
+
+const _typeArgExplicitFormOptions: TypeSameOptions = { honorIsTypeArgExplicit: true, honorTypeForm: true };
 
 // The maximum number of constraint sets that can be associated
 // with a constraint tracker. This equates to the number of overloads
@@ -78,7 +80,7 @@ export class ConstraintSet {
                 return type1 === type2;
             }
 
-            return isTypeSame(type1, type2, { honorIsTypeArgExplicit: true, honorTypeForm: true });
+            return isTypeSame(type1, type2, _typeArgExplicitFormOptions);
         }
 
         let isSame = true;
