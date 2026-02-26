@@ -8723,7 +8723,8 @@ export function createTypeEvaluator(
                 AnalyzerNodeInfo.getFileInfo(node).isTypingStubFile;
 
             if (!isCyclicalTypeVarCall) {
-                argList.forEach((arg) => {
+                for (let ali = 0; ali < argList.length; ali++) {
+                    const arg = argList[ali];
                     if (
                         arg.valueExpression &&
                         arg.valueExpression.nodeType !== ParseNodeType.StringList &&
@@ -8731,7 +8732,7 @@ export function createTypeEvaluator(
                     ) {
                         getTypeOfExpression(arg.valueExpression);
                     }
-                });
+                }
             }
         }
 
@@ -9486,7 +9487,8 @@ export function createTypeEvaluator(
                     let dedupedMatchResults: Type[] = [];
                     let dedupedResultsIncludeAny = false;
 
-                    possibleMatchResults.forEach((result) => {
+                    for (let pri = 0; pri < possibleMatchResults.length; pri++) {
+                        const result = possibleMatchResults[pri];
                         let isSubtypeSubsumed = false;
 
                         for (let dedupedIndex = 0; dedupedIndex < dedupedMatchResults.length; dedupedIndex++) {
@@ -9515,7 +9517,7 @@ export function createTypeEvaluator(
                         if (!isSubtypeSubsumed) {
                             dedupedMatchResults.push(result.returnType);
                         }
-                    });
+                    }
 
                     dedupedMatchResults = dedupedMatchResults.filter((t) => !isNever(t));
                     const combinedTypes = combineTypes(dedupedMatchResults);
@@ -9651,13 +9653,14 @@ export function createTypeEvaluator(
         typeResult: TypeResult<OverloadedType>,
         argList: Arg[]
     ): FunctionType | undefined {
-        let overloadIndex = 0;
         const matches: MatchArgsToParamsResult[] = [];
         const speculativeNode = getSpeculativeNodeForCall(errorNode);
 
         useSignatureTracker(errorNode, () => {
             // Create a list of potential overload matches based on arguments.
-            OverloadedType.getOverloads(typeResult.type).forEach((overload) => {
+            const overloads = OverloadedType.getOverloads(typeResult.type);
+            for (let overloadIndex = 0; overloadIndex < overloads.length; overloadIndex++) {
+                const overload = overloads[overloadIndex];
                 useSpeculativeMode(speculativeNode, () => {
                     const matchResults = matchArgsToParams(
                         errorNode,
@@ -9669,30 +9672,29 @@ export function createTypeEvaluator(
                     if (!matchResults.argumentErrors) {
                         matches.push(matchResults);
                     }
-
-                    overloadIndex++;
                 });
-            });
+            }
         });
 
         let winningOverloadIndex: number | undefined;
 
-        matches.forEach((match, matchIndex) => {
-            if (winningOverloadIndex === undefined) {
-                useSpeculativeMode(speculativeNode, () => {
-                    const callResult = validateArgTypes(
-                        errorNode,
-                        match,
-                        new ConstraintTracker(),
-                        /* skipUnknownArgCheck */ true
-                    );
-
-                    if (callResult && !callResult.argumentErrors) {
-                        winningOverloadIndex = matchIndex;
-                    }
-                });
+        for (let matchIndex = 0; matchIndex < matches.length; matchIndex++) {
+            if (winningOverloadIndex !== undefined) {
+                break;
             }
-        });
+            useSpeculativeMode(speculativeNode, () => {
+                const callResult = validateArgTypes(
+                    errorNode,
+                    matches[matchIndex],
+                    new ConstraintTracker(),
+                    /* skipUnknownArgCheck */ true
+                );
+
+                if (callResult && !callResult.argumentErrors) {
+                    winningOverloadIndex = matchIndex;
+                }
+            });
+        }
 
         return winningOverloadIndex === undefined ? undefined : matches[winningOverloadIndex].overload;
     }
@@ -9717,8 +9719,9 @@ export function createTypeEvaluator(
         // speculatively because we don't want to record any types in the type
         // cache or record any diagnostics at this stage.
         useSpeculativeMode(speculativeNode, () => {
-            let overloadIndex = 0;
-            OverloadedType.getOverloads(type).forEach((overload) => {
+            const overloads = OverloadedType.getOverloads(type);
+            for (let overloadIndex = 0; overloadIndex < overloads.length; overloadIndex++) {
+                const overload = overloads[overloadIndex];
                 // Consider only the functions that have the @overload decorator,
                 // not the final function that omits the overload. This is the
                 // intended behavior according to PEP 484.
@@ -9732,9 +9735,7 @@ export function createTypeEvaluator(
                 if (!matchResults.argumentErrors) {
                     filteredMatchResults.push(matchResults);
                 }
-
-                overloadIndex++;
-            });
+            }
         });
 
         // If there are no possible arg/param matches among the overloads,
@@ -10090,11 +10091,12 @@ export function createTypeEvaluator(
     ): CallResult {
         function touchArgTypes() {
             if (!isCallTypeIncomplete) {
-                argList.forEach((arg) => {
+                for (let tai = 0; tai < argList.length; tai++) {
+                    const arg = argList[tai];
                     if (arg.valueExpression && !isSpeculativeModeInUse(arg.valueExpression)) {
                         getTypeOfArg(arg, /* inferenceContext */ undefined);
                     }
-                });
+                }
             }
         }
 
@@ -11008,8 +11010,16 @@ export function createTypeEvaluator(
         // the keyword arguments may target one or more parameters that are positional.
         // In this case, we will limit the number of positional parameters so the
         // *args doesn't consume them all.
-        if (argList.some((arg) => arg.argCategory === ArgCategory.UnpackedList)) {
-            argList.forEach((arg) => {
+        let hasUnpackedListArg = false;
+        for (let ali = 0; ali < argList.length; ali++) {
+            if (argList[ali].argCategory === ArgCategory.UnpackedList) {
+                hasUnpackedListArg = true;
+                break;
+            }
+        }
+        if (hasUnpackedListArg) {
+            for (let ali = 0; ali < argList.length; ali++) {
+                const arg = argList[ali];
                 if (arg.name) {
                     const keywordParamIndex = paramDetails.params.findIndex((paramInfo) => {
                         assert(paramInfo, 'paramInfo entry is undefined fork kwargs check');
@@ -11028,7 +11038,7 @@ export function createTypeEvaluator(
                         }
                     }
                 }
-            });
+            }
         }
 
         // If we didn't see any special cases, then all parameters are positional.
@@ -11045,7 +11055,7 @@ export function createTypeEvaluator(
             }
         }
 
-        const foundUnpackedListArg = argList.find((arg) => arg.argCategory === ArgCategory.UnpackedList) !== undefined;
+        const foundUnpackedListArg = hasUnpackedListArg;
 
         // Map the positional args to parameters.
         let paramIndex = 0;
