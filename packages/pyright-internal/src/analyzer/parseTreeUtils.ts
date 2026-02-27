@@ -1680,10 +1680,10 @@ export class NameNodeWalker extends ParseTreeWalker {
         const prevBaseExpression = this._baseExpression;
         this._baseExpression = node.d.leftExpr;
 
-        node.d.items.forEach((item, index) => {
+        for (let index = 0; index < node.d.items.length; index++) {
             this._subscriptIndex = index;
-            this.walk(item);
-        });
+            this.walk(node.d.items[index]);
+        }
 
         this._subscriptIndex = prevSubscriptIndex;
         this._baseExpression = prevBaseExpression;
@@ -1758,9 +1758,10 @@ export function getCallNodeAndActiveParamIndex(
     let addedActive = false;
     let activeIndex = -1;
     let activeOrFake = false;
-    callNode.d.args.forEach((arg, index) => {
+    for (let index = 0; index < callNode.d.args.length; index++) {
+        const arg = callNode.d.args[index];
         if (addedActive) {
-            return;
+            continue;
         }
 
         // Calculate the argument's bounds including whitespace and colons.
@@ -1796,7 +1797,7 @@ export function getCallNodeAndActiveParamIndex(
             activeOrFake = insertionOffset >= start;
             addedActive = true;
         }
-    });
+    }
 
     if (!addedActive) {
         activeIndex = callNode.d.args.length + 1;
@@ -2075,11 +2076,11 @@ export function getFileInfoFromNode(node: ParseNode) {
 export function isFunctionSuiteEmpty(node: FunctionNode) {
     let isEmpty = true;
 
-    node.d.suite.d.statements.forEach((statement) => {
+    for (const statement of node.d.suite.d.statements) {
         if (statement.nodeType === ParseNodeType.Error) {
-            return;
+            continue;
         } else if (statement.nodeType === ParseNodeType.StatementList) {
-            statement.d.statements.forEach((subStatement) => {
+            for (const subStatement of statement.d.statements) {
                 // Allow docstrings, ellipsis, and pass statements.
                 if (
                     subStatement.nodeType !== ParseNodeType.Ellipsis &&
@@ -2088,11 +2089,11 @@ export function isFunctionSuiteEmpty(node: FunctionNode) {
                 ) {
                     isEmpty = false;
                 }
-            });
+            }
         } else {
             isEmpty = false;
         }
-    });
+    }
 
     return isEmpty;
 }
