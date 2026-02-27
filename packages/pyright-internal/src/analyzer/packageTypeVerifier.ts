@@ -185,13 +185,13 @@ export class PackageTypeVerifier {
                     // use this map to determine which diagnostics to report. We don't want
                     // to report diagnostics many times for types that include public types.
                     const publicSymbols = new Set<string>();
-                    publicModules.forEach((moduleName) => {
+                    for (const moduleName of publicModules) {
                         this._getPublicSymbolsForModule(moduleName, publicSymbols, report.alternateSymbolNames);
-                    });
+                    }
 
-                    publicModules.forEach((moduleName) => {
+                    for (const moduleName of publicModules) {
                         this._verifyTypesOfModule(moduleName, publicSymbols, report);
-                    });
+                    }
                 }
             }
         } catch (e: any) {
@@ -310,7 +310,7 @@ export class PackageTypeVerifier {
         symbolTable: SymbolTable,
         scopeType: ScopeType
     ) {
-        symbolTable.forEach((symbol, name) => {
+        for (const [name, symbol] of symbolTable) {
             if (
                 !isPrivateOrProtectedName(name) &&
                 !symbol.isIgnoredForProtocolMatch() &&
@@ -352,7 +352,7 @@ export class PackageTypeVerifier {
                     }
                 }
             }
-        });
+        }
     }
 
     private _addAlternateSymbolName(map: AlternateSymbolNameMap, name: string, altName: string) {
@@ -429,12 +429,12 @@ export class PackageTypeVerifier {
         const uniqueModules: string[] = [];
         const moduleMap = new Map<string, string>();
 
-        publicModules.forEach((module) => {
+        for (const module of publicModules) {
             if (!moduleMap.has(module)) {
                 uniqueModules.push(module);
                 moduleMap.set(module, module);
             }
-        });
+        }
 
         return uniqueModules;
     }
@@ -447,7 +447,7 @@ export class PackageTypeVerifier {
     ) {
         const dirEntries = this._serviceProvider.fs().readdirEntriesSync(dirPath);
 
-        dirEntries.forEach((entry) => {
+        for (const entry of dirEntries) {
             let isFile = entry.isFile();
             let isDirectory = entry.isDirectory();
             if (entry.isSymbolicLink()) {
@@ -493,7 +493,7 @@ export class PackageTypeVerifier {
                     );
                 }
             }
-        });
+        }
     }
 
     private _isLegalModulePartName(name: string): boolean {
@@ -522,7 +522,7 @@ export class PackageTypeVerifier {
 
         let knownStatus = TypeKnownStatus.Known;
 
-        symbolTable.forEach((symbol, name) => {
+        for (const [name, symbol] of symbolTable) {
             if (
                 !isPrivateOrProtectedName(name) &&
                 !symbol.isExternallyHidden() &&
@@ -538,7 +538,7 @@ export class PackageTypeVerifier {
                 const cachedSymbolInfo = report.symbols.get(fullName);
                 if (cachedSymbolInfo) {
                     cachedSymbolInfo.referenceCount++;
-                    return;
+                    continue;
                 }
 
                 let symbolType = this._program.getTypeOfSymbol(symbol);
@@ -591,7 +591,7 @@ export class PackageTypeVerifier {
                         primaryDecl?.type === DeclarationType.Variable &&
                         primaryDecl.isDefinedBySlots
                     ) {
-                        return;
+                        continue;
                     }
 
                     symbolInfo = {
@@ -678,7 +678,7 @@ export class PackageTypeVerifier {
 
                 knownStatus = this._updateKnownStatusIfWorse(knownStatus, symbolInfo.typeKnownStatus);
             }
-        });
+        }
 
         return knownStatus;
     }
@@ -764,7 +764,8 @@ export class PackageTypeVerifier {
 
         const aliasInfo = type.props?.typeAliasInfo;
         if (aliasInfo?.typeArgs) {
-            aliasInfo.typeArgs.forEach((typeArg, index) => {
+            for (let index = 0; index < aliasInfo.typeArgs.length; index++) {
+                const typeArg = aliasInfo.typeArgs[index];
                 if (isUnknown(typeArg)) {
                     this._addSymbolError(
                         symbolInfo,
@@ -784,7 +785,7 @@ export class PackageTypeVerifier {
                     );
                     knownStatus = TypeKnownStatus.PartiallyUnknown;
                 }
-            });
+            }
         }
 
         if (TypeBase.isAmbiguous(type) && !isUnknown(type)) {
@@ -884,12 +885,12 @@ export class PackageTypeVerifier {
 
                     const propertyClass = type;
 
-                    propMethodInfo.forEach((info) => {
+                    for (const info of propMethodInfo) {
                         const methodAccessor = info[1];
                         let accessType = methodAccessor(propertyClass);
 
                         if (!accessType) {
-                            return;
+                            continue;
                         }
 
                         if (isFunction(accessType)) {
@@ -914,7 +915,7 @@ export class PackageTypeVerifier {
                                 publicSymbols
                             )
                         );
-                    });
+                    }
 
                     break;
                 }
@@ -929,7 +930,8 @@ export class PackageTypeVerifier {
 
                 // Analyze type arguments if present to make sure they are known.
                 if (type.priv.typeArgs) {
-                    type.priv.typeArgs!.forEach((typeArg, index) => {
+                    for (let index = 0; index < type.priv.typeArgs!.length; index++) {
+                        const typeArg = type.priv.typeArgs![index];
                         if (isUnknown(typeArg)) {
                             this._addSymbolError(
                                 symbolInfo,
@@ -951,7 +953,7 @@ export class PackageTypeVerifier {
                             );
                             knownStatus = this._updateKnownStatusIfWorse(knownStatus, TypeKnownStatus.PartiallyUnknown);
                         }
-                    });
+                    }
                 }
 
                 break;
@@ -997,7 +999,8 @@ export class PackageTypeVerifier {
             declFileUri = type.shared.declaration.uri;
         }
 
-        type.shared.parameters.forEach((param, index) => {
+        for (let index = 0; index < type.shared.parameters.length; index++) {
+            const param = type.shared.parameters[index];
             const paramType = FunctionType.getParamType(type, index);
 
             // Skip nameless parameters like "*" and "/".
@@ -1068,7 +1071,7 @@ export class PackageTypeVerifier {
                     }
                 }
             }
-        });
+        }
 
         if (type.shared.declaredReturnType) {
             if (isUnknown(type.shared.declaredReturnType)) {
@@ -1232,7 +1235,7 @@ export class PackageTypeVerifier {
         }
 
         // Add information for base classes.
-        type.shared.baseClasses.forEach((baseClass) => {
+        for (const baseClass of type.shared.baseClasses) {
             if (!isInstantiableClass(baseClass)) {
                 this._addSymbolError(symbolInfo, `Type of base class unknown`, getEmptyRange(), Uri.empty());
                 symbolInfo.typeKnownStatus = this._updateKnownStatusIfWorse(
@@ -1243,7 +1246,7 @@ export class PackageTypeVerifier {
                 // Handle "tuple" specially. Even though it's a generic class, it
                 // doesn't require a type argument.
                 if (ClassType.isBuiltIn(baseClass, 'tuple')) {
-                    return;
+                    continue;
                 }
 
                 const diag = new DiagnosticAddendum();
@@ -1263,7 +1266,7 @@ export class PackageTypeVerifier {
                     );
                 }
             }
-        });
+        }
 
         return symbolInfo;
     }
@@ -1323,7 +1326,8 @@ export class PackageTypeVerifier {
 
         const aliasInfo = type.props?.typeAliasInfo;
         if (aliasInfo?.typeArgs) {
-            aliasInfo.typeArgs.forEach((typeArg, index) => {
+            for (let index = 0; index < aliasInfo.typeArgs.length; index++) {
+                const typeArg = aliasInfo.typeArgs[index];
                 if (isUnknown(typeArg)) {
                     diag.addMessage(
                         `Type argument ${index + 1} for type alias "${aliasInfo!.shared.name}" has unknown type`
@@ -1337,7 +1341,7 @@ export class PackageTypeVerifier {
                     );
                     knownStatus = this._updateKnownStatusIfWorse(knownStatus, TypeKnownStatus.PartiallyUnknown);
                 }
-            });
+            }
         }
 
         if (TypeBase.isAmbiguous(type)) {
@@ -1408,7 +1412,8 @@ export class PackageTypeVerifier {
 
                 // Analyze type arguments if present to make sure they are known.
                 if (type.priv.typeArgs) {
-                    type.priv.typeArgs!.forEach((typeArg, index) => {
+                    for (let index = 0; index < type.priv.typeArgs!.length; index++) {
+                        const typeArg = type.priv.typeArgs![index];
                         if (isUnknown(typeArg)) {
                             diag.addMessage(
                                 `Type argument ${index + 1} for class "${type.shared.name}" has unknown type`
@@ -1420,7 +1425,7 @@ export class PackageTypeVerifier {
                             );
                             knownStatus = this._updateKnownStatusIfWorse(knownStatus, TypeKnownStatus.PartiallyUnknown);
                         }
-                    });
+                    }
                 }
 
                 break;
