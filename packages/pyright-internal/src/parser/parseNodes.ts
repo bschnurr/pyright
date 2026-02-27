@@ -640,10 +640,10 @@ export namespace ClassNode {
             },
         };
 
-        decorators.forEach((decorator) => {
+        for (const decorator of decorators) {
             decorator.parent = node;
             extendRange(node, decorator);
-        });
+        }
 
         node.d.name.parent = node;
         node.d.suite.parent = node;
@@ -885,9 +885,9 @@ export namespace ErrorNode {
         }
 
         if (decorators) {
-            decorators.forEach((decorator) => {
+            for (const decorator of decorators) {
                 decorator.parent = node;
-            });
+            }
 
             if (decorators.length > 0) {
                 extendRange(node, decorators[0]);
@@ -1115,10 +1115,10 @@ export namespace TypeParameterListNode {
 
         extendRange(node, endToken);
 
-        params.forEach((param) => {
+        for (const param of params) {
             extendRange(node, param);
             param.parent = node;
-        });
+        }
 
         return node;
     }
@@ -1228,9 +1228,9 @@ export namespace FunctionAnnotationNode {
             },
         };
 
-        paramAnnotations.forEach((p) => {
+        for (const p of paramAnnotations) {
             p.parent = node;
-        });
+        }
         returnAnnotation.parent = node;
 
         extendRange(node, returnAnnotation);
@@ -1429,9 +1429,9 @@ export namespace CallNode {
         leftExpr.parent = node;
 
         if (args.length > 0) {
-            args.forEach((arg) => {
+            for (const arg of args) {
                 arg.parent = node;
-            });
+            }
             extendRange(node, args[args.length - 1]);
         }
 
@@ -1501,9 +1501,9 @@ export namespace IndexNode {
         };
 
         leftExpr.parent = node;
-        items.forEach((item) => {
+        for (const item of items) {
             item.parent = node;
-        });
+        }
 
         extendRange(node, closeBracketToken);
 
@@ -1806,16 +1806,16 @@ export namespace FormatStringNode {
             },
         };
 
-        fieldExprs.forEach((expr) => {
+        for (const expr of fieldExprs) {
             expr.parent = node;
             extendRange(node, expr);
-        });
+        }
 
         if (formatExprs) {
-            formatExprs.forEach((expr) => {
+            for (const expr of formatExprs) {
                 expr.parent = node;
                 extendRange(node, expr);
-            });
+            }
         }
 
         if (endToken) {
@@ -1857,9 +1857,9 @@ export namespace StringListNode {
         };
 
         if (strings.length > 0) {
-            strings.forEach((str) => {
+            for (const str of strings) {
                 str.parent = node;
-            });
+            }
             extendRange(node, strings[strings.length - 1]);
         }
 
@@ -2469,9 +2469,9 @@ export namespace PatternSequenceNode {
             extendRange(node, entries[entries.length - 1]);
         }
 
-        entries.forEach((entry) => {
+        for (const entry of entries) {
             entry.parent = node;
-        });
+        }
 
         return node;
     }
@@ -2503,9 +2503,9 @@ export namespace PatternAsNode {
             extendRange(node, orPatterns[orPatterns.length - 1]);
         }
 
-        orPatterns.forEach((pattern) => {
+        for (const pattern of orPatterns) {
             pattern.parent = node;
-        });
+        }
 
         if (target) {
             extendRange(node, target);
@@ -2563,9 +2563,9 @@ export namespace PatternClassNode {
         };
 
         className.parent = node;
-        args.forEach((arg) => {
+        for (const arg of args) {
             arg.parent = node;
-        });
+        }
 
         if (args.length > 0) {
             extendRange(node, args[args.length - 1]);
@@ -2664,9 +2664,9 @@ export namespace PatternMappingNode {
             extendRange(node, entries[entries.length - 1]);
         }
 
-        entries.forEach((entry) => {
+        for (const entry of entries) {
             entry.parent = node;
-        });
+        }
 
         return node;
     }
