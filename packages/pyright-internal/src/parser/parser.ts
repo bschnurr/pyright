@@ -845,16 +845,16 @@ export class Parser {
 
         switch (node.nodeType) {
             case ParseNodeType.PatternSequence: {
-                node.d.entries.forEach((subpattern) => {
+                for (const subpattern of node.d.entries) {
                     this._reportDuplicatePatternCaptureTargets(subpattern, globalNameMap, localNameMap);
-                });
+                }
                 break;
             }
 
             case ParseNodeType.PatternClass: {
-                node.d.args.forEach((arg) => {
+                for (const arg of node.d.args) {
                     this._reportDuplicatePatternCaptureTargets(arg.d.pattern, globalNameMap, localNameMap);
-                });
+                }
                 break;
             }
 
@@ -870,14 +870,14 @@ export class Parser {
                 });
 
                 const combinedLocalOrNameMap = new Map<string, NameNode>();
-                orLocalNameMaps.forEach((orLocalNameMap) => {
-                    orLocalNameMap.forEach((node) => {
+                for (const orLocalNameMap of orLocalNameMaps) {
+                    for (const node of orLocalNameMap.values()) {
                         if (!combinedLocalOrNameMap.has(node.d.value)) {
                             combinedLocalOrNameMap.set(node.d.value, node);
                             reportTargetIfDuplicate(node);
                         }
-                    });
-                });
+                    }
+                }
                 break;
             }
 
@@ -889,7 +889,7 @@ export class Parser {
             }
 
             case ParseNodeType.PatternMapping: {
-                node.d.entries.forEach((mapEntry) => {
+                for (const mapEntry of node.d.entries) {
                     if (mapEntry.nodeType === ParseNodeType.PatternMappingExpandEntry) {
                         reportTargetIfDuplicate(mapEntry.d.target);
                     } else {
@@ -900,7 +900,7 @@ export class Parser {
                             localNameMap
                         );
                     }
-                });
+                }
                 break;
             }
 
@@ -915,16 +915,16 @@ export class Parser {
     private _getPatternTargetNames(node: PatternAtomNode, nameSet: Set<string>): void {
         switch (node.nodeType) {
             case ParseNodeType.PatternSequence: {
-                node.d.entries.forEach((subpattern) => {
+                for (const subpattern of node.d.entries) {
                     this._getPatternTargetNames(subpattern, nameSet);
-                });
+                }
                 break;
             }
 
             case ParseNodeType.PatternClass: {
-                node.d.args.forEach((arg) => {
+                for (const arg of node.d.args) {
                     this._getPatternTargetNames(arg.d.pattern, nameSet);
-                });
+                }
                 break;
             }
 
@@ -932,9 +932,9 @@ export class Parser {
                 if (node.d.target) {
                     nameSet.add(node.d.target.d.value);
                 }
-                node.d.orPatterns.forEach((subpattern) => {
+                for (const subpattern of node.d.orPatterns) {
                     this._getPatternTargetNames(subpattern, nameSet);
-                });
+                }
                 break;
             }
 
@@ -946,14 +946,14 @@ export class Parser {
             }
 
             case ParseNodeType.PatternMapping: {
-                node.d.entries.forEach((mapEntry) => {
+                for (const mapEntry of node.d.entries) {
                     if (mapEntry.nodeType === ParseNodeType.PatternMappingExpandEntry) {
                         nameSet.add(mapEntry.d.target.d.value);
                     } else {
                         this._getPatternTargetNames(mapEntry.d.keyPattern, nameSet);
                         this._getPatternTargetNames(mapEntry.d.valuePattern, nameSet);
                     }
-                });
+                }
                 break;
             }
 
@@ -999,11 +999,11 @@ export class Parser {
 
         if (orPatterns.length > 1) {
             // Star patterns cannot be ORed with other patterns.
-            orPatterns.forEach((patternAtom) => {
+            for (const patternAtom of orPatterns) {
                 if (patternAtom.nodeType === ParseNodeType.PatternCapture && patternAtom.d.isStar) {
                     this._addSyntaxError(LocMessage.starPatternInOrPattern(), patternAtom);
                 }
-            });
+            }
         }
 
         let target: NameNode | undefined;
@@ -1027,19 +1027,20 @@ export class Parser {
         }
 
         // Validate that irrefutable patterns are not in any entries other than the last.
-        orPatterns.forEach((orPattern, index) => {
+        for (let index = 0; index < orPatterns.length; index++) {
+            const orPattern = orPatterns[index];
             if (index < orPatterns.length - 1 && this._isPatternIrrefutable(orPattern)) {
                 this._addSyntaxError(LocMessage.orPatternIrrefutable(), orPattern);
             }
-        });
+        }
 
         // Validate that all bound variables are the same within all or patterns.
         const fullNameSet = new Set<string>();
-        orPatterns.forEach((orPattern) => {
+        for (const orPattern of orPatterns) {
             this._getPatternTargetNames(orPattern, fullNameSet);
-        });
+        }
 
-        orPatterns.forEach((orPattern) => {
+        for (const orPattern of orPatterns) {
             const localNameSet = new Set<string>();
             this._getPatternTargetNames(orPattern, localNameSet);
 
@@ -1053,7 +1054,7 @@ export class Parser {
                 );
                 this._addSyntaxError(LocMessage.orPatternMissingName() + diag.getString(), orPattern);
             }
-        });
+        }
 
         return PatternAsNode.create(orPatterns, target);
     }
@@ -1271,11 +1272,11 @@ export class Parser {
             assert(stringList.nodeType === ParseNodeType.StringList);
 
             // Check for f-strings, which are not allowed.
-            stringList.d.strings.forEach((stringAtom) => {
+            for (const stringAtom of stringList.d.strings) {
                 if (stringAtom.nodeType === ParseNodeType.FormatString) {
                     this._addSyntaxError(LocMessage.formatStringInPattern(), stringAtom);
                 }
-            });
+            }
 
             return PatternLiteralNode.create(stringList);
         }
@@ -1699,12 +1700,12 @@ export class Parser {
             ) {
                 if (seqExpr.nodeType === ParseNodeType.Tuple && !seqExpr.d.hasParens) {
                     let sawStar = false;
-                    seqExpr.d.items.forEach((expr) => {
+                    for (const expr of seqExpr.d.items) {
                         if (expr.nodeType === ParseNodeType.Unpack && !sawStar) {
                             this._addSyntaxError(LocMessage.unpackOperatorNotAllowed(), expr);
                             sawStar = true;
                         }
-                    });
+                    }
                 }
             }
 
@@ -1761,9 +1762,9 @@ export class Parser {
 
         compNode.d.forIfNodes = forIfList;
         if (forIfList.length > 0) {
-            forIfList.forEach((comp) => {
+            for (const comp of forIfList) {
                 comp.parent = compNode;
-            });
+            }
             extendRange(compNode, forIfList[forIfList.length - 1]);
         }
         return compNode;
@@ -2067,15 +2068,15 @@ export class Parser {
         }
 
         functionNode.d.params = paramList;
-        paramList.forEach((param) => {
+        for (const param of paramList) {
             param.parent = functionNode;
-        });
+        }
 
         if (decorators) {
             functionNode.d.decorators = decorators;
-            decorators.forEach((decorator) => {
+            for (const decorator of decorators) {
                 decorator.parent = functionNode;
-            });
+            }
 
             if (decorators.length > 0) {
                 extendRange(functionNode, decorators[0]);
@@ -2395,9 +2396,9 @@ export class Parser {
         }
 
         withNode.d.withItems = withItemList;
-        withItemList.forEach((withItem) => {
+        for (const withItem of withItemList) {
             withItem.parent = withNode;
-        });
+        }
 
         return withNode;
     }
@@ -2535,16 +2536,16 @@ export class Parser {
 
         const classNode = ClassNode.create(classToken, NameNode.create(nameToken), suite, typeParameters);
         classNode.d.arguments = argList;
-        argList.forEach((arg) => {
+        for (const arg of argList) {
             arg.parent = classNode;
-        });
+        }
 
         if (decorators) {
             classNode.d.decorators = decorators;
             if (decorators.length > 0) {
-                decorators.forEach((decorator) => {
+                for (const decorator of decorators) {
                     decorator.parent = classNode;
-                });
+                }
                 extendRange(classNode, decorators[0]);
             }
         }
@@ -2733,15 +2734,15 @@ export class Parser {
             const typingSymbolsOfInterest = ['Literal', 'TypeAlias', 'Annotated'];
 
             if (importFromNode.d.isWildcardImport) {
-                typingSymbolsOfInterest.forEach((s) => {
+                for (const s of typingSymbolsOfInterest) {
                     this._typingSymbolAliases.set(s, s);
-                });
+                }
             } else {
-                importFromNode.d.imports.forEach((imp) => {
+                for (const imp of importFromNode.d.imports) {
                     if (typingSymbolsOfInterest.some((s) => s === imp.d.name.d.value)) {
                         this._typingSymbolAliases.set(imp.d.alias?.d.value || imp.d.name.d.value, imp.d.name.d.value);
                     }
-                });
+                }
             }
         }
 
@@ -2795,14 +2796,14 @@ export class Parser {
             } else {
                 // Implicitly import all modules in the multi-part name if we
                 // are not assigning the final module to an alias.
-                importAsNode.d.module.d.nameParts.forEach((_, index) => {
+                for (let index = 0; index < importAsNode.d.module.d.nameParts.length; index++) {
                     this._importedModules.push({
                         nameNode: importAsNode.d.module,
                         leadingDots: importAsNode.d.module.d.leadingDots,
                         nameParts: nameParts.slice(0, index + 1),
                         importedSymbols: undefined,
                     });
-                });
+                }
             }
 
             if (modName.d.nameParts.length === 1) {
@@ -2877,9 +2878,9 @@ export class Parser {
         const globalNode = GlobalNode.create(globalToken);
         globalNode.d.targets = this._parseNameList();
         if (globalNode.d.targets.length > 0) {
-            globalNode.d.targets.forEach((name) => {
+            for (const name of globalNode.d.targets) {
                 name.parent = globalNode;
-            });
+            }
             extendRange(globalNode, globalNode.d.targets[globalNode.d.targets.length - 1]);
         }
         return globalNode;
@@ -2891,9 +2892,9 @@ export class Parser {
         const nonlocalNode = NonlocalNode.create(nonlocalToken);
         nonlocalNode.d.targets = this._parseNameList();
         if (nonlocalNode.d.targets.length > 0) {
-            nonlocalNode.d.targets.forEach((name) => {
+            for (const name of nonlocalNode.d.targets) {
                 name.parent = nonlocalNode;
-            });
+            }
             extendRange(nonlocalNode, nonlocalNode.d.targets[nonlocalNode.d.targets.length - 1]);
         }
         return nonlocalNode;
@@ -2968,9 +2969,9 @@ export class Parser {
         const delNode = DelNode.create(delToken);
         delNode.d.targets = exprListResult.list;
         if (delNode.d.targets.length > 0) {
-            delNode.d.targets.forEach((expr) => {
+            for (const expr of delNode.d.targets) {
                 expr.parent = delNode;
-            });
+            }
             extendRange(delNode, delNode.d.targets[delNode.d.targets.length - 1]);
         }
         return delNode;
@@ -3170,9 +3171,9 @@ export class Parser {
         const tupleNode = TupleNode.create(tupleStartRange, enclosedInParens);
         tupleNode.d.items = exprListResult.list;
         if (exprListResult.list.length > 0) {
-            exprListResult.list.forEach((expr) => {
+            for (const expr of exprListResult.list) {
                 expr.parent = tupleNode;
-            });
+            }
             extendRange(tupleNode, exprListResult.list[exprListResult.list.length - 1]);
         }
 
@@ -3650,13 +3651,13 @@ export class Parser {
                 const callNode = CallNode.create(atomExpression, argListResult.args, argListResult.trailingComma);
 
                 if (argListResult.args.length > 1 || argListResult.trailingComma) {
-                    argListResult.args.forEach((arg) => {
+                    for (const arg of argListResult.args) {
                         if (arg.d.valueExpr.nodeType === ParseNodeType.Comprehension) {
                             if (!arg.d.valueExpr.d.hasParens) {
                                 this._addSyntaxError(LocMessage.generatorNotParenthesized(), arg.d.valueExpr);
                             }
                         }
-                    });
+                    }
                 }
 
                 const nextToken = this._peekToken();
@@ -4173,9 +4174,9 @@ export class Parser {
 
         const lambdaNode = LambdaNode.create(lambdaToken, testExpr);
         lambdaNode.d.params = argList;
-        argList.forEach((arg) => {
+        for (const arg of argList) {
             arg.parent = lambdaNode;
-        });
+        }
         return lambdaNode;
     }
 
@@ -4255,9 +4256,9 @@ export class Parser {
             }
 
             if (exprListResult.list.length > 0) {
-                exprListResult.list.forEach((expr) => {
+                for (const expr of exprListResult.list) {
                     expr.parent = listAtom;
-                });
+                }
                 extendRange(listAtom, exprListResult.list[exprListResult.list.length - 1]);
             }
 
@@ -4436,9 +4437,9 @@ export class Parser {
                 extendRange(setAtom, setEntries[setEntries.length - 1]);
             }
 
-            setEntries.forEach((entry) => {
+            for (const entry of setEntries) {
                 entry.parent = setAtom;
-            });
+            }
 
             setAtom.d.items = setEntries;
             return setAtom;
@@ -4456,9 +4457,9 @@ export class Parser {
         }
 
         if (dictionaryEntries.length > 0) {
-            dictionaryEntries.forEach((entry) => {
+            for (const entry of dictionaryEntries) {
                 entry.parent = dictionaryAtom;
-            });
+            }
             extendRange(dictionaryAtom, dictionaryEntries[dictionaryEntries.length - 1]);
         }
         dictionaryAtom.d.items = dictionaryEntries;
@@ -4637,11 +4638,12 @@ export class Parser {
             }
         }
 
-        assignmentTargets.forEach((target, index) => {
+        for (let index = 0; index < assignmentTargets.length; index++) {
+            const target = assignmentTargets[index];
             if (index > 0) {
                 assignmentNode = AssignmentNode.create(target, assignmentNode);
             }
-        });
+        }
 
         return assignmentNode;
     }
@@ -4839,9 +4841,9 @@ export class Parser {
             this._typingSymbolAliases
         );
 
-        parseResults.diagnostics.forEach((diag) => {
+        for (const diag of parseResults.diagnostics) {
             this._addSyntaxError(diag.message, stringListNode);
-        });
+        }
 
         if (!parseResults.parseTree) {
             return undefined;
@@ -4864,9 +4866,9 @@ export class Parser {
             this._typingSymbolAliases
         );
 
-        parseResults.diagnostics.forEach((diag) => {
+        for (const diag of parseResults.diagnostics) {
             this._addSyntaxError(diag.message, stringListNode);
-        });
+        }
 
         if (!parseResults.parseTree) {
             return;
@@ -5152,9 +5154,9 @@ export class Parser {
                         parseResults.diagnostics.length === 0 ||
                         this._parseOptions.reportErrorsForParsedStringContents
                     ) {
-                        parseResults.diagnostics.forEach((diag) => {
+                        for (const diag of parseResults.diagnostics) {
                             this._addSyntaxError(diag.message, stringNode);
-                        });
+                        }
 
                         if (parseResults.parseTree) {
                             stringNode.d.annotation = parseResults.parseTree;
