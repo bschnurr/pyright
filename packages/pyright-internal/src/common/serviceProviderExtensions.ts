@@ -37,7 +37,7 @@ export function createServiceProvider(...services: any): ServiceProvider {
     const sp = new ServiceProvider();
 
     // For known interfaces, register the service.
-    services.forEach((service: any) => {
+    for (const service of services) {
         if (FileSystem.is(service)) {
             sp.add(ServiceKeys.fs, service);
         }
@@ -71,7 +71,7 @@ export function createServiceProvider(...services: any): ServiceProvider {
         if (CancellationProvider.is(service)) {
             sp.add(ServiceKeys.cancellationProvider, service);
         }
-    });
+    }
     return sp;
 }
 

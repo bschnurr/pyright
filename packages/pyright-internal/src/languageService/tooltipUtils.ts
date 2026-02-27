@@ -165,9 +165,9 @@ export function getConstructorTooltip(
         const overloads = OverloadedType.getOverloads(type).map((overload) =>
             getConstructorTooltip(constructorName, overload, evaluator, functionSignatureDisplay)
         );
-        overloads.forEach((overload, index) => {
+        for (const overload of overloads) {
             signature += overload + ': ...' + '\n\n';
-        });
+        }
     } else if (isFunction(type)) {
         const indentStr =
             functionSignatureDisplay === SignatureDisplayType.formatted

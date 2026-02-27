@@ -385,11 +385,11 @@ export function addIfUnique<T>(arr: T[], t: T, equalityComparer: EqualityCompare
 
 export function getMapValues<K, V>(m: Map<K, V>, predicate: (k: K, v: V) => boolean): V[] {
     const values: V[] = [];
-    m.forEach((v, k) => {
+    for (const [k, v] of m) {
         if (predicate(k, v)) {
             values.push(v);
         }
-    });
+    }
 
     return values;
 }

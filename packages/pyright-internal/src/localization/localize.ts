@@ -30,9 +30,9 @@ export class ParameterizedString<T extends {}> {
 
     format(params: T): string {
         let str = this._formatString;
-        Object.keys(params).forEach((key) => {
+        for (const key of Object.keys(params)) {
             str = str.replace(new RegExp(`{${key}}`, 'g'), (params as any)[key].toString());
-        });
+        }
         return str;
     }
 

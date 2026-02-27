@@ -260,7 +260,9 @@ export class ConsoleWithLogLevel implements ConsoleInterface, Chainable, Clonabl
     }
 
     private _processChains(level: LogLevel, message: string) {
-        this._chains.forEach((c) => log(c, level, message));
+        for (const c of this._chains) {
+            log(c, level, message);
+        }
     }
 }
 

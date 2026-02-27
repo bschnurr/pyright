@@ -60,13 +60,13 @@ export class FileWatcherDynamicFeature extends DynamicFeature {
                     .filter(isDefined)
             );
 
-            foldersToWatch.forEach((p) => {
+            for (const p of foldersToWatch) {
                 const globPattern = isFile(this._fs, p, /* treatZipDirectoryAsFile */ true)
                     ? { baseUri: p.getDirectory().toString(), pattern: p.fileName }
                     : { baseUri: p.toString(), pattern: '**' };
 
                 watchers.push({ globPattern, kind: watchKind });
-            });
+            }
         }
 
         return this._connection.client.register(DidChangeWatchedFilesNotification.type, { watchers });

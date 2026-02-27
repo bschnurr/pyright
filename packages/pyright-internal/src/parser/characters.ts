@@ -248,7 +248,7 @@ function _buildIdentifierLookupTableFromSurrogateRangeTable(
 function _buildIdentifierLookupTable(fastTableOnly: boolean): void {
     _identifierCharFastTable.fill(CharCategory.NotIdentifierChar);
 
-    _identifierCharRanges.forEach((table) => {
+    for (const table of _identifierCharRanges) {
         _buildIdentifierLookupTableFromUnicodeRangeTable(
             table,
             CharCategory.IdentifierChar,
@@ -256,9 +256,9 @@ function _buildIdentifierLookupTable(fastTableOnly: boolean): void {
             _identifierCharFastTable,
             _identifierCharMap
         );
-    });
+    }
 
-    _startIdentifierCharRanges.forEach((table) => {
+    for (const table of _startIdentifierCharRanges) {
         _buildIdentifierLookupTableFromUnicodeRangeTable(
             table,
             CharCategory.StartIdentifierChar,
@@ -266,7 +266,7 @@ function _buildIdentifierLookupTable(fastTableOnly: boolean): void {
             _identifierCharFastTable,
             _identifierCharMap
         );
-    });
+    }
 
     // Populate the surrogate tables for characters that require two
     // character codes.

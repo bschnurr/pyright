@@ -292,9 +292,9 @@ export class HoverProvider {
                 this._addResultsForDeclaration(results.parts, primaryDeclaration, node);
             } else if (declInfo && declInfo.synthesizedTypes.length > 0) {
                 const nameNode = node;
-                declInfo?.synthesizedTypes.forEach((type) => {
+                for (const type of declInfo.synthesizedTypes) {
                     this._addResultsForSynthesizedType(results.parts, type, nameNode);
-                });
+                }
                 this._addDocumentationPart(results.parts, node, /* resolvedDecl */ undefined);
             } else if (!node.parent || node.parent.nodeType !== ParseNodeType.ModuleName) {
                 // If we had no declaration, see if we can provide a minimal tooltip. We'll skip

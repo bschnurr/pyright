@@ -119,14 +119,14 @@ export class RenameProvider {
         }
 
         const edits: FileEditAction[] = [];
-        referencesResult.results.forEach((result) => {
+        for (const result of referencesResult.results) {
             // Special case the renames of keyword arguments.
             edits.push({
                 fileUri: result.location.uri,
                 range: result.location.range,
                 replacementText: newName,
             });
-        });
+        }
 
         return convertToWorkspaceEdit(this._program.fileSystem, { edits, fileOperations: [] });
     }

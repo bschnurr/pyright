@@ -105,9 +105,9 @@ function collectSymbolIndexData(
     }
 
     const symbolTable = scope.symbolTable;
-    symbolTable.forEach((symbol, name) => {
+    for (const [name, symbol] of symbolTable) {
         if (symbol.isIgnoredForProtocolMatch()) {
-            return;
+            continue;
         }
 
         // Prefer declarations with a defined type.
@@ -119,11 +119,11 @@ function collectSymbolIndexData(
         }
 
         if (!declaration) {
-            return;
+            continue;
         }
 
         if (DeclarationType.Alias === declaration.type && !shouldAliasBeIndexed(declaration, indexOptions)) {
-            return;
+            continue;
         }
 
         // We rely on ExternallyHidden flag to determine what
@@ -138,7 +138,7 @@ function collectSymbolIndexData(
             indexSymbolData,
             token
         );
-    });
+    }
 }
 
 function collectSymbolIndexDataForName(

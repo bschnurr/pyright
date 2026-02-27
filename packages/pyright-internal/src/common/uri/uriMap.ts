@@ -23,9 +23,9 @@ export class UriMap<T> implements Map<Uri, T> {
         this._values.clear();
     }
     forEach(callbackfn: (value: T, key: Uri, map: Map<Uri, T>) => void, thisArg?: any): void {
-        this._keys.forEach((v, k) => {
+        for (const [k, v] of this._keys) {
             callbackfn(this._values.get(k)!, v, this);
-        });
+        }
     }
     values(): IterableIterator<T> {
         return this._values.values();

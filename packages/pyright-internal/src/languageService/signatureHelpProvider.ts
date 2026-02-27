@@ -241,7 +241,8 @@ export class SignatureHelpProvider {
         let activeParameter: number | undefined;
         const params = functionType.shared.parameters;
 
-        stringParts[0].forEach((paramString: string, paramIndex) => {
+        for (let paramIndex = 0; paramIndex < stringParts[0].length; paramIndex++) {
+            const paramString = stringParts[0][paramIndex];
             let paramName = '';
             if (paramIndex < params.length) {
                 paramName = params[paramIndex].name || '';
@@ -273,7 +274,7 @@ export class SignatureHelpProvider {
 
                 label += paramString;
             }
-        });
+        }
 
         label += ') -> ' + stringParts[1];
 

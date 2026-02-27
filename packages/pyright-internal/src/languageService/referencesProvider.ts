@@ -358,10 +358,10 @@ export class ReferencesProvider {
             .filter(isDefined);
 
         // Check whether we need to add new symbol names and declarations.
-        providers.forEach((p) => {
+        for (const p of providers) {
             p.appendSymbolNamesTo(symbolNames);
             p.appendDeclarationsTo(declarations);
-        });
+        }
 
         return new ReferencesResult(
             requiresGlobalSearch,

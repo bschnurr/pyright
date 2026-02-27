@@ -116,7 +116,9 @@ export function setupCombinedTokensFor(source: AbstractCancellationTokenSource, 
 
     disposables.push(
         onCancellationRequested(source.token, () => {
-            disposables.forEach((d) => d.dispose());
+            for (const d of disposables) {
+                d.dispose();
+            }
         })
     );
 }

@@ -134,7 +134,9 @@ export class PartialStubService implements SupportPartialStubs {
     clearPartialStubs(): void {
         this._rootSearched.clear();
         this._partialStubPackagePaths.clear();
-        this._movedDirectories.forEach((d) => d.dispose());
+        for (const d of this._movedDirectories) {
+            d.dispose();
+        }
         this._movedDirectories = [];
     }
 

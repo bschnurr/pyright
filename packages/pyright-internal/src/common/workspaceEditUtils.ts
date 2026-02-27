@@ -67,11 +67,11 @@ export function convertToWorkspaceEdit(
 }
 
 export function appendToWorkspaceEdit(fs: ReadOnlyFileSystem, edits: FileEditAction[], workspaceEdit: WorkspaceEdit) {
-    edits.forEach((edit) => {
+    for (const edit of edits) {
         const uri = convertUriToLspUriString(fs, edit.fileUri);
         workspaceEdit.changes![uri] = workspaceEdit.changes![uri] || [];
         workspaceEdit.changes![uri].push({ range: edit.range, newText: edit.replacementText });
-    });
+    }
 }
 
 export function applyTextEditsToString(

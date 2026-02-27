@@ -340,24 +340,31 @@ export function getDirectoryChangeKind(
 export function deduplicateFolders(listOfFolders: Uri[][], excludes: Uri[] = []): Uri[] {
     const foldersToWatch = new Map<string, Uri>();
 
-    listOfFolders.forEach((folders) => {
-        folders.forEach((p) => {
+    for (const folders of listOfFolders) {
+        for (const p of folders) {
             if (foldersToWatch.has(p.key)) {
                 // Bail out on exact match.
-                return;
+                continue;
             }
 
+            let excluded = false;
             for (const exclude of excludes) {
                 if (p.startsWith(exclude)) {
-                    return;
+                    excluded = true;
+                    break;
                 }
             }
+            if (excluded) {
+                continue;
+            }
 
+            let handled = false;
             for (const existing of foldersToWatch) {
                 // ex) p: "/user/test" existing: "/user"
                 if (p.startsWith(existing[1])) {
                     // We already have the parent folder in the watch list
-                    return;
+                    handled = true;
+                    break;
                 }
 
                 // ex) p: "/user" folderToWatch: "/user/test"
@@ -365,13 +372,16 @@ export function deduplicateFolders(listOfFolders: Uri[][], excludes: Uri[] = [])
                     // We found better one to watch. replace.
                     foldersToWatch.delete(existing[0]);
                     foldersToWatch.set(p.key, p);
-                    return;
+                    handled = true;
+                    break;
                 }
             }
 
-            foldersToWatch.set(p.key, p);
-        });
-    });
+            if (!handled) {
+                foldersToWatch.set(p.key, p);
+            }
+        }
+    }
 
     return [...foldersToWatch.values()];
 }

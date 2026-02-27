@@ -367,11 +367,11 @@ function getVarianceString(type: Variance) {
 
 function getFlagEnumString<E extends number>(enumMap: [E, string][], enumValue: E): string {
     const str: string[] = [];
-    enumMap.forEach((e) => {
+    for (const e of enumMap) {
         if (enumValue & e[0]) {
             str.push(e[1]);
         }
-    });
+    }
     if (str.length === 0) {
         if (enumValue === 0) {
             return 'None';

@@ -99,9 +99,9 @@ export class FullAccessHost extends LimitedAccessHost {
         }
 
         importLogger?.log(`Received ${result.paths.length} paths from interpreter`);
-        result.paths.forEach((path) => {
+        for (const path of result.paths) {
             importLogger?.log(`  ${path}`);
-        });
+        }
 
         return result;
     }

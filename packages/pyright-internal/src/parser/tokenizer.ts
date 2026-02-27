@@ -859,7 +859,8 @@ export class Tokenizer {
                     this._indentAmounts.pop();
                 }
 
-                dedentPoints.forEach((dedentAmount, index) => {
+                for (let index = 0; index < dedentPoints.length; index++) {
+                    const dedentAmount = dedentPoints[index];
                     const matchesIndent = index < dedentPoints.length - 1 || dedentAmount === tab8Spaces;
                     const actualDedentAmount = index < dedentPoints.length - 1 ? dedentAmount : tab8Spaces;
                     this._tokens.push(
@@ -874,7 +875,7 @@ export class Tokenizer {
                     );
 
                     isDedentAmbiguous = false;
-                });
+                }
             }
         }
     }

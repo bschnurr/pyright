@@ -2769,7 +2769,7 @@ export function enumerateLiteralsForType(evaluator: TypeEvaluator, type: ClassTy
         // Enumerate all of the values in this enumeration.
         const enumList: ClassType[] = [];
         const fields = ClassType.getSymbolTable(type);
-        fields.forEach((symbol, name) => {
+        for (const [name, symbol] of fields) {
             if (!symbol.isIgnoredForProtocolMatch()) {
                 let symbolType = evaluator.getEffectiveTypeOfSymbol(symbol);
                 symbolType = transformTypeForEnumMember(evaluator, type, name) ?? symbolType;
@@ -2782,7 +2782,7 @@ export function enumerateLiteralsForType(evaluator: TypeEvaluator, type: ClassTy
                     enumList.push(symbolType);
                 }
             }
-        });
+        }
 
         return enumList;
     }

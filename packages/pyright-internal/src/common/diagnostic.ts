@@ -207,9 +207,9 @@ export class DiagnosticAddendum {
     }
 
     addMessageMultiline(message: string) {
-        message.split('\n').forEach((line) => {
+        for (const line of message.split('\n')) {
             this._messages.push(line);
-        });
+        }
     }
 
     addTextRange(range: TextRange) {

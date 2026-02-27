@@ -101,7 +101,7 @@ export class ServiceProvider {
 
     clone() {
         const serviceProvider = new ServiceProvider();
-        this._container.forEach((value, key) => {
+        for (const [key, value] of this._container) {
             if (Array.isArray(value)) {
                 serviceProvider._container.set(key, [...(value ?? [])]);
             } else if (value.clone !== undefined) {
@@ -109,7 +109,7 @@ export class ServiceProvider {
             } else {
                 serviceProvider._container.set(key, value);
             }
-        });
+        }
 
         return serviceProvider;
     }
@@ -136,9 +136,9 @@ export class ServiceProvider {
             }
         }
         this._container.clear();
-        essentials.forEach((value, key) => {
+        for (const [key, value] of essentials) {
             this._container.set(key, value);
-        });
+        }
     }
 
     private _addGroupService<T>(key: GroupServiceKey<T>, newValue: T | undefined) {
