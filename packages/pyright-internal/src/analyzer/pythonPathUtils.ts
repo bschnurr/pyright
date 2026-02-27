@@ -67,7 +67,7 @@ export function findPythonSearchPaths(
         const foundPaths: Uri[] = [];
         const sitePackagesPaths: Uri[] = [];
 
-        [pathConsts.lib, pathConsts.lib64, pathConsts.libAlternate].forEach((libPath) => {
+        for (const libPath of [pathConsts.lib, pathConsts.lib64, pathConsts.libAlternate]) {
             const sitePackagesPath = findSitePackagesPath(
                 fs,
                 venvPath.combinePaths(libPath),
@@ -78,21 +78,21 @@ export function findPythonSearchPaths(
                 addPathIfUnique(foundPaths, sitePackagesPath);
                 sitePackagesPaths.push(fs.realCasePath(sitePackagesPath));
             }
-        });
+        }
 
         // Now add paths from ".pth" files located in each of the site packages folders.
-        sitePackagesPaths.forEach((sitePackagesPath) => {
+        for (const sitePackagesPath of sitePackagesPaths) {
             const pthPaths = getPathsFromPthFiles(fs, sitePackagesPath);
-            pthPaths.forEach((path) => {
+            for (const path of pthPaths) {
                 addPathIfUnique(foundPaths, path);
-            });
-        });
+            }
+        }
 
         if (foundPaths.length > 0) {
             importLogger?.log(`Found the following '${pathConsts.sitePackages}' dirs`);
-            foundPaths.forEach((path) => {
+            for (const path of foundPaths) {
                 importLogger?.log(`  ${path}`);
-            });
+            }
             return foundPaths;
         }
 
@@ -182,7 +182,7 @@ export function readPthSearchPaths(pthFile: Uri, fs: FileSystem): Uri[] {
     if (fs.existsSync(pthFile)) {
         const data = fs.readFileSync(pthFile, 'utf8');
         const lines = data.split(/\r?\n/);
-        lines.forEach((line) => {
+        for (const line of lines) {
             const trimmedLine = line.trim();
             if (trimmedLine.length > 0 && !trimmedLine.startsWith('#') && !trimmedLine.match(/^import\s/)) {
                 const pthPath = pthFile.getDirectory().combinePaths(trimmedLine);
@@ -190,7 +190,7 @@ export function readPthSearchPaths(pthFile: Uri, fs: FileSystem): Uri[] {
                     searchPaths.push(fs.realCasePath(pthPath));
                 }
             }
-        });
+        }
     }
 
     return searchPaths;
@@ -205,7 +205,7 @@ export function getPathsFromPthFiles(fs: FileSystem, parentDir: Uri): Uri[] {
         .filter((entry) => (entry.isFile() || entry.isSymbolicLink()) && entry.name.endsWith('.pth'))
         .sort((a, b) => compareComparableValues(a.name, b.name));
 
-    pthFiles.forEach((pthFile) => {
+    for (const pthFile of pthFiles) {
         const filePath = fs.realCasePath(parentDir.combinePaths(pthFile.name));
         const fileStats = tryStat(fs, filePath);
 
@@ -213,7 +213,7 @@ export function getPathsFromPthFiles(fs: FileSystem, parentDir: Uri): Uri[] {
         if (fileStats?.isFile() && fileStats.size > 0 && fileStats.size < 64 * 1024) {
             searchPaths.push(...readPthSearchPaths(filePath, fs));
         }
-    });
+    }
 
     return searchPaths;
 }
