@@ -62,9 +62,13 @@ export function createNamedTupleType(
     // The "rename" parameter is supported only in the untyped version.
     let allowRename = false;
     if (!includesTypes) {
-        const renameArg = argList.find(
-            (arg) => arg.argCategory === ArgCategory.Simple && arg.name?.d.value === 'rename'
-        );
+        let renameArg: Arg | undefined;
+        for (const arg of argList) {
+            if (arg.argCategory === ArgCategory.Simple && arg.name?.d.value === 'rename') {
+                renameArg = arg;
+                break;
+            }
+        }
 
         if (renameArg?.valueExpression) {
             const renameValue = evaluateStaticBoolExpression(
@@ -89,13 +93,23 @@ export function createNamedTupleType(
                 argList[0].valueExpression || errorNode
             );
         } else if (nameArg.valueExpression && nameArg.valueExpression.nodeType === ParseNodeType.StringList) {
-            className = nameArg.valueExpression.d.strings.map((s) => s.d.value).join('');
+            let classNameParts = '';
+            for (const s of nameArg.valueExpression.d.strings) {
+                classNameParts += s.d.value;
+            }
+            className = classNameParts;
         }
     }
 
     // Is there is a default arg? If so, is it defined in a way that we
     // can determine its length statically?
-    const defaultsArg = argList.find((arg) => arg.name?.d.value === 'defaults');
+    let defaultsArg: Arg | undefined;
+    for (const arg of argList) {
+        if (arg.name?.d.value === 'defaults') {
+            defaultsArg = arg;
+            break;
+        }
+    }
     let defaultArgCount: number | undefined = 0;
     if (defaultsArg && defaultsArg.valueExpression) {
         const defaultsArgType = evaluator.getTypeOfExpression(defaultsArg.valueExpression).type;
@@ -171,13 +185,16 @@ export function createNamedTupleType(
                 entriesArg.valueExpression.nodeType === ParseNodeType.StringList
             ) {
                 const entryNameNode = entriesArg.valueExpression;
-                const entries = entriesArg.valueExpression.d.strings
-                    .map((s) => s.d.value)
-                    .join('')
+                let entryStr = '';
+                for (const s of entriesArg.valueExpression.d.strings) {
+                    entryStr += s.d.value;
+                }
+                const entries = entryStr
                     .split(/[,\s]+/);
                 const firstParamWithDefaultIndex =
                     defaultArgCount === undefined ? 0 : Math.max(0, entries.length - defaultArgCount);
-                entries.forEach((entryName, index) => {
+                for (let index = 0; index < entries.length; index++) {
+                    let entryName = entries[index];
                     entryName = entryName.trim();
                     if (entryName) {
                         entryName = renameUnderscore(evaluator, entryName, allowRename, entryNameNode, index);
@@ -217,7 +234,7 @@ export function createNamedTupleType(
                         classFields.set(entryName, newSymbol);
                         entryTypes.push(entryType);
                     }
-                });
+                }
             } else if (
                 entriesArg.valueExpression?.nodeType === ParseNodeType.List ||
                 entriesArg.valueExpression?.nodeType === ParseNodeType.Tuple
@@ -232,7 +249,8 @@ export function createNamedTupleType(
                 const firstParamWithDefaultIndex =
                     defaultArgCount === undefined ? 0 : Math.max(0, entryExpressions.length - defaultArgCount);
 
-                entryExpressions.forEach((entry, index) => {
+                for (let index = 0; index < entryExpressions.length; index++) {
+                    const entry = entryExpressions[index];
                     let entryTypeNode: ExpressionNode | undefined;
                     let entryType: Type | undefined;
                     let entryNameNode: ExpressionNode | undefined;
@@ -337,7 +355,7 @@ export function createNamedTupleType(
                     }
                     classFields.set(entryName, newSymbol);
                     namedTupleEntries.add(entryName);
-                });
+                }
 
                 // Set the type in the type cache for the dict node so it
                 // doesn't get evaluated again.
@@ -408,9 +426,10 @@ export function createNamedTupleType(
         tupleClassType &&
         isInstantiableClass(tupleClassType)
     ) {
-        const literalTypes: TupleTypeArg[] = matchArgsNames.map((name) => {
-            return { type: ClassType.cloneAsInstance(ClassType.cloneWithLiteral(strType, name)), isUnbounded: false };
-        });
+        const literalTypes: TupleTypeArg[] = [];
+        for (const name of matchArgsNames) {
+            literalTypes.push({ type: ClassType.cloneAsInstance(ClassType.cloneWithLiteral(strType, name)), isUnbounded: false });
+        }
         const matchArgsType = ClassType.cloneAsInstance(specializeTupleClass(tupleClassType, literalTypes));
         classFields.set('__match_args__', Symbol.createWithType(SymbolFlags.ClassMember, matchArgsType));
     }
@@ -425,9 +444,11 @@ export function createNamedTupleType(
 export function updateNamedTupleBaseClass(classType: ClassType, typeArgs: Type[], isTypeArgExplicit: boolean): boolean {
     let isUpdateNeeded = false;
 
-    classType.shared.baseClasses = classType.shared.baseClasses.map((baseClass) => {
+    const updatedBaseClasses: Type[] = [];
+    for (const baseClass of classType.shared.baseClasses) {
         if (!isInstantiableClass(baseClass) || !ClassType.isBuiltIn(baseClass, 'NamedTuple')) {
-            return baseClass;
+            updatedBaseClasses.push(baseClass);
+            continue;
         }
 
         const tupleTypeArgs: TupleTypeArg[] = [];
@@ -438,30 +459,32 @@ export function updateNamedTupleBaseClass(classType: ClassType, typeArgs: Type[]
                 isUnbounded: true,
             });
         } else {
-            typeArgs.forEach((t) => {
+            for (const t of typeArgs) {
                 tupleTypeArgs.push({ type: t, isUnbounded: false });
-            });
+            }
         }
 
         // Create a copy of the NamedTuple class that replaces the tuple base class.
         const clonedNamedTupleClass = ClassType.specialize(baseClass, /* typeArgs */ undefined, isTypeArgExplicit);
         clonedNamedTupleClass.shared = { ...clonedNamedTupleClass.shared };
 
-        clonedNamedTupleClass.shared.baseClasses = clonedNamedTupleClass.shared.baseClasses.map(
-            (namedTupleBaseClass) => {
-                if (!isInstantiableClass(namedTupleBaseClass) || !ClassType.isBuiltIn(namedTupleBaseClass, 'tuple')) {
-                    return namedTupleBaseClass;
-                }
-
-                return specializeTupleClass(namedTupleBaseClass, tupleTypeArgs, isTypeArgExplicit);
+        const updatedInnerBaseClasses: Type[] = [];
+        for (const namedTupleBaseClass of clonedNamedTupleClass.shared.baseClasses) {
+            if (!isInstantiableClass(namedTupleBaseClass) || !ClassType.isBuiltIn(namedTupleBaseClass, 'tuple')) {
+                updatedInnerBaseClasses.push(namedTupleBaseClass);
+                continue;
             }
-        );
+
+            updatedInnerBaseClasses.push(specializeTupleClass(namedTupleBaseClass, tupleTypeArgs, isTypeArgExplicit));
+        }
+        clonedNamedTupleClass.shared.baseClasses = updatedInnerBaseClasses;
 
         computeMroLinearization(clonedNamedTupleClass);
 
         isUpdateNeeded = true;
-        return clonedNamedTupleClass;
-    });
+        updatedBaseClasses.push(clonedNamedTupleClass);
+    }
+    classType.shared.baseClasses = updatedBaseClasses;
 
     return isUpdateNeeded;
 }
