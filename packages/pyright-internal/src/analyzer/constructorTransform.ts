@@ -17,7 +17,7 @@ import { LocMessage } from '../localization/localize';
 import { ArgCategory, ExpressionNode, ParamCategory } from '../parser/parseNodes';
 import { ConstraintTracker } from './constraintTracker';
 import { createFunctionFromConstructor } from './constructors';
-import { getParamListDetails, ParamKind } from './parameterUtils';
+import { getParamListDetails, ParamKind, VirtualParamDetails } from './parameterUtils';
 import { getTypedDictMembersForClass } from './typedDicts';
 import { Arg, FunctionResult, TypeEvaluator } from './typeEvaluatorTypes';
 import {
@@ -108,8 +108,10 @@ function applyPartialTransform(
     evaluator.inferReturnTypeIfNecessary(origFunctionType);
 
     // We don't currently handle unpacked arguments.
-    if (argList.some((arg) => arg.argCategory !== ArgCategory.Simple)) {
-        return undefined;
+    for (const arg of argList) {
+        if (arg.argCategory !== ArgCategory.Simple) {
+            return undefined;
+        }
     }
 
     // Make sure the first argument is a simple function.
@@ -141,7 +143,7 @@ function applyPartialTransform(
         let sawArgErrors = false;
 
         // Apply the partial transform to each of the functions in the overload.
-        overloads.forEach((overload) => {
+        for (const overload of overloads) {
             // Apply the transform to this overload, but don't report errors.
             const transformResult = applyPartialTransformToFunction(
                 evaluator,
@@ -158,7 +160,7 @@ function applyPartialTransform(
                     applicableOverloads.push(transformResult.returnType);
                 }
             }
-        });
+        }
 
         if (applicableOverloads.length === 0) {
             if (sawArgErrors && overloads.length > 0) {
@@ -178,11 +180,15 @@ function applyPartialTransform(
         if (applicableOverloads.length === 1) {
             synthesizedCallType = applicableOverloads[0];
         } else {
+            const mappedOverloads: FunctionType[] = [];
+            for (const overload of applicableOverloads) {
+                mappedOverloads.push(
+                    FunctionType.cloneWithNewFlags(overload, overload.shared.flags | FunctionTypeFlags.Overloaded)
+                );
+            }
             synthesizedCallType = OverloadedType.create(
                 // Set the "overloaded" flag for each of the __call__ overloads.
-                applicableOverloads.map((overload) =>
-                    FunctionType.cloneWithNewFlags(overload, overload.shared.flags | FunctionTypeFlags.Overloaded)
-                )
+                mappedOverloads
             );
         }
 
@@ -217,9 +223,10 @@ function applyPartialTransformToFunction(
     const constraints = new ConstraintTracker();
 
     const remainingArgsList = argList.slice(1);
-    remainingArgsList.forEach((arg, argIndex) => {
+    for (let argIndex = 0; argIndex < remainingArgsList.length; argIndex++) {
+        const arg = remainingArgsList[argIndex];
         if (!arg.valueExpression) {
-            return;
+            continue;
         }
 
         // Is it a positional argument or a keyword argument?
@@ -310,9 +317,13 @@ function applyPartialTransformToFunction(
                 paramMap.set(paramName, false);
             }
         } else {
-            const matchingParam = paramListDetails.params.find(
-                (paramInfo) => paramInfo.param.name === arg.name?.d.value && paramInfo.kind !== ParamKind.Positional
-            );
+            let matchingParam: VirtualParamDetails | undefined;
+            for (const paramInfo of paramListDetails.params) {
+                if (paramInfo.param.name === arg.name?.d.value && paramInfo.kind !== ParamKind.Positional) {
+                    matchingParam = paramInfo;
+                    break;
+                }
+            }
 
             if (!matchingParam) {
                 // Is there a kwargs parameter?
@@ -398,7 +409,7 @@ function applyPartialTransformToFunction(
                 }
             }
         }
-    });
+    }
 
     const specializedFunctionType = evaluator.solveAndApplyConstraints(origFunctionType, constraints);
     if (!isFunction(specializedFunctionType)) {
@@ -407,7 +418,9 @@ function applyPartialTransformToFunction(
 
     // Create a new parameter list that omits parameters that have been
     // populated already.
-    const updatedParamList: FunctionParam[] = specializedFunctionType.shared.parameters.map((param, index) => {
+    const updatedParamList: FunctionParam[] = [];
+    for (let index = 0; index < specializedFunctionType.shared.parameters.length; index++) {
+        const param = specializedFunctionType.shared.parameters[index];
         let newType = FunctionType.getParamType(specializedFunctionType, index);
 
         // If this is an **kwargs with an unpacked TypedDict, mark the provided
@@ -421,11 +434,11 @@ function applyPartialTransformToFunction(
             const typedDictEntries = getTypedDictMembersForClass(evaluator, newType);
             const narrowedEntriesMap = new Map<string, TypedDictEntry>(newType.priv.typedDictNarrowedEntries ?? []);
 
-            typedDictEntries.knownItems.forEach((entry, name) => {
+            for (const [name, entry] of typedDictEntries.knownItems) {
                 if (paramMap.has(name)) {
                     narrowedEntriesMap.set(name, { ...entry, isRequired: false });
                 }
-            });
+            }
 
             newType = ClassType.cloneAsInstance(
                 ClassType.cloneForNarrowedTypedDictEntries(newType, narrowedEntriesMap)
@@ -438,23 +451,20 @@ function applyPartialTransformToFunction(
         if (param.name && paramMap.get(param.name)) {
             newDefaultType = AnyType.create(/* isEllipsis */ true);
         }
-        return FunctionParam.create(param.category, newType, param.flags, param.name, newDefaultType);
-    });
-    const unassignedParamList = updatedParamList.filter((param) => {
+        updatedParamList.push(FunctionParam.create(param.category, newType, param.flags, param.name, newDefaultType));
+    }
+    const unassignedParamList: FunctionParam[] = [];
+    const assignedKeywordParamList: FunctionParam[] = [];
+    const kwargsParam: FunctionParam[] = [];
+    for (const param of updatedParamList) {
         if (param.category === ParamCategory.KwargsDict) {
-            return false;
+            kwargsParam.push(param);
+        } else if (param.name && paramMap.get(param.name)) {
+            assignedKeywordParamList.push(param);
+        } else if (param.category === ParamCategory.ArgsList || !param.name || !paramMap.has(param.name)) {
+            unassignedParamList.push(param);
         }
-        if (param.category === ParamCategory.ArgsList) {
-            return true;
-        }
-        return !param.name || !paramMap.has(param.name);
-    });
-    const assignedKeywordParamList = updatedParamList.filter((param) => {
-        return param.name && paramMap.get(param.name);
-    });
-    const kwargsParam = updatedParamList.filter((param) => {
-        return param.category === ParamCategory.KwargsDict;
-    });
+    }
 
     const newParamList: FunctionParam[] = [];
     appendArray(newParamList, unassignedParamList);
@@ -473,9 +483,9 @@ function applyPartialTransformToFunction(
     if (partialCallMemberType.shared.parameters.length > 0) {
         FunctionType.addParam(newCallMemberType, partialCallMemberType.shared.parameters[0]);
     }
-    newParamList.forEach((param) => {
+    for (const param of newParamList) {
         FunctionType.addParam(newCallMemberType, param);
-    });
+    }
 
     newCallMemberType.shared.declaredReturnType = specializedFunctionType.shared.declaredReturnType
         ? FunctionType.getEffectiveReturnType(specializedFunctionType)

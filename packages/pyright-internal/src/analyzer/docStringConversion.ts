@@ -136,7 +136,9 @@ class DocStringConverter {
         const isEpyDoc = epyDocFieldTokensRegExp.test(this._input);
         if (isEpyDoc) {
             // fixup cv2 leading '.'
-            this._lines = this._lines.map((v) => v.replace(epyDocCv2FixRegExp, ''));
+            for (let i = 0; i < this._lines.length; i++) {
+                this._lines[i] = this._lines[i].replace(epyDocCv2FixRegExp, '');
+            }
         }
 
         while (this._currentLineOrUndefined() !== undefined) {
@@ -191,9 +193,14 @@ class DocStringConverter {
     }
 
     private _nextBlockIndent(): number {
-        return _countLeadingSpaces(
-            this._lines.slice(this._lineNum + 1).find((v) => !_isUndefinedOrWhitespace(v)) || ''
-        );
+        let nextNonWhitespace = '';
+        for (let i = this._lineNum + 1; i < this._lines.length; i++) {
+            if (!_isUndefinedOrWhitespace(this._lines[i])) {
+                nextNonWhitespace = this._lines[i];
+                break;
+            }
+        }
+        return _countLeadingSpaces(nextNonWhitespace);
     }
 
     private _currentLineIsOutsideBlock(): boolean {
@@ -300,9 +307,9 @@ class DocStringConverter {
     }
 
     private _escapeHtml(line: string): string {
-        HtmlEscapes.forEach((escape) => {
+        for (const escape of HtmlEscapes) {
             line = line.replace(escape.exp, escape.replacement);
-        });
+        }
 
         return line;
     }
@@ -380,14 +387,14 @@ class DocStringConverter {
 
             // Escape _, *, and ~, but ignore things like ":param \*\*kwargs:".
             const subparts = part.split(linkRegExp);
-            subparts.forEach((item) => {
+            for (const item of subparts) {
                 // Don't escape links
                 if (linkRegExp.test(item)) {
                     this._append(item);
                 } else {
                     this._append(item.replace(UnescapedMarkdownCharsRegExp, '\\$1'));
                 }
-            });
+            }
         }
 
         // Go straight to the builder so that _appendLine doesn't think
@@ -403,7 +410,9 @@ class DocStringConverter {
             return '';
         }
 
-        LiteralBlockReplacements.forEach((item) => (line = line.replace(item.exp, item.replacement)));
+        for (const item of LiteralBlockReplacements) {
+            line = line.replace(item.exp, item.replacement);
+        }
 
         line = line.replace(DoubleTickRegExp, '`');
         return line;
@@ -692,9 +701,9 @@ class DocStringConverter {
                 this._tableState.inHeader = false;
 
                 // Append header
-                headerStrings.forEach((h) => {
+                for (const h of headerStrings) {
                     formattedLine += `${h}|`;
-                });
+                }
                 this._appendLine(formattedLine);
 
                 // Convert header end
@@ -704,13 +713,13 @@ class DocStringConverter {
             } else {
                 // Normal row parsing
                 let colStart = 0;
-                columnParts.forEach((column) => {
+                for (const column of columnParts) {
                     const len = column.length + 1;
                     const columnStr = line.slice(colStart, colStart + len);
                     formattedLine += `${columnStr}|`;
 
                     colStart += len;
-                });
+                }
 
                 this._appendLine(formattedLine);
                 this._eatLine();
