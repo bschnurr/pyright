@@ -276,11 +276,11 @@ export class UniqueSignatureTracker {
     }
 
     addTrackedSignatures(signatures: SignatureWithOffsets[]) {
-        signatures.forEach((s) => {
-            s.expressionOffsets.forEach((offset) => {
+        for (const s of signatures) {
+            for (const offset of s.expressionOffsets) {
                 this.addSignature(s.type, offset);
-            });
-        });
+            }
+        }
     }
 
     findSignature(signature: FunctionType | OverloadedType): SignatureWithOffsets | undefined {
@@ -1699,14 +1699,14 @@ export function getProtocolSymbolsRecursive(
         return;
     }
 
-    classType.shared.baseClasses.forEach((baseClass) => {
+    for (const baseClass of classType.shared.baseClasses) {
         if (isClass(baseClass) && (baseClass.shared.flags & classFlags) !== 0) {
             getProtocolSymbolsRecursive(baseClass, symbolMap, classFlags, recursionCount + 1);
         }
-    });
+    }
 
     if ((classType.shared.flags & classFlags) !== 0) {
-        ClassType.getSymbolTable(classType).forEach((symbol, name) => {
+        for (const [name, symbol] of ClassType.getSymbolTable(classType)) {
             if (!symbol.isIgnoredForProtocolMatch()) {
                 symbolMap.set(name, {
                     symbol,
@@ -1721,7 +1721,7 @@ export function getProtocolSymbolsRecursive(
                     skippedUndeclaredType: false,
                 });
             }
-        });
+        }
     }
 }
 
@@ -1741,19 +1741,19 @@ export function getContainerDepth(type: Type, recursionCount = 0) {
     let maxChildDepth = 0;
 
     if (type.priv.tupleTypeArgs) {
-        type.priv.tupleTypeArgs.forEach((typeArgInfo) => {
+        for (const typeArgInfo of type.priv.tupleTypeArgs) {
             doForEachSubtype(typeArgInfo.type, (subtype) => {
                 const childDepth = getContainerDepth(subtype, recursionCount);
                 maxChildDepth = Math.max(childDepth, maxChildDepth);
             });
-        });
+        }
     } else if (type.priv.typeArgs) {
-        type.priv.typeArgs.forEach((typeArg) => {
+        for (const typeArg of type.priv.typeArgs) {
             doForEachSubtype(typeArg, (subtype) => {
                 const childDepth = getContainerDepth(subtype, recursionCount);
                 maxChildDepth = Math.max(childDepth, maxChildDepth);
             });
-        });
+        }
     } else {
         return 0;
     }
@@ -2051,11 +2051,11 @@ export function getClassFieldsRecursive(classType: ClassType): Map<string, Class
     const memberMap = new Map<string, ClassMember>();
 
     // Evaluate the types of members from the end of the MRO to the beginning.
-    ClassType.getReverseMro(classType).forEach((mroClass) => {
+    for (const mroClass of ClassType.getReverseMro(classType)) {
         const specializedMroClass = partiallySpecializeType(mroClass, classType, /* typeClassType */ undefined);
 
         if (isClass(specializedMroClass)) {
-            ClassType.getSymbolTable(specializedMroClass).forEach((symbol, name) => {
+            for (const [name, symbol] of ClassType.getSymbolTable(specializedMroClass)) {
                 if (!symbol.isIgnoredForProtocolMatch() && symbol.hasTypedDeclarations()) {
                     memberMap.set(name, {
                         classType: specializedMroClass,
@@ -2070,13 +2070,13 @@ export function getClassFieldsRecursive(classType: ClassType): Map<string, Class
                         skippedUndeclaredType: false,
                     });
                 }
-            });
+            }
         } else {
             // If this ancestor class is unknown, throw away all symbols
             // found so far because they could be overridden by the unknown class.
             memberMap.clear();
         }
-    });
+    }
 
     return memberMap;
 }
@@ -2118,17 +2118,17 @@ export function getTypeVarArgsRecursive(type: Type, recursionCount = 0): TypeVar
         const combinedList: TypeVarType[] = [];
 
         if (aliasInfo.typeArgs) {
-            aliasInfo?.typeArgs.forEach((typeArg) => {
+            for (const typeArg of aliasInfo.typeArgs) {
                 addTypeVarsToListIfUnique(combinedList, getTypeVarArgsRecursive(typeArg, recursionCount));
-            });
+            }
 
             return combinedList;
         }
 
         if (aliasInfo.shared.typeParams) {
-            aliasInfo.shared.typeParams.forEach((typeParam) => {
+            for (const typeParam of aliasInfo.shared.typeParams) {
                 addTypeVarsToListIfUnique(combinedList, [typeParam]);
-            });
+            }
 
             return combinedList;
         }
@@ -2157,9 +2157,9 @@ export function getTypeVarArgsRecursive(type: Type, recursionCount = 0): TypeVar
         const combinedList: TypeVarType[] = [];
         const typeArgs = type.priv.tupleTypeArgs ? type.priv.tupleTypeArgs.map((e) => e.type) : type.priv.typeArgs;
         if (typeArgs) {
-            typeArgs.forEach((typeArg) => {
+            for (const typeArg of typeArgs) {
                 addTypeVarsToListIfUnique(combinedList, getTypeVarArgsRecursive(typeArg, recursionCount));
-            });
+            }
         }
 
         return combinedList;
@@ -2241,11 +2241,12 @@ export function buildSolution(typeParams: TypeVarType[], typeArgs: Type[] | unde
         return solution;
     }
 
-    typeParams.forEach((typeParam, index) => {
+    for (let index = 0; index < typeParams.length; index++) {
+        const typeParam = typeParams[index];
         if (index < typeArgs.length) {
             solution.setType(typeParam, typeArgs[index]);
         }
-    });
+    }
 
     return solution;
 }
@@ -2553,11 +2554,11 @@ export function convertToInstantiable(type: Type, includeSubclasses = true): Typ
 }
 
 export function getMembersForClass(classType: ClassType, symbolTable: SymbolTable, includeInstanceVars: boolean) {
-    classType.shared.mro.forEach((mroClass) => {
+    for (const mroClass of classType.shared.mro) {
         if (isInstantiableClass(mroClass)) {
             // Add any new member variables from this class.
             const isClassTypedDict = ClassType.isTypedDictClass(mroClass);
-            ClassType.getSymbolTable(mroClass).forEach((symbol, name) => {
+            for (const [name, symbol] of ClassType.getSymbolTable(mroClass)) {
                 if (symbol.isClassMember() || (includeInstanceVars && symbol.isInstanceMember())) {
                     if (!isClassTypedDict || !isTypedDictMemberAccessedThroughIndex(symbol)) {
                         if (!symbol.isInitVar()) {
@@ -2573,9 +2574,9 @@ export function getMembersForClass(classType: ClassType, symbolTable: SymbolTabl
                         }
                     }
                 }
-            });
+            }
         }
-    });
+    }
 
     // Add members of the metaclass as well.
     if (!includeInstanceVars) {
@@ -2583,7 +2584,7 @@ export function getMembersForClass(classType: ClassType, symbolTable: SymbolTabl
         if (metaclass && isInstantiableClass(metaclass)) {
             for (const mroClass of metaclass.shared.mro) {
                 if (isInstantiableClass(mroClass)) {
-                    ClassType.getSymbolTable(mroClass).forEach((symbol, name) => {
+                    for (const [name, symbol] of ClassType.getSymbolTable(mroClass)) {
                         const existingSymbol = symbolTable.get(name);
 
                         if (!existingSymbol) {
@@ -2593,7 +2594,7 @@ export function getMembersForClass(classType: ClassType, symbolTable: SymbolTabl
                             // has an annotation for the symbol, use the parent type instead.
                             symbolTable.set(name, symbol);
                         }
-                    });
+                    }
                 } else {
                     break;
                 }
@@ -2607,14 +2608,14 @@ export function getMembersForModule(moduleType: ModuleType, symbolTable: SymbolT
     // same name defined within the module, they will overwrite the
     // loader fields.
     if (moduleType.priv.loaderFields) {
-        moduleType.priv.loaderFields.forEach((symbol, name) => {
+        for (const [name, symbol] of moduleType.priv.loaderFields) {
             symbolTable.set(name, symbol);
-        });
+        }
     }
 
-    moduleType.priv.fields.forEach((symbol, name) => {
+    for (const [name, symbol] of moduleType.priv.fields) {
         symbolTable.set(name, symbol);
-    });
+    }
 }
 
 // Determines if the type contains an Any recursively.
@@ -2819,9 +2820,10 @@ export function combineSameSizedTuples(type: Type, tupleType: Type | undefined):
             if (tupleClass && isClass(tupleClass) && tupleClass.priv.tupleTypeArgs) {
                 if (tupleEntries) {
                     if (tupleEntries.length === tupleClass.priv.tupleTypeArgs.length) {
-                        tupleClass.priv.tupleTypeArgs.forEach((entry, index) => {
+                        for (let index = 0; index < tupleClass.priv.tupleTypeArgs.length; index++) {
+                            const entry = tupleClass.priv.tupleTypeArgs[index];
                             tupleEntries![index].push(entry.type);
-                        });
+                        }
                     } else {
                         isValid = false;
                     }
@@ -2853,12 +2855,12 @@ export function combineSameSizedTuples(type: Type, tupleType: Type | undefined):
 export function combineTupleTypeArgs(typeArgs: TupleTypeArg[]): Type {
     const typesToCombine: Type[] = [];
 
-    typeArgs.forEach((t) => {
+    for (const t of typeArgs) {
         if (isTypeVar(t.type)) {
             if (isUnpackedTypeVarTuple(t.type)) {
                 // Treat the unpacked TypeVarTuple as a union.
                 typesToCombine.push(TypeVarType.cloneForUnpacked(t.type, /* isInUnion */ true));
-                return;
+                continue;
             }
 
             if (isUnpackedTypeVar(t.type)) {
@@ -2870,12 +2872,12 @@ export function combineTupleTypeArgs(typeArgs: TupleTypeArg[]): Type {
                 ) {
                     typesToCombine.push(combineTupleTypeArgs(t.type.shared.boundType.priv.tupleTypeArgs));
                 }
-                return;
+                continue;
             }
         }
 
         typesToCombine.push(t.type);
-    });
+    }
 
     return combineTypes(typesToCombine);
 }
@@ -3247,7 +3249,7 @@ export function computeMroLinearization(classType: ClassType): boolean {
     // Construct the list of class lists that need to be merged.
     const classListsToMerge: Type[][] = [];
 
-    filteredBaseClasses.forEach((baseClass) => {
+    for (const baseClass of filteredBaseClasses) {
         if (isInstantiableClass(baseClass)) {
             const solution = buildSolutionFromSpecializedClass(baseClass);
             classListsToMerge.push(
@@ -3258,7 +3260,7 @@ export function computeMroLinearization(classType: ClassType): boolean {
         } else {
             classListsToMerge.push([baseClass]);
         }
-    });
+    }
 
     classListsToMerge.push(
         filteredBaseClasses.map((baseClass) => {
@@ -3396,9 +3398,9 @@ function addDeclaringModuleNamesForType(type: Type, moduleList: string[], recurs
 
         case TypeCategory.Overloaded: {
             const overloads = OverloadedType.getOverloads(type);
-            overloads.forEach((overload) => {
+            for (const overload of overloads) {
                 addDeclaringModuleNamesForType(overload, moduleList, recursionCount);
-            });
+            }
             const impl = OverloadedType.getImplementation(type);
             if (impl) {
                 addDeclaringModuleNamesForType(impl, moduleList, recursionCount);
@@ -3447,7 +3449,8 @@ export function convertTypeToParamSpecValue(type: Type): FunctionType {
 
         newFunction.shared.deprecatedMessage = type.shared.deprecatedMessage;
 
-        type.shared.parameters.forEach((param, index) => {
+        for (let index = 0; index < type.shared.parameters.length; index++) {
+            const param = type.shared.parameters[index];
             FunctionType.addParam(
                 newFunction,
                 FunctionParam.create(
@@ -3459,7 +3462,7 @@ export function convertTypeToParamSpecValue(type: Type): FunctionType {
                     param.defaultExpr
                 )
             );
-        });
+        }
 
         newFunction.shared.typeVarScopeId = type.shared.typeVarScopeId;
         newFunction.priv.constructorTypeVarScopeId = type.priv.constructorTypeVarScopeId;
@@ -3671,7 +3674,7 @@ export class TypeVarTransformer {
             const overloads = OverloadedType.getOverloads(type);
             const newOverloads: FunctionType[] = [];
 
-            overloads.forEach((entry) => {
+            for (const entry of overloads) {
                 const replacementType = this.transformTypeVarsInFunctionType(entry, recursionCount);
 
                 if (isFunction(replacementType)) {
@@ -3683,7 +3686,7 @@ export class TypeVarTransformer {
                 if (replacementType !== entry) {
                     requiresUpdate = true;
                 }
-            });
+            }
 
             const impl = OverloadedType.getImplementation(type);
             let newImpl: Type | undefined = impl;
@@ -3778,7 +3781,7 @@ export class TypeVarTransformer {
             if (classType.priv.tupleTypeArgs) {
                 newTupleTypeArgs = [];
 
-                classType.priv.tupleTypeArgs.forEach((oldTypeArgType) => {
+                for (const oldTypeArgType of classType.priv.tupleTypeArgs) {
                     const newTypeArgType = this.apply(oldTypeArgType.type, recursionCount);
 
                     if (newTypeArgType !== oldTypeArgType.type) {
@@ -3811,7 +3814,7 @@ export class TypeVarTransformer {
                             });
                         }
                     }
-                });
+                }
             } else if (typeParams.length > 0) {
                 newTupleTypeArgs = this.transformTupleTypeVar(typeParams[0], recursionCount);
                 if (newTupleTypeArgs) {
@@ -3998,12 +4001,13 @@ export class TypeVarTransformer {
             let insertKeywordOnlySeparator = false;
             let swallowPositionOnlySeparator = false;
 
-            specializedParams.parameterTypes.forEach((paramType, index) => {
+            for (let index = 0; index < specializedParams.parameterTypes.length; index++) {
+                const paramType = specializedParams.parameterTypes[index];
                 if (index === variadicParamIndex) {
                     let sawUnboundedEntry = false;
 
                     // Unpack the tuple into individual parameters.
-                    variadicTypesToUnpack!.forEach((unpackedType) => {
+                    for (const unpackedType of variadicTypesToUnpack!) {
                         FunctionType.addParam(
                             newFunctionType,
                             FunctionParam.create(
@@ -4019,7 +4023,7 @@ export class TypeVarTransformer {
                         if (unpackedType.isUnbounded) {
                             sawUnboundedEntry = true;
                         }
-                    });
+                    }
 
                     if (sawUnboundedEntry) {
                         swallowPositionOnlySeparator = true;
@@ -4058,7 +4062,7 @@ export class TypeVarTransformer {
                         );
                     }
                 }
-            });
+            }
 
             newFunctionType.shared.declaredReturnType = specializedParams.returnType;
 
@@ -4127,7 +4131,7 @@ class UniqueFunctionSignatureTransformer extends TypeVarTransformer {
 
                 // Create new type variables with the same scope but with
                 // different (unique) names.
-                sourceType.shared.typeParams.forEach((typeParam) => {
+                for (const typeParam of sourceType.shared.typeParams) {
                     if (typeParam.priv.scopeType === TypeVarScopeType.Function) {
                         const replacement: Type = TypeVarType.cloneForNewName(
                             typeParam,
@@ -4136,7 +4140,7 @@ class UniqueFunctionSignatureTransformer extends TypeVarTransformer {
 
                         solution.setType(typeParam, replacement);
                     }
-                });
+                }
 
                 updatedSourceType = applySolvedTypeVars(sourceType, solution);
                 assert(isFunctionOrOverloaded(updatedSourceType));
