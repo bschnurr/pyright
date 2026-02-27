@@ -240,14 +240,14 @@ export function applySourceSolutionToConstraints(constraints: ConstraintTracker,
     }
 
     constraints.doForEachConstraintSet((constraintSet) => {
-        constraintSet.getTypeVars().forEach((entry) => {
+        for (const entry of constraintSet.getTypeVars()) {
             constraintSet.setBounds(
                 entry.typeVar,
                 entry.lowerBound ? applySolvedTypeVars(entry.lowerBound, srcSolution) : undefined,
                 entry.upperBound ? applySolvedTypeVars(entry.upperBound, srcSolution) : undefined,
                 entry.retainLiterals
             );
-        });
+        }
     });
 }
 
@@ -344,9 +344,9 @@ export function addConstraintsForExpectedType(
     usageOffset: number | undefined = undefined
 ): boolean {
     if (isAny(expectedType)) {
-        type.shared.typeParams.forEach((typeParam) => {
+        for (const typeParam of type.shared.typeParams) {
             constraints.setBounds(typeParam, expectedType, expectedType);
-        });
+        }
         return true;
     }
 
@@ -377,7 +377,7 @@ export function addConstraintsForExpectedType(
     if (ClassType.isSameGenericClass(expectedType, type)) {
         const solution = buildSolutionFromSpecializedClass(expectedType);
         const typeParams = ClassType.getTypeParams(expectedType);
-        typeParams.forEach((typeParam) => {
+        for (const typeParam of typeParams) {
             let typeArgValue = solution.getMainSolutionSet().getType(typeParam);
 
             if (typeArgValue && liveTypeVarScopes) {
@@ -393,13 +393,16 @@ export function addConstraintsForExpectedType(
                     variance === Variance.Contravariant ? undefined : typeArgValue
                 );
             }
-        });
+        }
         return true;
     }
 
     // Create a generic version of the expected type.
     const expectedTypeScopeId = getTypeVarScopeId(expectedType);
-    const synthExpectedTypeArgs = ClassType.getTypeParams(expectedType).map((typeParam, index) => {
+    const expectedTypeParams = ClassType.getTypeParams(expectedType);
+    const synthExpectedTypeArgs: TypeVarType[] = [];
+    for (let index = 0; index < expectedTypeParams.length; index++) {
+        const typeParam = expectedTypeParams[index];
         const typeVar = TypeVarType.createInstance(
             `__dest${index}`,
             isParamSpec(typeParam) ? TypeVarKind.ParamSpec : TypeVarKind.TypeVar
@@ -409,12 +412,15 @@ export function addConstraintsForExpectedType(
         // Use invariance here so we set the lower and upper bound on the TypeVar.
         typeVar.shared.declaredVariance = Variance.Invariant;
         typeVar.priv.scopeId = expectedTypeScopeId;
-        return typeVar;
-    });
+        synthExpectedTypeArgs.push(typeVar);
+    }
     const genericExpectedType = ClassType.specialize(expectedType, synthExpectedTypeArgs);
 
     // For each type param in the target type, create a placeholder type variable.
-    const typeArgs = ClassType.getTypeParams(type).map((typeParam, index) => {
+    const srcTypeParams = ClassType.getTypeParams(type);
+    const typeArgs: TypeVarType[] = [];
+    for (let index = 0; index < srcTypeParams.length; index++) {
+        const typeParam = srcTypeParams[index];
         const typeVar = TypeVarType.createInstance(
             `__source${index}`,
             isParamSpec(typeParam) ? TypeVarKind.ParamSpec : TypeVarKind.TypeVar
@@ -422,8 +428,8 @@ export function addConstraintsForExpectedType(
         typeVar.shared.isSynthesized = true;
         typeVar.shared.synthesizedIndex = index;
         typeVar.shared.isExemptFromBoundCheck = true;
-        return TypeVarType.cloneAsUnificationVar(typeVar);
-    });
+        typeArgs.push(TypeVarType.cloneAsUnificationVar(typeVar));
+    }
 
     const specializedType = ClassType.specialize(type, typeArgs);
     const syntheticConstraints = new ConstraintTracker();
@@ -438,7 +444,8 @@ export function addConstraintsForExpectedType(
     ) {
         let isResultValid = true;
 
-        synthExpectedTypeArgs.forEach((typeVar, index) => {
+        for (let index = 0; index < synthExpectedTypeArgs.length; index++) {
+            const typeVar = synthExpectedTypeArgs[index];
             let synthTypeVar = getTypeVarType(evaluator, syntheticConstraints.getMainConstraintSet(), typeVar);
             const otherSubtypes: Type[] = [];
 
@@ -452,7 +459,7 @@ export function addConstraintsForExpectedType(
                 if (isUnion(synthTypeVar)) {
                     let foundSynthTypeVar: TypeVarType | undefined;
 
-                    sortTypes(synthTypeVar.priv.subtypes).forEach((subtype) => {
+                    for (const subtype of sortTypes(synthTypeVar.priv.subtypes)) {
                         if (
                             isTypeVar(subtype) &&
                             subtype.shared.isSynthesized &&
@@ -463,7 +470,7 @@ export function addConstraintsForExpectedType(
                         } else {
                             otherSubtypes.push(subtype);
                         }
-                    });
+                    }
 
                     if (foundSynthTypeVar) {
                         synthTypeVar = foundSynthTypeVar;
@@ -506,7 +513,7 @@ export function addConstraintsForExpectedType(
                     }
                 }
             }
-        });
+        }
 
         return isResultValid;
     }
@@ -1050,7 +1057,9 @@ function assignConstrainedTypeVar(
             }
 
             let constraintIndexUsed: number | undefined;
-            destType.shared.constraints.forEach((constraint, i) => {
+            const destConstraints = destType.shared.constraints;
+            for (let i = 0; i < destConstraints.length; i++) {
+                const constraint = destConstraints[i];
                 const adjustedConstraint = TypeBase.isInstantiable(destType)
                     ? convertToInstantiable(constraint)
                     : constraint;
@@ -1081,7 +1090,7 @@ function assignConstrainedTypeVar(
                         constraintIndexUsed = i;
                     }
                 }
-            });
+            }
 
             if (!constrainedSubtype) {
                 // We found a source subtype that is not compatible with the dest.
@@ -1347,19 +1356,20 @@ function stripLiteralValueForUnpackedTuple(evaluator: TypeEvaluator, type: Type)
     }
 
     let strippedLiteral = false;
-    const tupleTypeArgs: TupleTypeArg[] = type.priv.tupleTypeArgs.map((arg) => {
+    const tupleTypeArgs: TupleTypeArg[] = [];
+    for (const arg of type.priv.tupleTypeArgs) {
         const strippedType = stripTypeForm(evaluator.stripLiteralValue(arg.type));
 
         if (strippedType !== arg.type) {
             strippedLiteral = true;
         }
 
-        return {
+        tupleTypeArgs.push({
             isUnbounded: arg.isUnbounded,
             isOptional: arg.isOptional,
             type: strippedType,
-        };
-    });
+        });
+    }
 
     if (!strippedLiteral) {
         return type;
@@ -1387,7 +1397,7 @@ function logConstraints(evaluator: TypeEvaluator, constraints: ConstraintTracker
 function logTypeVarConstraintSet(evaluator: TypeEvaluator, context: ConstraintSet, indent: string) {
     let loggedConstraint = false;
 
-    context.getTypeVars().forEach((entry) => {
+    for (const entry of context.getTypeVars()) {
         const typeVarName = `${indent}${entry.typeVar.shared.name}`;
         const lowerBound = entry.lowerBound;
         const upperBound = entry.upperBound;
@@ -1406,7 +1416,7 @@ function logTypeVarConstraintSet(evaluator: TypeEvaluator, context: ConstraintSe
                 loggedConstraint = true;
             }
         }
-    });
+    }
 
     if (!loggedConstraint) {
         console.log(`${indent}no constraints`);
