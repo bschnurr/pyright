@@ -6,7 +6,7 @@
  * Utility functions for parameters.
  */
 
-import { assert } from '../common/debug';
+import { assert, fail } from '../common/debug';
 import { ParamCategory } from '../parser/parseNodes';
 import { isDunderName } from './symbolNameUtils';
 import {
@@ -100,7 +100,13 @@ export function getParamListDetails(type: FunctionType, options?: ParamListDetai
         hasUnpackedTypedDict: false,
     };
 
-    let positionOnlyIndex = type.shared.parameters.findIndex((p) => isPositionOnlySeparator(p));
+    let positionOnlyIndex = -1;
+    for (let i = 0; i < type.shared.parameters.length; i++) {
+        if (isPositionOnlySeparator(type.shared.parameters[i])) {
+            positionOnlyIndex = i;
+            break;
+        }
+    }
 
     // Handle the old (pre Python 3.8) way of specifying positional-only
     // parameters by naming them with "__".
@@ -170,14 +176,18 @@ export function getParamListDetails(type: FunctionType, options?: ParamListDetai
         }
     };
 
-    type.shared.parameters.forEach((param, index) => {
+    const parameters = type.shared.parameters;
+    for (let index = 0; index < parameters.length; index++) {
+        const param = parameters[index];
         if (param.category === ParamCategory.ArgsList) {
             // If this is an unpacked tuple, expand the entries.
             const paramType = FunctionType.getParamType(type, index);
             if (param.name && isUnpackedClass(paramType) && paramType.priv.tupleTypeArgs) {
                 const addToPositionalOnly = index < result.positionOnlyParamCount;
 
-                paramType.priv.tupleTypeArgs.forEach((tupleArg, tupleIndex) => {
+                const tupleTypeArgs = paramType.priv.tupleTypeArgs;
+                for (let tupleIndex = 0; tupleIndex < tupleTypeArgs.length; tupleIndex++) {
+                    const tupleArg = tupleTypeArgs[tupleIndex];
                     const category =
                         isTypeVarTuple(tupleArg.type) || tupleArg.isUnbounded
                             ? ParamCategory.ArgsList
@@ -211,7 +221,7 @@ export function getParamListDetails(type: FunctionType, options?: ParamListDetai
                     if (tupleIndex > 0 && addToPositionalOnly) {
                         result.positionOnlyParamCount++;
                     }
-                });
+                }
 
                 // Normally, a VarArgList parameter (either named or as an unnamed separator)
                 // would signify the start of keyword-only parameters. However, we can construct
@@ -256,8 +266,8 @@ export function getParamListDetails(type: FunctionType, options?: ParamListDetai
                 }
 
                 const typedDictType = paramType;
-                paramType.shared.typedDictEntries.knownItems.forEach((entry, name) => {
-                    entry = paramType.priv.typedDictNarrowedEntries?.get(name) ?? entry;
+                for (const [name, origEntry] of paramType.shared.typedDictEntries.knownItems) {
+                    const entry = paramType.priv.typedDictNarrowedEntries?.get(name) ?? origEntry;
 
                     const specializedParamType = partiallySpecializeType(
                         entry.valueType,
@@ -278,7 +288,7 @@ export function getParamListDetails(type: FunctionType, options?: ParamListDetai
                         specializedParamType,
                         defaultParamType
                     );
-                });
+                }
 
                 const extraItemsType = paramType.shared.typedDictEntries.extraItems?.valueType;
 
@@ -334,18 +344,22 @@ export function getParamListDetails(type: FunctionType, options?: ParamListDetai
                     : undefined
             );
         }
-    });
+    }
 
     // If the signature ends in `*args: P.args, **kwargs: P.kwargs`,
     // extract the ParamSpec P.
     result.paramSpec = FunctionType.getParamSpecFromArgsKwargs(type);
 
-    result.firstPositionOrKeywordIndex = result.params.findIndex(
-        (p) => p.kind !== ParamKind.Positional && p.kind !== ParamKind.ExpandedArgs
-    );
-    if (result.firstPositionOrKeywordIndex < 0) {
-        result.firstPositionOrKeywordIndex = result.params.length;
+    let firstPositionOrKeywordIndex = -1;
+    for (let i = 0; i < result.params.length; i++) {
+        const kind = result.params[i].kind;
+        if (kind !== ParamKind.Positional && kind !== ParamKind.ExpandedArgs) {
+            firstPositionOrKeywordIndex = i;
+            break;
+        }
     }
+    result.firstPositionOrKeywordIndex =
+        firstPositionOrKeywordIndex < 0 ? result.params.length : firstPositionOrKeywordIndex;
 
     return result;
 }
@@ -433,10 +447,11 @@ export class ParamAssignmentTracker {
     params: ParamAssignmentInfo[];
 
     constructor(paramInfos: VirtualParamDetails[]) {
-        this.params = paramInfos.map((p) => {
+        this.params = [];
+        for (const p of paramInfos) {
             const argsNeeded = !!p.defaultType || p.param.category !== ParamCategory.Simple ? 0 : 1;
-            return { paramDetails: p, argsNeeded, argsReceived: 0 };
-        });
+            this.params.push({ paramDetails: p, argsNeeded, argsReceived: 0 });
+        }
     }
 
     // Add a virtual keyword parameter for a keyword argument that
@@ -452,22 +467,28 @@ export class ParamAssignmentTracker {
     }
 
     lookupName(name: string): ParamAssignmentInfo | undefined {
-        return this.params.find((p) => {
+        for (const p of this.params) {
             // Don't return positional parameters because their names are irrelevant.
             const kind = p.paramDetails.kind;
             if (kind === ParamKind.Positional || kind === ParamKind.ExpandedArgs) {
-                return false;
+                continue;
             }
 
             const effectiveName = p.keywordName ?? p.paramDetails.param.name;
-            return effectiveName === name;
-        });
+            if (effectiveName === name) {
+                return p;
+            }
+        }
+        return undefined;
     }
 
     lookupDetails(paramInfo: VirtualParamDetails): ParamAssignmentInfo {
-        const info = this.params.find((p) => p.paramDetails === paramInfo);
-        assert(info !== undefined);
-        return info;
+        for (const p of this.params) {
+            if (p.paramDetails === paramInfo) {
+                return p;
+            }
+        }
+        fail('paramInfo not found');
     }
 
     markArgReceived(paramInfo: VirtualParamDetails) {
@@ -479,17 +500,17 @@ export class ParamAssignmentTracker {
     // required number of arguments.
     getUnassignedParams(): string[] {
         const unassignedParams: string[] = [];
-        this.params.forEach((p) => {
+        for (const p of this.params) {
             if (!p.paramDetails.param.name) {
-                return;
+                continue;
             }
 
             if (p.argsReceived >= p.argsNeeded) {
-                return;
+                continue;
             }
 
             unassignedParams.push(p.paramDetails.param.name);
-        });
+        }
 
         return unassignedParams;
     }
