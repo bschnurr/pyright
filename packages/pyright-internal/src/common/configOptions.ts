@@ -1162,7 +1162,8 @@ export class ConfigOptions {
             } else {
                 this.include = [];
                 const filesList = configObj.include as string[];
-                filesList.forEach((fileSpec, index) => {
+                for (let index = 0; index < filesList.length; index++) {
+                    const fileSpec = filesList[index];
                     if (typeof fileSpec !== 'string') {
                         console.error(`Index ${index} of "include" array should be a string.`);
                     } else if (isAbsolute(fileSpec)) {
@@ -1170,7 +1171,7 @@ export class ConfigOptions {
                     } else {
                         this.include.push(getFileSpec(configDirUri, fileSpec));
                     }
-                });
+                }
             }
         }
 
@@ -1182,7 +1183,8 @@ export class ConfigOptions {
             } else {
                 this.exclude = [];
                 const filesList = configObj.exclude as string[];
-                filesList.forEach((fileSpec, index) => {
+                for (let index = 0; index < filesList.length; index++) {
+                    const fileSpec = filesList[index];
                     if (typeof fileSpec !== 'string') {
                         console.error(`Index ${index} of "exclude" array should be a string.`);
                     } else if (isAbsolute(fileSpec)) {
@@ -1190,7 +1192,7 @@ export class ConfigOptions {
                     } else {
                         this.exclude.push(getFileSpec(configDirUri, fileSpec));
                     }
-                });
+                }
             }
         }
 
@@ -1202,7 +1204,8 @@ export class ConfigOptions {
             } else {
                 this.ignore = [];
                 const filesList = configObj.ignore as string[];
-                filesList.forEach((fileSpec, index) => {
+                for (let index = 0; index < filesList.length; index++) {
+                    const fileSpec = filesList[index];
                     if (typeof fileSpec !== 'string') {
                         console.error(`Index ${index} of "ignore" array should be a string.`);
                     } else {
@@ -1212,7 +1215,7 @@ export class ConfigOptions {
                         // paths when the conf file is used with a language server.
                         this.ignore.push(getFileSpec(configDirUri, fileSpec));
                     }
-                });
+                }
             }
         }
 
@@ -1224,7 +1227,8 @@ export class ConfigOptions {
             } else {
                 this.strict = [];
                 const filesList = configObj.strict as string[];
-                filesList.forEach((fileSpec, index) => {
+                for (let index = 0; index < filesList.length; index++) {
+                    const fileSpec = filesList[index];
                     if (typeof fileSpec !== 'string') {
                         console.error(`Index ${index} of "strict" array should be a string.`);
                     } else if (isAbsolute(fileSpec)) {
@@ -1232,7 +1236,7 @@ export class ConfigOptions {
                     } else {
                         this.strict.push(getFileSpec(configDirUri, fileSpec));
                     }
-                });
+                }
             }
         }
 
@@ -1262,24 +1266,24 @@ export class ConfigOptions {
 
         // Apply overrides from the config file for the boolean rules.
         const configRuleSet = { ...this.diagnosticRuleSet };
-        getBooleanDiagnosticRules(/* includeNonOverridable */ true).forEach((ruleName) => {
+        for (const ruleName of getBooleanDiagnosticRules(/* includeNonOverridable */ true)) {
             unusedConfigKeys.delete(ruleName);
             (configRuleSet as any)[ruleName] = this._convertBoolean(
                 configObj[ruleName],
                 ruleName,
                 configRuleSet[ruleName] as boolean
             );
-        });
+        }
 
         // Apply overrides from the config file for the diagnostic level rules.
-        getDiagLevelDiagnosticRules().forEach((ruleName) => {
+        for (const ruleName of getDiagLevelDiagnosticRules()) {
             unusedConfigKeys.delete(ruleName);
             (configRuleSet as any)[ruleName] = this._convertDiagnosticLevel(
                 configObj[ruleName],
                 ruleName,
                 configRuleSet[ruleName] as DiagnosticLevel
             );
-        });
+        }
         this.diagnosticRuleSet = { ...configRuleSet };
 
         // Read the "venvPath".
@@ -1310,13 +1314,14 @@ export class ConfigOptions {
                 console.error(`Config "extraPaths" field must contain an array.`);
             } else {
                 const pathList = configObj.extraPaths as string[];
-                pathList.forEach((path, pathIndex) => {
+                for (let pathIndex = 0; pathIndex < pathList.length; pathIndex++) {
+                    const path = pathList[pathIndex];
                     if (typeof path !== 'string') {
                         console.error(`Config "extraPaths" field ${pathIndex} must be a string.`);
                     } else {
                         configExtraPaths!.push(configDirUri.resolvePaths(path));
                     }
-                });
+                }
                 this.defaultExtraPaths = [...configExtraPaths];
             }
         }
@@ -1412,7 +1417,7 @@ export class ConfigOptions {
                 console.error(`Config "defineConstant" field must contain a map indexed by constant names.`);
             } else {
                 const keys = Object.getOwnPropertyNames(configObj.defineConstant);
-                keys.forEach((key) => {
+                for (const key of keys) {
                     const value = configObj.defineConstant[key];
                     const valueType = typeof value;
                     if (valueType !== 'boolean' && valueType !== 'string') {
@@ -1420,7 +1425,7 @@ export class ConfigOptions {
                     } else {
                         this.defineConstant.set(key, value);
                     }
-                });
+                }
             }
         }
 
@@ -1492,9 +1497,9 @@ export class ConfigOptions {
         unusedConfigKeys.delete('executionEnvironments');
         unusedConfigKeys.delete('extends');
 
-        Array.from(unusedConfigKeys).forEach((unknownKey) => {
+        for (const unknownKey of Array.from(unusedConfigKeys)) {
             console.error(`Config contains unrecognized setting "${unknownKey}".`);
-        });
+        }
     }
 
     static resolveExtends(configObj: any, configDirUri: Uri): Uri | undefined {
@@ -1599,7 +1604,8 @@ export class ConfigOptions {
 
                 const execEnvironments = configObj.executionEnvironments as ExecutionEnvironment[];
 
-                execEnvironments.forEach((env, index) => {
+                for (let index = 0; index < execEnvironments.length; index++) {
+                    const env = execEnvironments[index];
                     const execEnv = this._initExecutionEnvironmentFromJson(
                         env,
                         configDirUri,
@@ -1614,7 +1620,7 @@ export class ConfigOptions {
                     if (execEnv) {
                         this.executionEnvironments.push(execEnv);
                     }
-                });
+                }
             }
         }
     }
@@ -1693,7 +1699,8 @@ export class ConfigOptions {
                     newExecEnv.extraPaths = [];
 
                     const pathList = envObj.extraPaths as string[];
-                    pathList.forEach((path, pathIndex) => {
+                    for (let pathIndex = 0; pathIndex < pathList.length; pathIndex++) {
+                        const path = pathList[pathIndex];
                         if (typeof path !== 'string') {
                             console.error(
                                 `Config executionEnvironments index ${index}:` +
@@ -1702,7 +1709,7 @@ export class ConfigOptions {
                         } else {
                             newExecEnv.extraPaths.push(configDirUri.resolvePaths(path));
                         }
-                    });
+                    }
                 }
             }
 
@@ -1742,28 +1749,28 @@ export class ConfigOptions {
             }
 
             // Apply overrides from the config file for the boolean overrides.
-            getBooleanDiagnosticRules(/* includeNonOverridable */ true).forEach((ruleName) => {
+            for (const ruleName of getBooleanDiagnosticRules(/* includeNonOverridable */ true)) {
                 unusedEnvKeys.delete(ruleName);
                 (newExecEnv.diagnosticRuleSet as any)[ruleName] = this._convertBoolean(
                     envObj[ruleName],
                     ruleName,
                     newExecEnv.diagnosticRuleSet[ruleName] as boolean
                 );
-            });
+            }
 
             // Apply overrides from the config file for the diagnostic level overrides.
-            getDiagLevelDiagnosticRules().forEach((ruleName) => {
+            for (const ruleName of getDiagLevelDiagnosticRules()) {
                 unusedEnvKeys.delete(ruleName);
                 (newExecEnv.diagnosticRuleSet as any)[ruleName] = this._convertDiagnosticLevel(
                     envObj[ruleName],
                     ruleName,
                     newExecEnv.diagnosticRuleSet[ruleName] as DiagnosticLevel
                 );
-            });
+            }
 
-            Array.from(unusedEnvKeys).forEach((unknownKey) => {
+            for (const unknownKey of Array.from(unusedEnvKeys)) {
                 console.error(`Config executionEnvironments index ${index}: unrecognized setting "${unknownKey}".`);
-            });
+            }
 
             return newExecEnv;
         } catch {
