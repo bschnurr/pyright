@@ -783,7 +783,7 @@ export class SourceFile {
 
                 this._writableData.commentDiagnostics = [];
 
-                commentDiags.forEach((commentDiag) => {
+                for (const commentDiag of commentDiags) {
                     this._writableData.commentDiagnostics.push(
                         new Diagnostic(
                             DiagnosticCategory.Error,
@@ -791,7 +791,7 @@ export class SourceFile {
                             convertTextRangeToRange(commentDiag.range, parseFileResults.tokenizerOutput.lines)
                         )
                     );
-                });
+                }
             } catch (e: any) {
                 const message: string =
                     (e.stack ? e.stack.toString() : undefined) ||
@@ -1177,7 +1177,7 @@ export class SourceFile {
                 }
             }
 
-            typeIgnoreLinesClone.forEach((ignoreComment) => {
+            for (const ignoreComment of typeIgnoreLinesClone.values()) {
                 if (this._writableData.tokenizerLines!) {
                     const rangeStart = ignoreComment.range.start;
                     const rangeEnd = rangeStart + ignoreComment.range.length;
@@ -1189,9 +1189,9 @@ export class SourceFile {
                         unnecessaryTypeIgnoreDiags.push(diag);
                     }
                 }
-            });
+            }
 
-            pyrightIgnoreLinesClone.forEach((ignoreComment) => {
+            for (const ignoreComment of pyrightIgnoreLinesClone.values()) {
                 if (this._writableData.tokenizerLines!) {
                     if (!ignoreComment.rulesList) {
                         const rangeStart = ignoreComment.range.start;
@@ -1204,7 +1204,7 @@ export class SourceFile {
                             unnecessaryTypeIgnoreDiags.push(diag);
                         }
                     } else {
-                        ignoreComment.rulesList.forEach((unusedRule) => {
+                        for (const unusedRule of ignoreComment.rulesList) {
                             const rangeStart = unusedRule.range.start;
                             const rangeEnd = rangeStart + unusedRule.range.length;
                             const range = convertOffsetsToRange(
@@ -1224,10 +1224,10 @@ export class SourceFile {
                                 diag.setRule(DiagnosticRule.reportUnnecessaryTypeIgnoreComment);
                                 unnecessaryTypeIgnoreDiags.push(diag);
                             }
-                        });
+                        }
                     }
                 }
-            });
+            }
         }
 
         if (
@@ -1236,7 +1236,7 @@ export class SourceFile {
         ) {
             const category = convertLevelToCategory(this._diagnosticRuleSet.reportImportCycles);
 
-            this._writableData.circularDependencies.forEach((cirDep) => {
+            for (const cirDep of this._writableData.circularDependencies) {
                 const diag = new Diagnostic(
                     category,
                     LocMessage.importCycleDetected() +
@@ -1249,7 +1249,7 @@ export class SourceFile {
                 );
                 diag.setRule(DiagnosticRule.reportImportCycles);
                 diagList.push(diag);
-            });
+            }
         }
 
         if (this._writableData.hitMaxImportDepth !== undefined) {
@@ -1537,15 +1537,18 @@ export class SourceFile {
     }
 
     private _fireFileDirtyEvent() {
-        this.serviceProvider.tryGet(ServiceKeys.stateMutationListeners)?.forEach((l) => {
-            try {
-                l.onFileDirty?.(this._uri);
-            } catch (ex: any) {
-                const console = this.serviceProvider.tryGet(ServiceKeys.console);
-                if (console) {
-                    console.error(`State mutation listener exception: ${ex.message}`);
+        const listeners = this.serviceProvider.tryGet(ServiceKeys.stateMutationListeners);
+        if (listeners) {
+            for (const l of listeners) {
+                try {
+                    l.onFileDirty?.(this._uri);
+                } catch (ex: any) {
+                    const console = this.serviceProvider.tryGet(ServiceKeys.console);
+                    if (console) {
+                        console.error(`State mutation listener exception: ${ex.message}`);
+                    }
                 }
             }
-        });
+        }
     }
 }
