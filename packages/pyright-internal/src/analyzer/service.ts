@@ -566,11 +566,11 @@ export class AnalyzerService {
             // Update the config options to include the auto-excluded directories.
             const excludes = this.options.configOptions?.exclude;
             if (enumResults.autoExcludedDirs && excludes) {
-                enumResults.autoExcludedDirs.forEach((excludedDir) => {
+                for (const excludedDir of enumResults.autoExcludedDirs) {
                     if (!FileSpec.isInPath(excludedDir, excludes)) {
                         excludes.push(getFileSpec(this._configOptions.projectRoot, `${excludedDir}/**`));
                     }
-                });
+                }
                 this._backgroundAnalysisProgram.setConfigOptions(this._configOptions);
             }
 
@@ -694,9 +694,9 @@ export class AnalyzerService {
                 log(this._console, logLevel, `Execution environment: ${execEnv.name}`);
                 log(this._console, logLevel, `  Extra paths:`);
                 if (execEnv.extraPaths.length > 0) {
-                    execEnv.extraPaths.forEach((path) => {
+                    for (const path of execEnv.extraPaths) {
                         log(this._console, logLevel, `    ${path.toUserVisibleString()}`);
-                    });
+                    }
                 } else {
                     log(this._console, logLevel, `    (none)`);
                 }
@@ -704,9 +704,9 @@ export class AnalyzerService {
                 log(this._console, logLevel, `  Python platform: ${execEnv.pythonPlatform ?? 'All'}`);
                 log(this._console, logLevel, `  Search paths:`);
                 const roots = importResolver.getImportRoots(execEnv, /* forLogging */ true);
-                roots.forEach((path) => {
+                for (const path of roots) {
                     log(this._console, logLevel, `    ${path.toUserVisibleString()}`);
-                });
+                }
             }
         }
 
@@ -923,10 +923,10 @@ export class AnalyzerService {
         // If there was no explicit set of excludes, add a few common ones to
         // avoid long scan times.
         if (configOptions.exclude.length === 0) {
-            defaultExcludes.forEach((exclude) => {
+            for (const exclude of defaultExcludes) {
                 this._console.info(`Auto-excluding ${exclude}`);
                 configOptions.exclude.push(getFileSpec(projectRoot, exclude));
-            });
+            }
 
             if (configOptions.autoExcludeVenv === undefined) {
                 configOptions.autoExcludeVenv = true;
@@ -963,10 +963,10 @@ export class AnalyzerService {
             );
 
             this._console.info(`Excluding typeshed stdlib stubs according to VERSIONS file:`);
-            excludeList.forEach((exclude) => {
+            for (const exclude of excludeList) {
                 this._console.info(`    ${exclude}`);
                 configOptions.exclude.push(getFileSpec(executionRoot, exclude.getFilePath()));
-            });
+            }
         }
 
         // If useLibraryCodeForTypes is unspecified, default it to true.
@@ -1013,9 +1013,11 @@ export class AnalyzerService {
                                 `${configOptions.venvPath.toUserVisibleString()} and venv ${configOptions.venv}.`
                         );
 
-                        importLogger?.getLogs().forEach((diag) => {
-                            this._console.error(`  ${diag}`);
-                        });
+                        if (importLogger) {
+                            for (const diag of importLogger.getLogs()) {
+                                this._console.error(`  ${diag}`);
+                            }
+                        }
                     }
                 }
             }
@@ -1127,17 +1129,17 @@ export class AnalyzerService {
             configOptions.pythonEnvironmentName = commandLineOptions.pythonEnvironmentName;
         }
 
-        commandLineOptions.includeFileSpecs.forEach((fileSpec) => {
+        for (const fileSpec of commandLineOptions.includeFileSpecs) {
             configOptions.include.push(getFileSpec(projectRoot, fileSpec));
-        });
+        }
 
-        commandLineOptions.excludeFileSpecs.forEach((fileSpec) => {
+        for (const fileSpec of commandLineOptions.excludeFileSpecs) {
             configOptions.exclude.push(getFileSpec(projectRoot, fileSpec));
-        });
+        }
 
-        commandLineOptions.ignoreFileSpecs.forEach((fileSpec) => {
+        for (const fileSpec of commandLineOptions.ignoreFileSpecs) {
             configOptions.ignore.push(getFileSpec(projectRoot, fileSpec));
-        });
+        }
 
         configOptions.applyDiagnosticOverrides(commandLineOptions.diagnosticSeverityOverrides);
         configOptions.applyDiagnosticOverrides(commandLineOptions.diagnosticBooleanOverrides);
@@ -1151,11 +1153,11 @@ export class AnalyzerService {
         // Override the include based on command-line settings.
         if (commandLineOptions.includeFileSpecsOverride) {
             configOptions.include = [];
-            commandLineOptions.includeFileSpecsOverride.forEach((include) => {
+            for (const include of commandLineOptions.includeFileSpecsOverride) {
                 configOptions.include.push(
                     getFileSpec(Uri.file(include, this.serviceProvider, /* checkRelative */ true), '.')
                 );
-            });
+            }
         }
 
         // Override the venvPath based on the command-line setting.
@@ -1385,11 +1387,12 @@ export class AnalyzerService {
     private _getTrackedFileList(fileMap: Map<string, Uri>): Uri[] {
         // And scan all matching open files. We need to do this since some of files are not backed by
         // files in file system but only exist in memory (ex, virtual workspace)
-        this._backgroundAnalysisProgram.program
-            .getOpened()
-            .map((o) => o.uri)
-            .filter((f) => f.isUntitled() || matchFileSpecs(this._program.configOptions, f))
-            .forEach((f) => fileMap.set(f.key, f));
+        for (const opened of this._backgroundAnalysisProgram.program.getOpened()) {
+            const f = opened.uri;
+            if (f.isUntitled() || matchFileSpecs(this._program.configOptions, f)) {
+                fileMap.set(f.key, f);
+            }
+        }
 
         const fileList = Array.from(fileMap.values());
         return fileList;
@@ -1455,11 +1458,13 @@ export class AnalyzerService {
                 }
 
                 // Add the implicit import paths.
-                importResult.filteredImplicitImports?.forEach((implicitImport) => {
-                    if (ImportResolver.isSupportedImportSourceFile(implicitImport.uri)) {
-                        filesToImport.push(implicitImport.uri);
+                if (importResult.filteredImplicitImports) {
+                    for (const [, implicitImport] of importResult.filteredImplicitImports) {
+                        if (ImportResolver.isSupportedImportSourceFile(implicitImport.uri)) {
+                            filesToImport.push(implicitImport.uri);
+                        }
                     }
-                });
+                }
 
                 this._backgroundAnalysisProgram.setAllowedThirdPartyImports([this._typeStubTargetImportName]);
                 this._backgroundAnalysisProgram.setTrackedFiles(filesToImport);
