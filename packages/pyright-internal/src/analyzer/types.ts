@@ -1952,7 +1952,7 @@ export namespace FunctionType {
         // Update the specialized parameter types as well.
         const specializedTypes = newFunction.priv.specializedTypes;
         if (specializedTypes) {
-            paramSpecValue.shared.parameters.forEach((_, index) => {
+            for (let index = 0; index < paramSpecValue.shared.parameters.length; index++) {
                 specializedTypes.parameterTypes.push(FunctionType.getParamType(paramSpecValue, index));
 
                 if (specializedTypes.parameterDefaultTypes) {
@@ -1960,7 +1960,7 @@ export namespace FunctionType {
                         FunctionType.getParamDefaultType(paramSpecValue, index)
                     );
                 }
-            });
+            }
         }
 
         newFunction.priv.constructorTypeVarScopeId = paramSpecValue.priv.constructorTypeVarScopeId;
@@ -2138,9 +2138,9 @@ export namespace FunctionType {
     }
 
     export function addDefaultParams(type: FunctionType, useUnknown = false) {
-        getDefaultParams(useUnknown).forEach((param) => {
+        for (const param of getDefaultParams(useUnknown)) {
             FunctionType.addParam(type, param);
-        });
+        }
     }
 
     export function getDefaultParams(useUnknown = false): FunctionParam[] {
@@ -2373,9 +2373,9 @@ export namespace OverloadedType {
             },
         };
 
-        overloads.forEach((overload) => {
+        for (const overload of overloads) {
             OverloadedType.addOverload(newType, overload);
-        });
+        }
 
         if (implementation && isFunction(implementation)) {
             implementation.priv.overloaded = newType;
@@ -2517,11 +2517,11 @@ export namespace TypeCondition {
 
         // Deduplicate the lists.
         const combined = Array.from(conditions1);
-        conditions2.forEach((c1) => {
+        for (const c1 of conditions2) {
             if (!combined.some((c2) => _compare(c1, c2) === 0)) {
                 combined.push(c1);
             }
-        });
+        }
 
         // Always keep the conditions sorted for easier comparison.
         return combined.sort(_compare);
@@ -2730,9 +2730,9 @@ export namespace UnionType {
                     unionType.priv.typeAliasSources = new Set<UnionType>();
                 }
 
-                sourcesToAdd.forEach((source) => {
+                for (const source of sourcesToAdd) {
                     unionType.priv.typeAliasSources!.add(source);
-                });
+                }
             }
         }
     }
@@ -3847,9 +3847,9 @@ export function combineTypes(subtypes: Type[], options?: CombineTypesOptions): T
             if (subtype.props?.typeAliasInfo) {
                 (typeAliasSources ??= new Set<UnionType>()).add(subtype);
             } else if (subtype.priv.typeAliasSources) {
-                subtype.priv.typeAliasSources.forEach((subtype) => {
-                    (typeAliasSources ??= new Set<UnionType>()).add(subtype);
-                });
+                for (const subtype2 of subtype.priv.typeAliasSources) {
+                    (typeAliasSources ??= new Set<UnionType>()).add(subtype2);
+                }
             }
         } else if (expandedTypes) {
             expandedTypes.push(subtype);
