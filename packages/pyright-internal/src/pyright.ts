@@ -772,9 +772,9 @@ function runWorkerMessageLoop(workerNum: number, tempFolderName: string) {
             case 'setOptions': {
                 const options = new PyrightCommandLineOptions(process.cwd(), false);
 
-                Object.keys(messageObj.data).forEach((key) => {
+                for (const key of Object.keys(messageObj.data)) {
                     (options as any)[key] = messageObj.data[key];
-                });
+                }
 
                 let logLevel = LogLevel.Error;
                 if (options.configSettings.verboseOutput) {
@@ -907,13 +907,13 @@ function buildTypeCompletenessReport(
     };
 
     // Add the general diagnostics.
-    completenessReport.generalDiagnostics.forEach((diag) => {
+    for (const diag of completenessReport.generalDiagnostics) {
         const jsonDiag = convertDiagnosticToJson('', diag);
         if (isDiagnosticIncluded(jsonDiag.severity, minSeverityLevel)) {
             report.generalDiagnostics.push(jsonDiag);
         }
         accumulateReportDiagnosticStats(jsonDiag, report);
-    });
+    }
 
     report.typeCompleteness = {
         packageName,
@@ -941,25 +941,25 @@ function buildTypeCompletenessReport(
     };
 
     // Add the modules.
-    completenessReport.modules.forEach((module) => {
+    for (const module of completenessReport.modules.values()) {
         const jsonModule: PyrightPublicModuleReport = {
             name: module.name,
         };
 
         report.typeCompleteness!.modules.push(jsonModule);
-    });
+    }
 
     // Add the symbols.
-    completenessReport.symbols.forEach((symbol) => {
+    for (const symbol of completenessReport.symbols.values()) {
         const diagnostics: PyrightJsonDiagnostic[] = [];
 
         // Convert and filter the diagnostics.
-        symbol.diagnostics.forEach((diag) => {
+        for (const diag of symbol.diagnostics) {
             const jsonDiag = convertDiagnosticToJson(diag.uri.getFilePath(), diag.diagnostic);
             if (isDiagnosticIncluded(jsonDiag.severity, minSeverityLevel)) {
                 diagnostics.push(jsonDiag);
             }
-        });
+        }
 
         const jsonSymbol: PyrightPublicSymbolReport = {
             category: PackageTypeVerifier.getSymbolCategoryString(symbol.category),
@@ -998,7 +998,7 @@ function buildTypeCompletenessReport(
                 report.typeCompleteness!.otherSymbolCounts.withUnknownType++;
             }
         }
-    });
+    }
 
     const unknownSymbolCount = report.typeCompleteness.exportedSymbolCounts.withUnknownType;
     const ambiguousSymbolCount = report.typeCompleteness.exportedSymbolCounts.withAmbiguousType;
@@ -1031,52 +1031,52 @@ function printTypeCompletenessReportText(results: PyrightJsonResults, verboseOut
     if (completenessReport.modules.length > 0) {
         console.info('');
         console.info(`Public modules: ${completenessReport.modules.length}`);
-        completenessReport.modules.forEach((module) => {
+        for (const module of completenessReport.modules) {
             console.info(`   ${module.name}`);
-        });
+        }
     }
 
     // Print list of all symbols.
     if (completenessReport.symbols.length > 0 && verboseOutput) {
         console.info('');
         console.info(`Exported symbols: ${completenessReport.symbols.filter((sym) => sym.isExported).length}`);
-        completenessReport.symbols.forEach((symbol) => {
+        for (const symbol of completenessReport.symbols) {
             if (symbol.isExported) {
                 const refCount = symbol.referenceCount > 1 ? ` (${symbol.referenceCount} references)` : '';
                 console.info(`   ${symbol.name}${refCount}`);
             }
-        });
+        }
 
         console.info('');
         console.info(`Other referenced symbols: ${completenessReport.symbols.filter((sym) => !sym.isExported).length}`);
-        completenessReport.symbols.forEach((symbol) => {
+        for (const symbol of completenessReport.symbols) {
             if (!symbol.isExported) {
                 const refCount = symbol.referenceCount > 1 ? ` (${symbol.referenceCount} references)` : '';
                 console.info(`   ${symbol.name}${refCount}`);
             }
-        });
+        }
     }
 
     // Print all the general diagnostics.
-    results.generalDiagnostics.forEach((diag) => {
+    for (const diag of results.generalDiagnostics) {
         logDiagnosticToConsole(diag);
-    });
+    }
 
     // Print all the symbol-specific diagnostics.
     console.info('');
     console.info(`Symbols used in public interface:`);
-    results.typeCompleteness!.symbols.forEach((symbol) => {
+    for (const symbol of results.typeCompleteness!.symbols) {
         let diagnostics = symbol.diagnostics;
         if (!verboseOutput) {
             diagnostics = diagnostics.filter((diag) => diag.severity === 'error');
         }
         if (diagnostics.length > 0) {
             console.info(`${symbol.name}`);
-            diagnostics.forEach((diag) => {
+            for (const diag of diagnostics) {
                 logDiagnosticToConsole(diag);
-            });
+            }
         }
-    });
+    }
 
     // Print other stats.
     console.info('');
@@ -1175,8 +1175,8 @@ function reportDiagnosticsAsJson(
         },
     };
 
-    fileDiagnostics.forEach((fileDiag) => {
-        fileDiag.diagnostics.sort(compareDiagnostics).forEach((diag) => {
+    for (const fileDiag of fileDiagnostics) {
+        for (const diag of fileDiag.diagnostics.sort(compareDiagnostics)) {
             if (
                 diag.category === DiagnosticCategory.Error ||
                 diag.category === DiagnosticCategory.Warning ||
@@ -1189,8 +1189,8 @@ function reportDiagnosticsAsJson(
 
                 accumulateReportDiagnosticStats(jsonDiag, report);
             }
-        });
-    });
+        }
+    }
 
     console.info(JSON.stringify(report, /* replacer */ undefined, 4));
 
@@ -1255,9 +1255,9 @@ function reportDiagnosticsAsText(
     let warningCount = 0;
     let informationCount = 0;
 
-    fileDiagnostics.forEach((fileDiagnostics) => {
+    for (const fileDiag of fileDiagnostics) {
         // Don't report unused code or deprecated diagnostics.
-        const fileErrorsAndWarnings = fileDiagnostics.diagnostics
+        const fileErrorsAndWarnings = fileDiag.diagnostics
             .filter(
                 (diag) =>
                     diag.category !== DiagnosticCategory.UnusedCode &&
@@ -1268,9 +1268,9 @@ function reportDiagnosticsAsText(
             .sort(compareDiagnostics);
 
         if (fileErrorsAndWarnings.length > 0) {
-            console.info(`${fileDiagnostics.fileUri.toUserVisibleString()}`);
-            fileErrorsAndWarnings.forEach((diag) => {
-                const jsonDiag = convertDiagnosticToJson(fileDiagnostics.fileUri.getFilePath(), diag);
+            console.info(`${fileDiag.fileUri.toUserVisibleString()}`);
+            for (const diag of fileErrorsAndWarnings) {
+                const jsonDiag = convertDiagnosticToJson(fileDiag.fileUri.getFilePath(), diag);
                 logDiagnosticToConsole(jsonDiag);
 
                 if (diag.category === DiagnosticCategory.Error) {
@@ -1280,9 +1280,9 @@ function reportDiagnosticsAsText(
                 } else if (diag.category === DiagnosticCategory.Information) {
                     informationCount++;
                 }
-            });
+            }
         }
-    });
+    }
 
     console.info(
         `${errorCount.toString()} ${errorCount === 1 ? 'error' : 'errors'}, ` +
