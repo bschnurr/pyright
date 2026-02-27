@@ -98,7 +98,7 @@ function _overrideRules(
 
     // Enable the strict rules as appropriate.
     for (const ruleName of boolRuleNames) {
-        if (skipRuleNames.find((r) => r === ruleName)) {
+        if (skipRuleNames.includes(ruleName)) {
             continue;
         }
 
@@ -108,7 +108,7 @@ function _overrideRules(
     }
 
     for (const ruleName of diagRuleNames) {
-        if (skipRuleNames.find((r) => r === ruleName)) {
+        if (skipRuleNames.includes(ruleName)) {
             continue;
         }
 
@@ -171,12 +171,18 @@ function _parsePyrightComment(
 
         // If it contains a "strict" operand, replace the existing
         // diagnostic rules with their strict counterparts.
-        if (operandList.some((s) => s.trim() === strictSetting)) {
-            _applyStrictRules(ruleSet);
-        } else if (operandList.some((s) => s.trim() === standardSetting)) {
-            _applyStandardRules(ruleSet);
-        } else if (operandList.some((s) => s.trim() === basicSetting)) {
-            _applyBasicRules(ruleSet);
+        for (const s of operandList) {
+            const trimmed = s.trim();
+            if (trimmed === strictSetting) {
+                _applyStrictRules(ruleSet);
+                break;
+            } else if (trimmed === standardSetting) {
+                _applyStandardRules(ruleSet);
+                break;
+            } else if (trimmed === basicSetting) {
+                _applyBasicRules(ruleSet);
+                break;
+            }
         }
 
         let rangeOffset = 0;
@@ -208,7 +214,7 @@ function _parsePyrightOperand(
 
     // Handle basic directives "basic", "standard" and "strict".
     if (operandSplit.length === 1) {
-        if (trimmedRule && [strictSetting, standardSetting, basicSetting].some((setting) => trimmedRule === setting)) {
+        if (trimmedRule && [strictSetting, standardSetting, basicSetting].includes(trimmedRule)) {
             return ruleSet;
         }
     }
@@ -222,7 +228,7 @@ function _parsePyrightOperand(
         length: ruleValue.length,
     });
 
-    if (diagLevelRules.find((r) => r === trimmedRule)) {
+    if ((diagLevelRules as readonly string[]).includes(trimmedRule)) {
         const diagLevelValue = _parseDiagLevel(trimmedRuleValue);
         if (diagLevelValue !== undefined) {
             (ruleSet as any)[trimmedRule] = diagLevelValue;
@@ -233,7 +239,7 @@ function _parsePyrightOperand(
             };
             diagnostics.push(diag);
         }
-    } else if (boolRules.find((r) => r === trimmedRule)) {
+    } else if ((boolRules as readonly string[]).includes(trimmedRule)) {
         const boolValue = _parseBoolSetting(trimmedRuleValue);
         if (boolValue !== undefined) {
             (ruleSet as any)[trimmedRule] = boolValue;

@@ -10,7 +10,16 @@
 
 import { ExecutionEnvironment, PythonPlatform } from '../common/configOptions';
 import { PythonReleaseLevel, PythonVersion } from '../common/pythonVersion';
-import { ArgCategory, ExpressionNode, NameNode, NumberNode, ParseNodeType, TupleNode } from '../parser/parseNodes';
+import {
+    ArgCategory,
+    ExpressionNode,
+    FormatStringNode,
+    NameNode,
+    NumberNode,
+    ParseNodeType,
+    StringNode,
+    TupleNode,
+} from '../parser/parseNodes';
 import { KeywordType, OperatorType } from '../parser/tokenizerTypes';
 
 // Returns undefined if the expression cannot be evaluated
@@ -110,14 +119,14 @@ export function evaluateStaticBoolExpression(
             node.d.rightExpr.nodeType === ParseNodeType.StringList
         ) {
             // Handle the special case of "sys.platform != 'X'"
-            const comparisonPlatform = node.d.rightExpr.d.strings.map((s) => s.d.value).join('');
+            const comparisonPlatform = _joinStringNodeValues(node.d.rightExpr.d.strings);
             const expectedPlatformName = _getExpectedPlatformNameFromPlatform(execEnv);
             return _evaluateStringBinaryOperation(node.d.operator, expectedPlatformName, comparisonPlatform);
         }
 
         if (_isOsNameInfoExpression(node.d.leftExpr) && node.d.rightExpr.nodeType === ParseNodeType.StringList) {
             // Handle the special case of "os.name == 'X'"
-            const comparisonOsName = node.d.rightExpr.d.strings.map((s) => s.d.value).join('');
+            const comparisonOsName = _joinStringNodeValues(node.d.rightExpr.d.strings);
             const expectedOsName = _getExpectedOsNameFromPlatform(execEnv);
             if (expectedOsName !== undefined) {
                 return _evaluateStringBinaryOperation(node.d.operator, expectedOsName, comparisonOsName);
@@ -134,7 +143,7 @@ export function evaluateStaticBoolExpression(
                 }
 
                 if (constantValue !== undefined && typeof constantValue === 'string') {
-                    const comparisonStringName = node.d.rightExpr.d.strings.map((s) => s.d.value).join('');
+                    const comparisonStringName = _joinStringNodeValues(node.d.rightExpr.d.strings);
                     return _evaluateStringBinaryOperation(node.d.operator, constantValue, comparisonStringName);
                 }
             }
@@ -159,7 +168,7 @@ export function evaluateStaticBoolExpression(
             typingImportAliases &&
             node.d.member.d.value === 'TYPE_CHECKING' &&
             node.d.leftExpr.nodeType === ParseNodeType.Name &&
-            typingImportAliases.some((alias) => alias === (node.d.leftExpr as NameNode).d.value)
+            typingImportAliases.includes((node.d.leftExpr as NameNode).d.value)
         ) {
             return true;
         }
@@ -303,7 +312,7 @@ function _evaluateStringBinaryOperation(
 function _isSysVersionInfoExpression(node: ExpressionNode, sysImportAliases: string[] = ['sys']): boolean {
     if (node.nodeType === ParseNodeType.MemberAccess) {
         if (node.d.leftExpr.nodeType === ParseNodeType.Name && node.d.member.d.value === 'version_info') {
-            if (sysImportAliases.some((alias) => alias === (node.d.leftExpr as NameNode).d.value)) {
+            if (sysImportAliases.includes((node.d.leftExpr as NameNode).d.value)) {
                 return true;
             }
         }
@@ -315,7 +324,7 @@ function _isSysVersionInfoExpression(node: ExpressionNode, sysImportAliases: str
 function _isSysPlatformInfoExpression(node: ExpressionNode, sysImportAliases: string[] = ['sys']): boolean {
     if (node.nodeType === ParseNodeType.MemberAccess) {
         if (node.d.leftExpr.nodeType === ParseNodeType.Name && node.d.member.d.value === 'platform') {
-            if (sysImportAliases.some((alias) => alias === (node.d.leftExpr as NameNode).d.value)) {
+            if (sysImportAliases.includes((node.d.leftExpr as NameNode).d.value)) {
                 return true;
             }
         }
@@ -360,4 +369,12 @@ function _getExpectedOsNameFromPlatform(execEnv: ExecutionEnvironment): string |
     }
 
     return undefined;
+}
+
+function _joinStringNodeValues(strings: readonly (StringNode | FormatStringNode)[]): string {
+    let result = '';
+    for (const s of strings) {
+        result += s.d.value;
+    }
+    return result;
 }

@@ -77,15 +77,13 @@ export function createProperty(
 
     // Clone the symbol table of the old class type.
     const fields = ClassType.getSymbolTable(propertyClass);
-    ClassType.getSymbolTable(decoratorType).forEach((symbol, name) => {
-        const ignoredMethods = ['__get__', '__set__', '__delete__'];
-
+    for (const [name, symbol] of ClassType.getSymbolTable(decoratorType)) {
         if (!symbol.isIgnoredForProtocolMatch()) {
-            if (!ignoredMethods.some((m) => m === name)) {
+            if (name !== '__get__' && name !== '__set__' && name !== '__delete__') {
                 fields.set(name, symbol);
             }
         }
-    });
+    }
 
     const propertyObject = ClassType.cloneAsInstance(propertyClass);
     propertyClass.priv.isAsymmetricDescriptor = false;
@@ -183,11 +181,11 @@ export function clonePropertyWithSetter(
 
     // Clone the symbol table of the old class type.
     const fields = ClassType.getSymbolTable(propertyClass);
-    ClassType.getSymbolTable(classType).forEach((symbol, name) => {
+    for (const [name, symbol] of ClassType.getSymbolTable(classType)) {
         if (!symbol.isIgnoredForProtocolMatch()) {
             fields.set(name, symbol);
         }
-    });
+    }
 
     // Update the __get__ and __delete__ methods if present.
     updateGetSetDelMethodForClonedProperty(evaluator, propertyObject);
@@ -242,11 +240,11 @@ export function clonePropertyWithDeleter(
 
     // Clone the symbol table of the old class type.
     const fields = ClassType.getSymbolTable(propertyClass);
-    ClassType.getSymbolTable(classType).forEach((symbol, name) => {
+    for (const [name, symbol] of ClassType.getSymbolTable(classType)) {
         if (!symbol.isIgnoredForProtocolMatch()) {
             fields.set(name, symbol);
         }
-    });
+    }
 
     // Update the __get__ and __set__ methods if present.
     updateGetSetDelMethodForClonedProperty(evaluator, propertyObject);
@@ -448,7 +446,7 @@ function addDecoratorMethodsToPropertySymbolTable(propertyObject: ClassType) {
     const fields = ClassType.getSymbolTable(propertyObject);
 
     // Fill in the getter, setter and deleter methods.
-    ['getter', 'setter', 'deleter'].forEach((accessorName) => {
+    for (const accessorName of ['getter', 'setter', 'deleter']) {
         const accessorFunction = FunctionType.createSynthesizedInstance(accessorName);
         FunctionType.addParam(
             accessorFunction,
@@ -461,7 +459,7 @@ function addDecoratorMethodsToPropertySymbolTable(propertyObject: ClassType) {
         accessorFunction.shared.declaredReturnType = propertyObject;
         const accessorSymbol = Symbol.createWithType(SymbolFlags.ClassMember, accessorFunction);
         fields.set(accessorName, accessorSymbol);
-    });
+    }
 }
 
 export function assignProperty(
@@ -500,7 +498,7 @@ export function assignProperty(
         },
     ];
 
-    accessors.forEach((accessorInfo) => {
+    for (const accessorInfo of accessors) {
         let destAccessType = accessorInfo.getFunction(destPropertyType);
 
         if (destAccessType && isFunction(destAccessType)) {
@@ -509,7 +507,7 @@ export function assignProperty(
             if (!srcAccessType || !isFunction(srcAccessType)) {
                 diag?.addMessage(accessorInfo.missingDiagMsg());
                 isAssignable = false;
-                return;
+                continue;
             }
 
             evaluator.inferReturnTypeIfNecessary(srcAccessType);
@@ -556,7 +554,7 @@ export function assignProperty(
                 isAssignable = false;
             }
         }
-    });
+    }
 
     return isAssignable;
 }

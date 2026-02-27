@@ -199,15 +199,17 @@ export function isDefinedInFile(decl: Declaration, fileUri: Uri) {
 
 export function getDeclarationsWithUsesLocalNameRemoved(decls: Declaration[]) {
     // Make a shallow copy and clear the "usesLocalName" field.
-    return decls.map((localDecl) => {
+    const result: Declaration[] = [];
+    for (const localDecl of decls) {
         if (localDecl.type !== DeclarationType.Alias) {
-            return localDecl;
+            result.push(localDecl);
+        } else {
+            const nonLocalDecl: AliasDeclaration = { ...localDecl };
+            nonLocalDecl.usesLocalName = false;
+            result.push(nonLocalDecl);
         }
-
-        const nonLocalDecl: AliasDeclaration = { ...localDecl };
-        nonLocalDecl.usesLocalName = false;
-        return nonLocalDecl;
-    });
+    }
+    return result;
 }
 
 export function synthesizeAliasDeclaration(uri: Uri): AliasDeclaration {
@@ -352,11 +354,11 @@ export function resolveAliasDeclaration(
 
         // Try not to use declarations within an except suite even if it's a typed
         // declaration. These are typically used for fallback exception handling.
-        declarations = declarations.filter((decl) => !decl.isInExceptSuite);
+        declarations = _filterOutExceptSuite(declarations);
 
         if (declarations.length === 0) {
             declarations = symbol.getDeclarations();
-            declarations = declarations.filter((decl) => !decl.isInExceptSuite);
+            declarations = _filterOutExceptSuite(declarations);
         }
 
         if (declarations.length === 0) {
@@ -372,7 +374,7 @@ export function resolveAliasDeclaration(
 
         // Prefer the last unvisited declaration in the list. This ensures that
         // we use all of the overloads if it's an overloaded function.
-        const unvisitedDecls = declarations.filter((decl) => !alreadyVisited.includes(decl));
+        const unvisitedDecls = _filterOutVisited(declarations, alreadyVisited);
         if (unvisitedDecls.length > 0) {
             curDeclaration = unvisitedDecls[unvisitedDecls.length - 1];
         } else {
@@ -399,7 +401,7 @@ export function resolveAliasDeclaration(
         }
 
         // Make sure we don't follow a circular list indefinitely.
-        if (alreadyVisited.find((decl) => decl === curDeclaration)) {
+        if (alreadyVisited.includes(curDeclaration)) {
             // If the path path of the alias points back to the original path, use the submodule
             // fallback instead. This happens in the case where a module's __init__.py file
             // imports a submodule using itself as the import target. For example, if
@@ -417,4 +419,24 @@ export function resolveAliasDeclaration(
         }
         alreadyVisited.push(curDeclaration);
     }
+}
+
+function _filterOutExceptSuite(declarations: Declaration[]): Declaration[] {
+    const result: Declaration[] = [];
+    for (const decl of declarations) {
+        if (!decl.isInExceptSuite) {
+            result.push(decl);
+        }
+    }
+    return result;
+}
+
+function _filterOutVisited(declarations: Declaration[], alreadyVisited: Declaration[]): Declaration[] {
+    const result: Declaration[] = [];
+    for (const decl of declarations) {
+        if (!alreadyVisited.includes(decl)) {
+            result.push(decl);
+        }
+    }
+    return result;
 }
