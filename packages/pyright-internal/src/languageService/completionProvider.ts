@@ -442,13 +442,13 @@ export class CompletionProvider {
 
         const completionMap = new CompletionMap();
 
-        symbolTable.forEach((symbol, name) => {
+        for (const [name, symbol] of symbolTable) {
             let decl = getLastTypedDeclarationForSymbol(symbol);
             if (decl && decl.type === DeclarationType.Function) {
                 if (StringUtils.isPatternInSymbol(partialName.d.value, name)) {
                     const declaredType = this.evaluator.getTypeForDeclaration(decl)?.type;
                     if (!declaredType) {
-                        return;
+                        continue;
                     }
 
                     let isProperty = isClassInstance(declaredType) && ClassType.isPropertyClass(declaredType);
@@ -459,7 +459,7 @@ export class CompletionProvider {
                     }
 
                     if (!isFunction(declaredType) && !isProperty) {
-                        return;
+                        continue;
                     }
 
                     if (isProperty) {
@@ -482,7 +482,7 @@ export class CompletionProvider {
                         name !== '__init_subclass__';
 
                     if (staticmethod !== isDeclaredStaticMethod || classmethod !== isDeclaredClassMethod) {
-                        return;
+                        continue;
                     }
 
                     const methodSignature = this._printMethodSignature(classResults.classType, decl);
@@ -513,7 +513,7 @@ export class CompletionProvider {
                     });
                 }
             }
-        });
+        }
 
         return completionMap;
     }
@@ -1757,14 +1757,14 @@ export class CompletionProvider {
         }
 
         const completionMap = new CompletionMap();
-        symbolTable.forEach((symbol, name) => {
+        for (const [name, symbol] of symbolTable) {
             if (
                 SymbolNameUtils.isPrivateName(name) ||
                 symbol.isPrivateMember() ||
                 symbol.isExternallyHidden() ||
                 !StringUtils.isPatternInSymbol(partialName.d.value, name)
             ) {
-                return;
+                continue;
             }
 
             const decls = symbol
@@ -1776,11 +1776,11 @@ export class CompletionProvider {
                 decls.length === 0 ||
                 decls.some((d) => d.node && ParseTreeUtils.getEnclosingClass(d.node, false) === enclosingClass)
             ) {
-                return;
+                continue;
             }
 
             this.addSymbol(name, symbol, partialName.d.value, completionMap, {});
-        });
+        }
 
         return completionMap.size > 0 ? completionMap : undefined;
     }
@@ -1795,21 +1795,21 @@ export class CompletionProvider {
         const completionMap = new CompletionMap();
 
         const enclosingFunc = ParseTreeUtils.getEnclosingFunction(partialName);
-        symbolTable.forEach((symbol, name) => {
+        for (const [name, symbol] of symbolTable) {
             const decl = getLastTypedDeclarationForSymbol(symbol);
             if (!decl || decl.type !== DeclarationType.Function) {
-                return;
+                continue;
             }
 
             if (!decl.node.d.decorators.some((d) => this._isOverload(d))) {
                 // Only consider ones that have overload decorator.
-                return;
+                continue;
             }
 
             const decls = symbol.getDeclarations();
             if (decls.length === 1 && decls.some((d) => d.node === enclosingFunc)) {
                 // Don't show itself.
-                return;
+                continue;
             }
 
             if (StringUtils.isPatternInSymbol(partialName.d.value, name)) {
@@ -1819,7 +1819,7 @@ export class CompletionProvider {
                     edits: { textEdit },
                 });
             }
-        });
+        }
 
         return completionMap;
 
@@ -2066,22 +2066,21 @@ export class CompletionProvider {
         postText: string,
         completionMap: CompletionMap
     ) {
-        signatureInfo.signatures.forEach((signature) => {
+        for (const signature of signatureInfo.signatures) {
             if (!signature.activeParam) {
-                return undefined;
+                continue;
             }
 
             const type = signature.type;
             const paramIndex = type.shared.parameters.indexOf(signature.activeParam);
 
             if (paramIndex < 0) {
-                return undefined;
+                continue;
             }
 
             const paramType = FunctionType.getParamType(type, paramIndex);
             this._addLiteralValuesForTargetType(paramType, priorWord, priorText, postText, completionMap);
-            return undefined;
-        });
+        }
     }
 
     private _addLiteralValuesForTargetType(
@@ -2092,7 +2091,7 @@ export class CompletionProvider {
         completionMap: CompletionMap
     ) {
         const quoteValue = this._getQuoteInfo(priorWord, priorText);
-        this._getSubTypesWithLiteralValues(type).forEach((v) => {
+        for (const v of this._getSubTypesWithLiteralValues(type)) {
             if (ClassType.isBuiltIn(v, 'str')) {
                 const value = printLiteralValue(v, quoteValue.quoteCharacter);
                 if (quoteValue.stringValue === undefined) {
@@ -2108,7 +2107,7 @@ export class CompletionProvider {
                     );
                 }
             }
-        });
+        }
     }
 
     private _getDictExpressionStringKeys(parseNode: ParseNode, excludeIds?: Set<number | undefined>) {
@@ -2194,7 +2193,7 @@ export class CompletionProvider {
         if (subscriptType) {
             const keys: string[] = [];
 
-            this._getSubTypesWithLiteralValues(subscriptType).forEach((v) => {
+            for (const v of this._getSubTypesWithLiteralValues(subscriptType)) {
                 if (
                     !ClassType.isBuiltIn(v, 'str') &&
                     !ClassType.isBuiltIn(v, 'int') &&
@@ -2202,11 +2201,11 @@ export class CompletionProvider {
                     !ClassType.isBuiltIn(v, 'bytes') &&
                     !ClassType.isEnumClass(v)
                 ) {
-                    return;
+                    continue;
                 }
 
                 keys.push(printLiteralValue(v, this.parseResults.tokenizerOutput.predominantSingleQuoteCharacter));
-            });
+            }
 
             if (keys.length > 0) {
                 return keys;
@@ -2582,20 +2581,18 @@ export class CompletionProvider {
         const quoteInfo = this._getQuoteInfo(priorWord, priorText);
         const excludes = new Set(existingKeys);
 
-        typedDicts.forEach((typedDict) => {
-            getTypedDictMembersForClass(this.evaluator, typedDict, /* allowNarrowed */ true).knownItems.forEach(
-                (_, key) => {
-                    // Unions of TypedDicts may define the same key.
-                    if (excludes.has(key) || completionMap.has(key)) {
-                        return;
-                    }
-
-                    excludes.add(key);
-
-                    this._addStringLiteralToCompletions(key, quoteInfo, postText, completionMap);
+        for (const typedDict of typedDicts) {
+            for (const key of getTypedDictMembersForClass(this.evaluator, typedDict, /* allowNarrowed */ true).knownItems.keys()) {
+                // Unions of TypedDicts may define the same key.
+                if (excludes.has(key) || completionMap.has(key)) {
+                    continue;
                 }
-            );
-        });
+
+                excludes.add(key);
+
+                this._addStringLiteralToCompletions(key, quoteInfo, postText, completionMap);
+            }
+        }
 
         return true;
     }
@@ -2832,13 +2829,15 @@ export class CompletionProvider {
         priorWord: string,
         completionMap: CompletionMap
     ) {
-        importInfo.implicitImports?.forEach((implImport) => {
-            if (!importFromNode.d.imports.find((imp) => imp.d.name.d.value === implImport.name)) {
-                this.addNameToCompletions(implImport.name, CompletionItemKind.Module, priorWord, completionMap, {
-                    moduleUri: implImport.uri,
-                });
+        if (importInfo.implicitImports) {
+            for (const implImport of importInfo.implicitImports.values()) {
+                if (!importFromNode.d.imports.find((imp) => imp.d.name.d.value === implImport.name)) {
+                    this.addNameToCompletions(implImport.name, CompletionItemKind.Module, priorWord, completionMap, {
+                        moduleUri: implImport.uri,
+                    });
+                }
             }
-        });
+        }
     }
 
     private _findMatchingKeywords(keywordList: string[], partialMatch: string): string[] {
@@ -2854,33 +2853,35 @@ export class CompletionProvider {
     private _addNamedParameters(signatureInfo: CallSignatureInfo, priorWord: string, completionMap: CompletionMap) {
         const argNameSet = new Set<string>();
 
-        signatureInfo.signatures.forEach((signature) => {
+        for (const signature of signatureInfo.signatures) {
             this._addNamedParametersToMap(signature.type, argNameSet);
-        });
+        }
 
         // Add keys from typed dict outside signatures.
-        signatureInfo.signatures.forEach((signature) => {
+        for (const signature of signatureInfo.signatures) {
             if (signature.type.priv.boundToType) {
                 const keys = Array.from(
                     signature.type.priv.boundToType.shared.typedDictEntries?.knownItems.keys() || []
                 );
-                keys.forEach((key: string) => argNameSet.add(key));
+                for (const key of keys) {
+                    argNameSet.add(key);
+                }
             }
-        });
+        }
 
         // Remove any named parameters that are already provided.
-        signatureInfo.callNode.d.args!.forEach((arg) => {
+        for (const arg of signatureInfo.callNode.d.args!) {
             if (arg.d.name) {
                 argNameSet.delete(arg.d.name.d.value);
             }
-        });
+        }
 
         // Add the remaining unique parameter names to the completion list.
-        argNameSet.forEach((argName) => {
+        for (const argName of argNameSet) {
             if (StringUtils.isPatternInSymbol(priorWord, argName)) {
                 const label = argName + '=';
                 if (completionMap.has(label)) {
-                    return;
+                    continue;
                 }
 
                 const completionItem = CompletionItem.create(label);
@@ -2896,13 +2897,13 @@ export class CompletionProvider {
 
                 completionMap.set(completionItem);
             }
-        });
+        }
     }
 
     private _addNamedParametersToMap(type: FunctionType, names: Set<string>) {
         const paramDetails = getParamListDetails(type);
 
-        paramDetails.params.forEach((paramInfo) => {
+        for (const paramInfo of paramDetails.params) {
             if (
                 paramInfo.param.name &&
                 paramInfo.kind !== ParamKind.Positional &&
@@ -2915,7 +2916,7 @@ export class CompletionProvider {
                     names.add(paramInfo.param.name);
                 }
             }
-        });
+        }
     }
 
     private _addSymbols(node: ParseNode, priorWord: string, completionMap: CompletionMap) {
@@ -2942,7 +2943,7 @@ export class CompletionProvider {
                 if (curNode.nodeType === ParseNodeType.Class) {
                     const classType = this.evaluator.getTypeOfClass(curNode);
                     if (classType && isInstantiableClass(classType.classType)) {
-                        classType.classType.shared.mro.forEach((baseClass, index) => {
+                        for (const baseClass of classType.classType.shared.mro) {
                             if (isInstantiableClass(baseClass)) {
                                 this._addSymbolsForSymbolTable(
                                     ClassType.getSymbolTable(baseClass),
@@ -2963,7 +2964,7 @@ export class CompletionProvider {
                                     completionMap
                                 );
                             }
-                        });
+                        }
                     }
                 }
                 break;
@@ -2985,7 +2986,7 @@ export class CompletionProvider {
         const insideTypeAnnotation =
             ParseTreeUtils.isWithinAnnotationComment(node) ||
             ParseTreeUtils.isWithinTypeAnnotation(node, /* requireQuotedAnnotation */ false);
-        symbolTable.forEach((symbol, name) => {
+        for (const [name, symbol] of symbolTable) {
             // If there are no declarations or the symbol is not
             // exported from this scope, don't include it in the
             // suggestion list unless we are in the same file.
@@ -3005,7 +3006,7 @@ export class CompletionProvider {
                     });
                 }
             }
-        });
+        }
     }
 
     private _shouldShowAutoParensForClass(symbol: Symbol, node: ParseNode) {
@@ -3175,12 +3176,12 @@ export class CompletionProvider {
             completionMap.set(completionItem);
         }
 
-        completions.forEach((modulePath, completionName) => {
+        for (const [completionName, modulePath] of completions) {
             this.addNameToCompletions(completionName, CompletionItemKind.Module, '', completionMap, {
                 sortText: this._makeSortText(SortCategory.ImportModuleName, completionName),
                 moduleUri: modulePath,
             });
-        });
+        }
 
         return completionMap;
     }
@@ -3263,15 +3264,17 @@ export class CompletionMap {
 
     toArray(): CompletionItem[] {
         const items: CompletionItem[] = [];
-        this._completions?.forEach((value) => {
-            if (Array.isArray(value)) {
-                value.forEach((item) => {
-                    items.push(item);
-                });
-            } else {
-                items.push(value);
+        if (this._completions) {
+            for (const value of this._completions.values()) {
+                if (Array.isArray(value)) {
+                    for (const item of value) {
+                        items.push(item);
+                    }
+                } else {
+                    items.push(value);
+                }
             }
-        });
+        }
         return items;
     }
 
