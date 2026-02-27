@@ -59,12 +59,14 @@ export class ConstraintSet {
     clone() {
         const constraintSet = new ConstraintSet();
 
-        this._typeVarMap.forEach((value) => {
+        for (const value of this._typeVarMap.values()) {
             constraintSet.setBounds(value.typeVar, value.lowerBound, value.upperBound, value.retainLiterals);
-        });
+        }
 
         if (this._scopeIds) {
-            this._scopeIds.forEach((scopeId) => constraintSet.addScopeId(scopeId));
+            for (const scopeId of this._scopeIds) {
+                constraintSet.addScopeId(scopeId);
+            }
         }
 
         return constraintSet;
@@ -84,7 +86,7 @@ export class ConstraintSet {
         }
 
         let isSame = true;
-        this._typeVarMap.forEach((value, key) => {
+        for (const [key, value] of this._typeVarMap) {
             const otherValue = other._typeVarMap.get(key);
             if (
                 !otherValue ||
@@ -92,8 +94,9 @@ export class ConstraintSet {
                 !typesMatch(value.upperBound, otherValue.upperBound)
             ) {
                 isSame = false;
+                break;
             }
-        });
+        }
 
         return isSame;
     }
@@ -108,7 +111,7 @@ export class ConstraintSet {
         let score = 0;
 
         // Sum the scores for the defined type vars.
-        this._typeVarMap.forEach((entry) => {
+        for (const entry of this._typeVarMap.values()) {
             // Add 1 to the score for each type variable defined.
             score += 1;
 
@@ -119,7 +122,7 @@ export class ConstraintSet {
             if (typeVarType) {
                 score += 1.0 - getComplexityScoreForType(typeVarType);
             }
-        });
+        }
 
         return score;
     }
@@ -135,7 +138,9 @@ export class ConstraintSet {
     }
 
     doForEachTypeVar(cb: (entry: TypeVarConstraints) => void) {
-        this._typeVarMap.forEach(cb);
+        for (const entry of this._typeVarMap.values()) {
+            cb(entry);
+        }
     }
 
     getTypeVar(typeVar: TypeVarType): TypeVarConstraints | undefined {
@@ -146,9 +151,9 @@ export class ConstraintSet {
     getTypeVars(): TypeVarConstraints[] {
         const entries: TypeVarConstraints[] = [];
 
-        this._typeVarMap.forEach((entry) => {
+        for (const entry of this._typeVarMap.values()) {
             entries.push(entry);
-        });
+        }
 
         return entries;
     }
@@ -194,7 +199,11 @@ export class ConstraintTracker {
     clone() {
         const newTypeVarMap = new ConstraintTracker();
 
-        newTypeVarMap._constraintSets = this._constraintSets.map((set) => set.clone());
+        const clonedSets: ConstraintSet[] = [];
+        for (const set of this._constraintSets) {
+            clonedSets.push(set.clone());
+        }
+        newTypeVarMap._constraintSets = clonedSets;
 
         return newTypeVarMap;
     }
@@ -203,14 +212,19 @@ export class ConstraintTracker {
         const cloned = this.clone();
 
         if (scopeId) {
-            const filteredSets = this._constraintSets.filter((context) => context.hasScopeId(scopeId));
+            const filteredSets: ConstraintSet[] = [];
+            for (const context of this._constraintSets) {
+                if (context.hasScopeId(scopeId)) {
+                    filteredSets.push(context);
+                }
+            }
 
             if (filteredSets.length > 0) {
                 cloned._constraintSets = filteredSets;
             } else {
-                cloned._constraintSets.forEach((context) => {
+                for (const context of cloned._constraintSets) {
                     context.addScopeId(scopeId);
-                });
+                }
             }
         }
 
@@ -219,13 +233,17 @@ export class ConstraintTracker {
 
     // Copies a cloned type var context back into this object.
     copyFromClone(clone: ConstraintTracker) {
-        this._constraintSets = clone._constraintSets.map((context) => context.clone());
+        const clonedSets: ConstraintSet[] = [];
+        for (const context of clone._constraintSets) {
+            clonedSets.push(context.clone());
+        }
+        this._constraintSets = clonedSets;
     }
 
     copyBounds(entry: TypeVarConstraints) {
-        this._constraintSets.forEach((set) => {
+        for (const set of this._constraintSets) {
             set.setBounds(entry.typeVar, entry.lowerBound, entry.upperBound, entry.retainLiterals);
-        });
+        }
     }
 
     // Copy the specified constraint sets into this type var context.
@@ -244,25 +262,35 @@ export class ConstraintTracker {
             return false;
         }
 
-        return this._constraintSets.every((set, index) => set.isSame(other._constraintSets[index]));
+        for (let i = 0; i < this._constraintSets.length; i++) {
+            if (!this._constraintSets[i].isSame(other._constraintSets[i])) {
+                return false;
+            }
+        }
+        return true;
     }
 
     isEmpty() {
-        return this._constraintSets.every((set) => set.isEmpty());
+        for (const set of this._constraintSets) {
+            if (!set.isEmpty()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     setBounds(typeVar: TypeVarType, lowerBound: Type | undefined, upperBound?: Type, retainLiterals?: boolean) {
-        return this._constraintSets.forEach((set) => {
+        for (const set of this._constraintSets) {
             set.setBounds(typeVar, lowerBound, upperBound, retainLiterals);
-        });
+        }
     }
 
     getScore() {
         let total = 0;
 
-        this._constraintSets.forEach((set) => {
+        for (const set of this._constraintSets) {
             total += set.getScore();
-        });
+        }
 
         // Return the average score among all constraint sets.
         return total / this._constraintSets.length;
@@ -277,9 +305,10 @@ export class ConstraintTracker {
     }
 
     doForEachConstraintSet(callback: (constraintSet: ConstraintSet, index: number) => void) {
-        this.getConstraintSets().forEach((set, index) => {
-            callback(set, index);
-        });
+        const sets = this.getConstraintSets();
+        for (let i = 0; i < sets.length; i++) {
+            callback(sets[i], i);
+        }
     }
 
     getConstraintSet(index: number) {

@@ -128,9 +128,9 @@ export function getTopLevelImports(parseTree: ModuleNode, includeImplicitImports
     let followsNonImportStatement = false;
     let foundFirstImportStatement = false;
 
-    parseTree.d.statements.forEach((statement) => {
+    for (const statement of parseTree.d.statements) {
         if (statement.nodeType === ParseNodeType.StatementList) {
-            statement.d.statements.forEach((subStatement) => {
+            for (const subStatement of statement.d.statements) {
                 if (subStatement.nodeType === ParseNodeType.Import) {
                     foundFirstImportStatement = true;
                     _processImportNode(subStatement, localImports, followsNonImportStatement);
@@ -147,11 +147,11 @@ export function getTopLevelImports(parseTree: ModuleNode, includeImplicitImports
                 } else {
                     followsNonImportStatement = foundFirstImportStatement;
                 }
-            });
+            }
         } else {
             followsNonImportStatement = foundFirstImportStatement;
         }
-    });
+    }
 
     return localImports;
 }
@@ -632,7 +632,7 @@ function _getInsertionEditForAutoImportInsertion(
 }
 
 function _processImportNode(node: ImportNode, localImports: ImportStatements, followsNonImportStatement: boolean) {
-    node.d.list.forEach((importAsNode) => {
+    for (const importAsNode of node.d.list) {
         const importResult = AnalyzerNodeInfo.getImportInfo(importAsNode.d.module);
         let resolvedPath: Uri | undefined;
 
@@ -660,7 +660,7 @@ function _processImportNode(node: ImportNode, localImports: ImportStatements, fo
                 localImports.mapByFilePath.set(resolvedPath.key, localImport);
             }
         }
-    });
+    }
 }
 
 function _processImportFromNode(
@@ -681,7 +681,13 @@ function _processImportFromNode(
 
         if (importResult.implicitImports) {
             for (const implicitImport of importResult.implicitImports.values()) {
-                const importFromAs = node.d.imports.find((i) => i.d.name.d.value === implicitImport.name);
+                let importFromAs: ImportFromAsNode | undefined;
+                for (const i of node.d.imports) {
+                    if (i.d.name.d.value === implicitImport.name) {
+                        importFromAs = i;
+                        break;
+                    }
+                }
                 if (importFromAs) {
                     localImports.implicitImports.set(implicitImport.uri.key, importFromAs);
                 }
@@ -721,7 +727,14 @@ export function formatModuleName(node: ModuleNameNode): string {
         moduleName = moduleName + '.';
     }
 
-    moduleName += node.d.nameParts.map((part) => part.d.value).join('.');
+    let namePartsStr = '';
+    for (let i = 0; i < node.d.nameParts.length; i++) {
+        if (i > 0) {
+            namePartsStr += '.';
+        }
+        namePartsStr += node.d.nameParts[i].d.value;
+    }
+    moduleName += namePartsStr;
 
     return moduleName;
 }
@@ -994,11 +1007,11 @@ export function getWildcardImportNames(lookupInfo: ImportLookupResult): string[]
         appendArray(namesToImport, lookupInfo.dunderAllNames);
     }
 
-    lookupInfo.symbolTable.forEach((symbol, name) => {
+    for (const [name, symbol] of lookupInfo.symbolTable) {
         if (!symbol.isExternallyHidden() && !name.startsWith('_')) {
             namesToImport!.push(name);
         }
-    });
+    }
 
     return namesToImport;
 }
