@@ -37,11 +37,12 @@ import {
 } from './codeFlowTypes';
 import { formatControlFlowGraph } from './codeFlowUtils';
 import { getBoundCallMethod, getBoundNewMethod } from './constructors';
+import { Declaration } from './declaration';
 import { isMatchingExpression, isPartialMatchingExpression, printExpression } from './parseTreeUtils';
 import { getPatternSubtypeNarrowingCallback } from './patternMatching';
 import { SpeculativeTypeTracker } from './typeCacheUtils';
 import { narrowForKeyAssignment } from './typedDicts';
-import { EvalFlags, Reachability, TypeEvaluator, TypeResult } from './typeEvaluatorTypes';
+import { ArgWithExpression, EvalFlags, Reachability, TypeEvaluator, TypeResult } from './typeEvaluatorTypes';
 import { getTypeNarrowingCallback } from './typeGuards';
 import {
     ClassType,
@@ -357,11 +358,11 @@ export function getCodeFlowEngine(
                     // types we've accumulated so far.
                     const typesToCombine: Type[] = [];
 
-                    cachedEntry.incompleteSubtypes.forEach((t) => {
+                    for (const t of cachedEntry.incompleteSubtypes) {
                         if (t.type) {
                             typesToCombine.push(t.type);
                         }
-                    });
+                    }
 
                     combinedType = typesToCombine.length > 0 ? combineTypes(typesToCombine) : undefined;
                 }
@@ -414,11 +415,13 @@ export function getCodeFlowEngine(
 
                 const typesToCombine: Type[] = [];
 
-                cacheEntry.incompleteSubtypes?.forEach((entry) => {
-                    if (entry.type && !isIncompleteUnknown(entry.type)) {
-                        typesToCombine.push(cleanIncompleteUnknown(entry.type));
+                if (cacheEntry.incompleteSubtypes) {
+                    for (const entry of cacheEntry.incompleteSubtypes) {
+                        if (entry.type && !isIncompleteUnknown(entry.type)) {
+                            typesToCombine.push(cleanIncompleteUnknown(entry.type));
+                        }
                     }
-                });
+                }
 
                 return combineTypes(typesToCombine);
             }
@@ -637,9 +640,13 @@ export function getCodeFlowEngine(
                             // Determine whether any of the context managers support exception
                             // suppression. If not, none of its antecedents are reachable.
                             const contextMgrNode = curFlowNode as FlowPostContextManagerLabel;
-                            const contextManagerSwallowsExceptions = contextMgrNode.expressions.some((expr) =>
-                                isExceptionContextManager(evaluator, expr, contextMgrNode.isAsync)
-                            );
+                            let contextManagerSwallowsExceptions = false;
+                            for (const expr of contextMgrNode.expressions) {
+                                if (isExceptionContextManager(evaluator, expr, contextMgrNode.isAsync)) {
+                                    contextManagerSwallowsExceptions = true;
+                                    break;
+                                }
+                            }
 
                             if (contextManagerSwallowsExceptions === contextMgrNode.blockIfSwallowsExceptions) {
                                 // Do not explore any further along this code flow path.
@@ -654,10 +661,16 @@ export function getCodeFlowEngine(
                                 subexpressionReferenceKeys = createKeysForReferenceSubexpressions(reference);
                             }
 
+                            let affectsReference = false;
+                            for (const key of subexpressionReferenceKeys) {
+                                if (branchFlowNode.affectedExpressions!.has(key)) {
+                                    affectsReference = true;
+                                    break;
+                                }
+                            }
+
                             if (
-                                !subexpressionReferenceKeys.some((key) =>
-                                    branchFlowNode.affectedExpressions!.has(key)
-                                ) &&
+                                !affectsReference &&
                                 getFlowNodeReachability(curFlowNode, branchFlowNode.preBranchAntecedent) ===
                                     Reachability.Reachable
                             ) {
@@ -680,7 +693,15 @@ export function getCodeFlowEngine(
                                 subexpressionReferenceKeys = createKeysForReferenceSubexpressions(reference);
                             }
 
-                            if (!subexpressionReferenceKeys.some((key) => loopNode.affectedExpressions!.has(key))) {
+                            let loopAffectsRef = false;
+                            for (const key of subexpressionReferenceKeys) {
+                                if (loopNode.affectedExpressions!.has(key)) {
+                                    loopAffectsRef = true;
+                                    break;
+                                }
+                            }
+
+                            if (!loopAffectsRef) {
                                 curFlowNode = loopNode.antecedents[0];
                                 continue;
                             }
@@ -917,7 +938,7 @@ export function getCodeFlowEngine(
                         const wildcardImportFlowNode = curFlowNode as FlowWildcardImport;
                         if (reference && reference.nodeType === ParseNodeType.Name) {
                             const nameValue = reference.d.value;
-                            if (wildcardImportFlowNode.names.some((name) => name === nameValue)) {
+                            if (wildcardImportFlowNode.names.includes(nameValue)) {
                                 return preventRecursion(curFlowNode, () => {
                                     const type = getTypeFromWildcardImport(wildcardImportFlowNode, nameValue);
                                     return setCacheEntry(curFlowNode, type, /* isIncomplete */ false);
@@ -981,38 +1002,58 @@ export function getCodeFlowEngine(
                     );
                 } else if (
                     cacheEntry.incompleteSubtypes &&
-                    cacheEntry.incompleteSubtypes.length === loopNode.antecedents.length &&
-                    cacheEntry.incompleteSubtypes.some((subtype) => subtype.isPending)
+                    cacheEntry.incompleteSubtypes.length === loopNode.antecedents.length
                 ) {
-                    // If entries have been added for all antecedents and there are pending entries
-                    // that have not been evaluated even once, treat it as incomplete. We clean
-                    // any incomplete unknowns from the type here to assist with type convergence.
-                    return FlowNodeTypeResult.create(
-                        cleanIncompleteUnknownForCacheEntry(cacheEntry),
-                        /* isIncomplete */ true
-                    );
+                    let hasPendingSubtype = false;
+                    for (const subtype of cacheEntry.incompleteSubtypes) {
+                        if (subtype.isPending) {
+                            hasPendingSubtype = true;
+                            break;
+                        }
+                    }
+
+                    if (hasPendingSubtype) {
+                        // If entries have been added for all antecedents and there are pending entries
+                        // that have not been evaluated even once, treat it as incomplete. We clean
+                        // any incomplete unknowns from the type here to assist with type convergence.
+                        return FlowNodeTypeResult.create(
+                            cleanIncompleteUnknownForCacheEntry(cacheEntry),
+                            /* isIncomplete */ true
+                        );
+                    }
                 }
+
+                // cacheEntry is guaranteed to be defined: either assigned in the
+                // if-branch or was already non-undefined in the else-if branch.
+                assert(cacheEntry !== undefined);
 
                 let attemptCount = 0;
 
                 while (true) {
                     let sawIncomplete = false;
                     let sawPending = false;
-                    let isProvenReachable =
-                        reference === undefined &&
-                        cacheEntry.incompleteSubtypes?.some((subtype) => subtype.type !== undefined);
+                    let isProvenReachable = false;
+                    if (reference === undefined && cacheEntry!.incompleteSubtypes) {
+                        for (const subtype of cacheEntry!.incompleteSubtypes) {
+                            if (subtype.type !== undefined) {
+                                isProvenReachable = true;
+                                break;
+                            }
+                        }
+                    }
                     let firstAntecedentTypeIsIncomplete = false;
                     let firstAntecedentTypeIsPending = false;
 
-                    loopNode.antecedents.forEach((antecedent, index) => {
+                    for (let index = 0; index < loopNode.antecedents.length; index++) {
+                        const antecedent = loopNode.antecedents[index];
                         // If we've trying to determine reachability and we've already proven
                         // reachability, then we're done.
                         if (reference === undefined && isProvenReachable) {
-                            return;
+                            break;
                         }
 
                         if (firstAntecedentTypeIsPending && index > 0) {
-                            return;
+                            break;
                         }
 
                         cacheEntry = getCacheEntry(loopNode)!;
@@ -1039,7 +1080,7 @@ export function getCodeFlowEngine(
                             } else {
                                 sawIncomplete = true;
                                 sawPending = true;
-                                return;
+                                continue;
                             }
                         }
 
@@ -1061,7 +1102,7 @@ export function getCodeFlowEngine(
                                     console.log('Types failed to converge during code flow analysis');
                                 }
                                 maxConvergenceLimitHit = true;
-                                return;
+                                continue;
                             }
 
                             // Set this entry to "pending" to prevent infinite recursion.
@@ -1113,7 +1154,7 @@ export function getCodeFlowEngine(
                         if (reference === undefined && cacheEntry?.type !== undefined) {
                             isProvenReachable = true;
                         }
-                    });
+                    }
 
                     if (isProvenReachable) {
                         // If we saw a pending entry, do not save over the top of the cache
@@ -1124,7 +1165,7 @@ export function getCodeFlowEngine(
                             : setCacheEntry(loopNode, UnknownType.create(), /* isIncomplete */ false);
                     }
 
-                    let effectiveType = cacheEntry.type;
+                    let effectiveType = cacheEntry!.type;
                     if (sawIncomplete) {
                         // If there is an incomplete "Unknown" type within a union type, remove
                         // it. Otherwise we might end up resolving the cycle with a type
@@ -1423,11 +1464,14 @@ export function getCodeFlowEngine(
                         // Determine whether any of the context managers support exception
                         // suppression. If not, none of its antecedents are reachable.
                         const contextMgrNode = curFlowNode as FlowPostContextManagerLabel;
-                        if (
-                            !contextMgrNode.expressions.some((expr) =>
-                                isExceptionContextManager(evaluator, expr, contextMgrNode.isAsync)
-                            )
-                        ) {
+                        let hasSwallowingExpr = false;
+                        for (const expr of contextMgrNode.expressions) {
+                            if (isExceptionContextManager(evaluator, expr, contextMgrNode.isAsync)) {
+                                hasSwallowingExpr = true;
+                                break;
+                            }
+                        }
+                        if (!hasSwallowingExpr) {
                             return cacheReachabilityResult(Reachability.UnreachableByAnalysis);
                         }
                     }
@@ -1597,9 +1641,15 @@ export function getCodeFlowEngine(
                                         typeVar
                                     );
 
-                                    return priorRemainingConstraints.filter((subtype) =>
-                                        ClassType.isSameGenericClass(subtype, ClassType.cloneAsInstance(classType))
-                                    );
+                                    const filtered: ClassType[] = [];
+                                    for (const subtype of priorRemainingConstraints) {
+                                        if (
+                                            ClassType.isSameGenericClass(subtype, ClassType.cloneAsInstance(classType))
+                                        ) {
+                                            filtered.push(subtype);
+                                        }
+                                    }
+                                    return filtered;
                                 }
                             }
                         }
@@ -1646,13 +1696,19 @@ export function getCodeFlowEngine(
                             ).type;
 
                             if (isInstantiableClass(arg1Type)) {
-                                return priorRemainingConstraints.filter((subtype) => {
+                                const filtered: ClassType[] = [];
+                                for (const subtype of priorRemainingConstraints) {
                                     if (ClassType.isSameGenericClass(subtype, ClassType.cloneAsInstance(arg1Type))) {
-                                        return isPositiveTest;
+                                        if (isPositiveTest) {
+                                            filtered.push(subtype);
+                                        }
                                     } else {
-                                        return !isPositiveTest;
+                                        if (!isPositiveTest) {
+                                            filtered.push(subtype);
+                                        }
                                     }
-                                });
+                                }
+                                return filtered;
                             }
                         }
                     }
@@ -1671,7 +1727,14 @@ export function getCodeFlowEngine(
                         const constraintsToAdd = narrowConstrainedTypeVarRecursive(antecedent, typeVar);
 
                         for (const constraint of constraintsToAdd) {
-                            if (!newConstraints.some((t) => isTypeSame(t, constraint))) {
+                            let isDuplicate = false;
+                            for (const t of newConstraints) {
+                                if (isTypeSame(t, constraint)) {
+                                    isDuplicate = true;
+                                    break;
+                                }
+                            }
+                            if (!isDuplicate) {
                                 newConstraints.push(constraint);
                             }
                         }
@@ -1704,13 +1767,17 @@ export function getCodeFlowEngine(
                     isCompatible = false;
                 }
             } else if (subtype.props?.condition) {
-                if (
-                    !subtype.props.condition.some(
-                        (condition) =>
-                            TypeVarType.hasConstraints(condition.typeVar) &&
-                            condition.typeVar.priv.nameWithScope === typeVar.priv.nameWithScope
-                    )
-                ) {
+                let hasMatchingCondition = false;
+                for (const condition of subtype.props.condition) {
+                    if (
+                        TypeVarType.hasConstraints(condition.typeVar) &&
+                        condition.typeVar.priv.nameWithScope === typeVar.priv.nameWithScope
+                    ) {
+                        hasMatchingCondition = true;
+                        break;
+                    }
+                }
+                if (!hasMatchingCondition) {
                     isCompatible = false;
                 }
             } else {
@@ -1807,13 +1874,13 @@ export function getCodeFlowEngine(
                     let overloadCount = 0;
                     let noReturnOverloadCount = 0;
 
-                    OverloadedType.getOverloads(callSubtype).forEach((overload) => {
+                    for (const overload of OverloadedType.getOverloads(callSubtype)) {
                         overloadCount++;
 
                         if (isFunctionNoReturn(overload, isCallAwaited)) {
                             noReturnOverloadCount++;
                         }
-                    });
+                    }
 
                     // Was at least one of the overloaded return types NoReturn?
                     if (noReturnOverloadCount > 0) {
@@ -1823,9 +1890,13 @@ export function getCodeFlowEngine(
                         } else {
                             // Perform a more complete evaluation to determine whether
                             // the applicable overload returns a NoReturn.
+                            const convertedArgs: ArgWithExpression[] = [];
+                            for (const arg of node.d.args) {
+                                convertedArgs.push(evaluator.convertNodeToArg(arg));
+                            }
                             const callResult = evaluator.validateOverloadedArgTypes(
                                 node,
-                                node.d.args.map((arg) => evaluator.convertNodeToArg(arg)),
+                                convertedArgs,
                                 { type: callSubtype, isIncomplete: callTypeResult.isIncomplete },
                                 /* constraints */ undefined,
                                 /* skipUnknownArgCheck */ false,
@@ -2004,7 +2075,13 @@ export function getCodeFlowEngine(
         const symbolWithScope = evaluator.lookUpSymbolRecursive(flowNode.node, name, /* honorCodeFlow */ false);
         assert(symbolWithScope !== undefined);
         const decls = symbolWithScope!.symbol.getDeclarations();
-        const wildcardDecl = decls.find((decl) => decl.node === flowNode.node);
+        let wildcardDecl: Declaration | undefined;
+        for (const decl of decls) {
+            if (decl.node === flowNode.node) {
+                wildcardDecl = decl;
+                break;
+            }
+        }
 
         if (!wildcardDecl) {
             return UnknownType.create();
