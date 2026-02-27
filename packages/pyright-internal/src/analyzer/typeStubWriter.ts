@@ -521,7 +521,7 @@ export class TypeStubWriter extends ParseTreeWalker {
         const currentScope = getScopeForNode(node);
         if (currentScope) {
             // Record the input for later.
-            node.d.list.forEach((imp) => {
+            for (const imp of node.d.list) {
                 const moduleName = this._printModuleName(imp.d.module);
                 if (!this._trackedImportAs.has(moduleName)) {
                     const symbolName = imp.d.alias
@@ -539,7 +539,7 @@ export class TypeStubWriter extends ParseTreeWalker {
                         this._trackedImportAs.set(moduleName, trackedImportAs);
                     }
                 }
-            });
+            }
         }
 
         return false;
@@ -560,7 +560,7 @@ export class TypeStubWriter extends ParseTreeWalker {
                 this._trackedImportFrom.set(moduleName, trackedImportFrom);
             }
 
-            node.d.imports.forEach((imp) => {
+            for (const imp of node.d.imports) {
                 const symbolName = imp.d.alias ? imp.d.alias.d.value : imp.d.name.d.value;
                 const symbolInfo = currentScope.lookUpSymbolRecursive(symbolName);
                 if (symbolInfo) {
@@ -571,7 +571,7 @@ export class TypeStubWriter extends ParseTreeWalker {
                         false
                     );
                 }
-            });
+            }
         }
 
         return false;
@@ -615,9 +615,9 @@ export class TypeStubWriter extends ParseTreeWalker {
     }
 
     private _emitDecorators(decorators: DecoratorNode[]) {
-        decorators.forEach((decorator) => {
+        for (const decorator of decorators) {
             this._emitLine('@' + this._printExpression(decorator.d.expr));
-        });
+        }
     }
 
     private _printHeaderDocString() {
@@ -731,7 +731,7 @@ export class TypeStubWriter extends ParseTreeWalker {
         let lineEmitted = false;
 
         // Emit the "import" statements.
-        this._trackedImportAs.forEach((imp) => {
+        for (const imp of this._trackedImportAs.values()) {
             if (this._accessedImportedSymbols.has(imp.alias || imp.importName)) {
                 imp.isAccessed = true;
             }
@@ -744,15 +744,15 @@ export class TypeStubWriter extends ParseTreeWalker {
                 importStr += this._lineEnd;
                 lineEmitted = true;
             }
-        });
+        }
 
         // Emit the "import from" statements.
-        this._trackedImportFrom.forEach((imp) => {
-            imp.symbols.forEach((s) => {
+        for (const imp of this._trackedImportFrom.values()) {
+            for (const s of imp.symbols) {
                 if (this._accessedImportedSymbols.has(s.alias || s.name)) {
                     s.isAccessed = true;
                 }
-            });
+            }
 
             if (imp.isWildcardImport) {
                 importStr += `from ${imp.importName} import *` + this._lineEnd;
@@ -789,7 +789,7 @@ export class TypeStubWriter extends ParseTreeWalker {
                 importStr += this._lineEnd;
                 lineEmitted = true;
             }
-        });
+        }
 
         if (lineEmitted) {
             importStr += this._lineEnd;
