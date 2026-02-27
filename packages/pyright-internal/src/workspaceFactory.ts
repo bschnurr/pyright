@@ -130,49 +130,51 @@ export class WorkspaceFactory implements IWorkspaceFactory {
     handleInitialize(params: InitializeParams) {
         // Create a service instance for each of the workspace folders.
         if (params.workspaceFolders) {
-            params.workspaceFolders.forEach((folder) => {
+            for (const folder of params.workspaceFolders) {
                 this._add(Uri.parse(folder.uri, this._serviceProvider), folder.name, [WellKnownWorkspaceKinds.Regular]);
-            });
+            }
         } else if (params.rootPath) {
             this._add(Uri.file(params.rootPath, this._serviceProvider), '', [WellKnownWorkspaceKinds.Regular]);
         }
     }
 
     handleWorkspaceFoldersChanged(params: WorkspaceFoldersChangeEvent, workspaces: lspWorkspaceFolder[] | null) {
-        params.removed.forEach((workspaceInfo) => {
+        for (const workspaceInfo of params.removed) {
             const uri = Uri.parse(workspaceInfo.uri, this._serviceProvider);
             // Delete all workspaces for this folder. Even the ones generated for notebook kernels.
             const workspaces = this.getNonDefaultWorkspaces().filter((w) => w.rootUri.equals(uri));
-            workspaces.forEach((w) => {
+            for (const w of workspaces) {
                 this._remove(w);
-            });
-        });
+            }
+        }
 
-        params.added.forEach((workspaceInfo) => {
+        for (const workspaceInfo of params.added) {
             const uri = Uri.parse(workspaceInfo.uri, this._serviceProvider);
 
             // Skip if workspace already exists (e.g., created during initialize)
             if (this.getNonDefaultWorkspaces().some((w) => w.rootUri.equals(uri))) {
-                return;
+                continue;
             }
 
             this._add(uri, workspaceInfo.name, [WellKnownWorkspaceKinds.Regular]);
-        });
+        }
 
         // Ensure name changes are also reflected.
         const foldersToCheck =
             workspaces?.filter(
                 (w) => !params.added.some((a) => a.uri === w.uri) && !params.removed.some((a) => a.uri === w.uri)
             ) ?? [];
-        foldersToCheck.forEach((workspaceInfo) => {
+        for (const workspaceInfo of foldersToCheck) {
             const uri = Uri.parse(workspaceInfo.uri, this._serviceProvider);
 
             const workspaces = this.getNonDefaultWorkspaces().filter(
                 (w) => w.rootUri.equals(uri) && w.workspaceName !== workspaceInfo.name
             );
 
-            workspaces.forEach((w) => renameWorkspace(w, workspaceInfo.name));
-        });
+            for (const w of workspaces) {
+                renameWorkspace(w, workspaceInfo.name);
+            }
+        }
     }
 
     items() {
@@ -180,10 +182,10 @@ export class WorkspaceFactory implements IWorkspaceFactory {
     }
 
     clear() {
-        this._map.forEach((workspace) => {
+        for (const workspace of this._map.values()) {
             workspace.isInitialized.resolve();
             workspace.service.dispose();
-        });
+        }
         this._map.clear();
         this._console.log(`WorkspaceFactory ${this._id} clear`);
     }
@@ -215,17 +217,17 @@ export class WorkspaceFactory implements IWorkspaceFactory {
 
     getNonDefaultWorkspaces(kind?: string): NormalWorkspace[] {
         const workspaces: NormalWorkspace[] = [];
-        this._map.forEach((workspace) => {
+        for (const workspace of this._map.values()) {
             if (!workspace.rootUri) {
-                return;
+                continue;
             }
 
             if (kind && !workspace.kinds.some((k) => k === kind)) {
-                return;
+                continue;
             }
 
             workspaces.push(workspace);
-        });
+        }
 
         return workspaces;
     }

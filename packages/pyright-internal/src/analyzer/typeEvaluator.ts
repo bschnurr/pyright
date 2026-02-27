@@ -4290,7 +4290,11 @@ export function createTypeEvaluator(
 
                     // Expand the list of constrained subtypes, filtering out any that are
                     // disallowed by the conditionFilter.
-                    for (let constraintIndex = 0; constraintIndex < subtype.shared.constraints.length; constraintIndex++) {
+                    for (
+                        let constraintIndex = 0;
+                        constraintIndex < subtype.shared.constraints.length;
+                        constraintIndex++
+                    ) {
                         let constraintType = subtype.shared.constraints[constraintIndex];
                         if (conditionFilter) {
                             const typeVarName = TypeVarType.getNameWithScope(subtype);
@@ -4816,9 +4820,9 @@ export function createTypeEvaluator(
             }
 
             case ParseNodeType.Tuple: {
-                node.d.items.forEach((expr) => {
+                for (const expr of node.d.items) {
                     verifyDeleteExpression(expr);
-                });
+                }
                 break;
             }
 
@@ -9722,12 +9726,7 @@ export function createTypeEvaluator(
         for (const match of matches) {
             returnTypes.push(match.returnType);
         }
-        if (
-            areTypesSame(
-                returnTypes,
-                { treatAnySameAsUnknown: true }
-            )
-        ) {
+        if (areTypesSame(returnTypes, { treatAnySameAsUnknown: true })) {
             return [matches[0]];
         }
 
@@ -9992,9 +9991,11 @@ export function createTypeEvaluator(
                             types.push(arg.typeResult.type);
                         } else if (arg.valueExpression) {
                             const valueExpressionNode = arg.valueExpression;
-                            types.push(useSpeculativeMode(valueExpressionNode, () => {
-                                return getTypeOfExpression(valueExpressionNode).type;
-                            }));
+                            types.push(
+                                useSpeculativeMode(valueExpressionNode, () => {
+                                    return getTypeOfExpression(valueExpressionNode).type;
+                                })
+                            );
                         } else {
                             types.push(AnyType.create());
                         }
@@ -14175,7 +14176,7 @@ export function createTypeEvaluator(
                 if (callResult.argumentErrors) {
                     magicMethodSupported = false;
                 } else if (callResult.overloadsUsedForCall) {
-                    callResult.overloadsUsedForCall.forEach((overload) => {
+                    for (const overload of callResult.overloadsUsedForCall) {
                         overloadsUsedForCall.push(overload);
 
                         // If one of the overloads is deprecated, note the message.
@@ -14186,7 +14187,7 @@ export function createTypeEvaluator(
                                 methodName,
                             };
                         }
-                    });
+                    }
                 }
 
                 if (callResult.isTypeIncomplete) {
@@ -14499,11 +14500,15 @@ export function createTypeEvaluator(
         // Strip any literal values and TypeForm types.
         const keyTypes: Type[] = [];
         for (const t of keyTypeResults) {
-            keyTypes.push(stripTypeForm(convertSpecialFormToRuntimeValue(stripLiteralValue(t.type), flags, !hasExpectedType)));
+            keyTypes.push(
+                stripTypeForm(convertSpecialFormToRuntimeValue(stripLiteralValue(t.type), flags, !hasExpectedType))
+            );
         }
         const valueTypes: Type[] = [];
         for (const t of valueTypeResults) {
-            valueTypes.push(stripTypeForm(convertSpecialFormToRuntimeValue(stripLiteralValue(t.type), flags, !hasExpectedType)));
+            valueTypes.push(
+                stripTypeForm(convertSpecialFormToRuntimeValue(stripLiteralValue(t.type), flags, !hasExpectedType))
+            );
         }
 
         if (keyTypes.length > 0) {
@@ -16840,7 +16845,8 @@ export function createTypeEvaluator(
             if (!typeArgs) {
                 tupleTypeArgTypes.push({ type: UnknownType.create(), isUnbounded: true });
             } else {
-                typeArgs.forEach((typeArg, index) => {
+                for (let index = 0; index < typeArgs.length; index++) {
+                    const typeArg = typeArgs[index];
                     if (index === 1 && isEllipsisType(typeArgTypes[index])) {
                         if (tupleTypeArgTypes.length === 1 && !tupleTypeArgTypes[0].isUnbounded) {
                             tupleTypeArgTypes[0] = { type: tupleTypeArgTypes[0].type, isUnbounded: true };
@@ -16850,7 +16856,7 @@ export function createTypeEvaluator(
                     } else {
                         tupleTypeArgTypes.push({ type: typeArgTypes[index], isUnbounded: false });
                     }
-                });
+                }
             }
 
             returnType = specializeTupleClass(classType, tupleTypeArgTypes, typeArgs !== undefined);
@@ -17889,7 +17895,7 @@ export function createTypeEvaluator(
 
             // Keep a list of unique type parameters that are used in the
             // base class arguments.
-            let typeParams: TypeVarType[] = [];
+            const typeParams: TypeVarType[] = [];
 
             if (node.d.typeParams) {
                 const rawTypeParams = evaluateTypeParamList(node.d.typeParams);
@@ -18488,12 +18494,14 @@ export function createTypeEvaluator(
                                         typeVar.shared.isSynthesized = true;
                                         typeVar.priv.scopeId = ParseTreeUtils.getScopeIdForNode(initDeclNode);
                                         typeVar.shared.boundType = UnknownType.create();
-                                        typeParamsResult.push(TypeVarType.cloneForScopeId(
-                                            typeVar,
-                                            ParseTreeUtils.getScopeIdForNode(node),
-                                            node.d.name.d.value,
-                                            TypeVarScopeType.Class
-                                        ));
+                                        typeParamsResult.push(
+                                            TypeVarType.cloneForScopeId(
+                                                typeVar,
+                                                ParseTreeUtils.getScopeIdForNode(node),
+                                                node.d.name.d.value,
+                                                TypeVarScopeType.Class
+                                            )
+                                        );
                                     }
                                     classType.shared.typeParams = typeParamsResult;
                                 }
@@ -18514,10 +18522,7 @@ export function createTypeEvaluator(
                         break;
                     }
                 }
-                if (
-                    hasCustomClassGetItem ||
-                    classType.shared.fields.has('__class_getitem__')
-                ) {
+                if (hasCustomClassGetItem || classType.shared.fields.has('__class_getitem__')) {
                     classType.shared.flags |= ClassTypeFlags.HasCustomClassGetItem;
                 }
             }
@@ -19651,10 +19656,7 @@ export function createTypeEvaluator(
                                 break;
                             }
                         }
-                        if (
-                            isPrivateName(param.d.name.d.value) &&
-                            !hasSlashParam
-                        ) {
+                        if (isPrivateName(param.d.name.d.value) && !hasSlashParam) {
                             isImplicitPositionOnlyParam = true;
 
                             // If the parameter name indicates an implicit position-only parameter
@@ -19666,10 +19668,7 @@ export function createTypeEvaluator(
                                     break;
                                 }
                             }
-                            if (
-                                !paramsArePositionOnly &&
-                                allParamsSimple
-                            ) {
+                            if (!paramsArePositionOnly && allParamsSimple) {
                                 addDiagnostic(
                                     DiagnosticRule.reportGeneralTypeIssues,
                                     LocMessage.positionOnlyAfterNon(),
@@ -22730,10 +22729,10 @@ export function createTypeEvaluator(
                             );
                             if (lookupResults) {
                                 for (const decl of lookupResults.symbol.getDeclarations()) {
-                                if (decl.type === DeclarationType.Variable) {
-                                    return decl;
+                                    if (decl.type === DeclarationType.Variable) {
+                                        return decl;
+                                    }
                                 }
-                            }
                             }
                         }
                     }
@@ -25266,84 +25265,84 @@ export function createTypeEvaluator(
         if (srcTypeArgs) {
             for (let srcArgIndex = 0; srcArgIndex < srcTypeArgs.length; srcArgIndex++) {
                 const srcTypeArg = srcTypeArgs[srcArgIndex];
-            // In most cases, the number of type args should match the number
-            // of type arguments, but there are a few special cases where this
-            // isn't true (e.g. assigning a Tuple[X, Y, Z] to a tuple[W]).
-            const destArgIndex = srcArgIndex >= destTypeArgs.length ? destTypeArgs.length - 1 : srcArgIndex;
-            const destTypeArg = destArgIndex >= 0 ? destTypeArgs[destArgIndex] : UnknownType.create();
-            const destTypeParam = destArgIndex < destTypeParams.length ? destTypeParams[destArgIndex] : undefined;
-            const assignmentDiag = new DiagnosticAddendum();
-            const variance =
-                assumedVariance ?? (destTypeParam ? TypeVarType.getVariance(destTypeParam) : Variance.Covariant);
-            let effectiveFlags: AssignTypeFlags;
-            let errorSource: () => ParameterizedString<{ name: string; sourceType: string; destType: string }>;
-            let includeDiagAddendum = true;
+                // In most cases, the number of type args should match the number
+                // of type arguments, but there are a few special cases where this
+                // isn't true (e.g. assigning a Tuple[X, Y, Z] to a tuple[W]).
+                const destArgIndex = srcArgIndex >= destTypeArgs.length ? destTypeArgs.length - 1 : srcArgIndex;
+                const destTypeArg = destArgIndex >= 0 ? destTypeArgs[destArgIndex] : UnknownType.create();
+                const destTypeParam = destArgIndex < destTypeParams.length ? destTypeParams[destArgIndex] : undefined;
+                const assignmentDiag = new DiagnosticAddendum();
+                const variance =
+                    assumedVariance ?? (destTypeParam ? TypeVarType.getVariance(destTypeParam) : Variance.Covariant);
+                let effectiveFlags: AssignTypeFlags;
+                let errorSource: () => ParameterizedString<{ name: string; sourceType: string; destType: string }>;
+                let includeDiagAddendum = true;
 
-            if (variance === Variance.Covariant) {
-                effectiveFlags = flags | AssignTypeFlags.RetainLiteralsForTypeVar;
-                errorSource = LocAddendum.typeVarIsCovariant;
-            } else if (variance === Variance.Contravariant) {
-                effectiveFlags = flags | AssignTypeFlags.Contravariant | AssignTypeFlags.RetainLiteralsForTypeVar;
-                errorSource = LocAddendum.typeVarIsContravariant;
-            } else {
-                effectiveFlags = flags | AssignTypeFlags.Invariant | AssignTypeFlags.RetainLiteralsForTypeVar;
-                errorSource = LocAddendum.typeVarIsInvariant;
+                if (variance === Variance.Covariant) {
+                    effectiveFlags = flags | AssignTypeFlags.RetainLiteralsForTypeVar;
+                    errorSource = LocAddendum.typeVarIsCovariant;
+                } else if (variance === Variance.Contravariant) {
+                    effectiveFlags = flags | AssignTypeFlags.Contravariant | AssignTypeFlags.RetainLiteralsForTypeVar;
+                    errorSource = LocAddendum.typeVarIsContravariant;
+                } else {
+                    effectiveFlags = flags | AssignTypeFlags.Invariant | AssignTypeFlags.RetainLiteralsForTypeVar;
+                    errorSource = LocAddendum.typeVarIsInvariant;
 
-                // Omit the diagnostic addendum for the invariant case because it's obvious
-                // why two types are not the same.
-                includeDiagAddendum = false;
-            }
-
-            // Special-case TypeForm to retain literals when solving TypeVars.
-            if (ClassType.isBuiltIn(destType, 'TypeForm')) {
-                effectiveFlags |= AssignTypeFlags.RetainLiteralsForTypeVar;
-            }
-
-            if (
-                !assignType(
-                    variance === Variance.Contravariant ? srcTypeArg : destTypeArg,
-                    variance === Variance.Contravariant ? destTypeArg : srcTypeArg,
-                    assignmentDiag,
-                    constraints,
-                    effectiveFlags,
-                    recursionCount
-                )
-            ) {
-                // Don't report errors with type variables in "pseudo-random"
-                // classes since these type variables are not real.
-                if (!ClassType.isPseudoGenericClass(destType)) {
-                    if (diag) {
-                        if (destTypeParam) {
-                            const childDiag = diag.createAddendum();
-
-                            childDiag.addMessage(
-                                errorSource().format({
-                                    name: TypeVarType.getReadableName(destTypeParam),
-                                    ...printSrcDestTypes(srcTypeArg, destTypeArg),
-                                })
-                            );
-
-                            if (includeDiagAddendum) {
-                                childDiag.addAddendum(assignmentDiag);
-                            }
-
-                            if (isCompatible && ClassType.isSameGenericClass(destType, srcType)) {
-                                // Add additional notes to help the user if this is a common type mismatch.
-                                if (ClassType.isBuiltIn(destType, 'dict') && srcArgIndex === 1) {
-                                    childDiag.addMessage(LocAddendum.invariantSuggestionDict());
-                                } else if (ClassType.isBuiltIn(destType, 'list')) {
-                                    childDiag.addMessage(LocAddendum.invariantSuggestionList());
-                                } else if (ClassType.isBuiltIn(destType, 'set')) {
-                                    childDiag.addMessage(LocAddendum.invariantSuggestionSet());
-                                }
-                            }
-                        } else {
-                            diag.addAddendum(assignmentDiag);
-                        }
-                    }
-                    isCompatible = false;
+                    // Omit the diagnostic addendum for the invariant case because it's obvious
+                    // why two types are not the same.
+                    includeDiagAddendum = false;
                 }
-            }
+
+                // Special-case TypeForm to retain literals when solving TypeVars.
+                if (ClassType.isBuiltIn(destType, 'TypeForm')) {
+                    effectiveFlags |= AssignTypeFlags.RetainLiteralsForTypeVar;
+                }
+
+                if (
+                    !assignType(
+                        variance === Variance.Contravariant ? srcTypeArg : destTypeArg,
+                        variance === Variance.Contravariant ? destTypeArg : srcTypeArg,
+                        assignmentDiag,
+                        constraints,
+                        effectiveFlags,
+                        recursionCount
+                    )
+                ) {
+                    // Don't report errors with type variables in "pseudo-random"
+                    // classes since these type variables are not real.
+                    if (!ClassType.isPseudoGenericClass(destType)) {
+                        if (diag) {
+                            if (destTypeParam) {
+                                const childDiag = diag.createAddendum();
+
+                                childDiag.addMessage(
+                                    errorSource().format({
+                                        name: TypeVarType.getReadableName(destTypeParam),
+                                        ...printSrcDestTypes(srcTypeArg, destTypeArg),
+                                    })
+                                );
+
+                                if (includeDiagAddendum) {
+                                    childDiag.addAddendum(assignmentDiag);
+                                }
+
+                                if (isCompatible && ClassType.isSameGenericClass(destType, srcType)) {
+                                    // Add additional notes to help the user if this is a common type mismatch.
+                                    if (ClassType.isBuiltIn(destType, 'dict') && srcArgIndex === 1) {
+                                        childDiag.addMessage(LocAddendum.invariantSuggestionDict());
+                                    } else if (ClassType.isBuiltIn(destType, 'list')) {
+                                        childDiag.addMessage(LocAddendum.invariantSuggestionList());
+                                    } else if (ClassType.isBuiltIn(destType, 'set')) {
+                                        childDiag.addMessage(LocAddendum.invariantSuggestionSet());
+                                    }
+                                }
+                            } else {
+                                diag.addAddendum(assignmentDiag);
+                            }
+                        }
+                        isCompatible = false;
+                    }
+                }
             }
         }
 
@@ -25513,10 +25512,7 @@ export function createTypeEvaluator(
             // If the source is a conditional type associated with a bound TypeVar
             // and the bound TypeVar matches the condition, the types are compatible.
             const destTypeVar = destType;
-            if (
-                TypeBase.isInstantiable(destType) === TypeBase.isInstantiable(srcType) &&
-                srcType.props?.condition
-            ) {
+            if (TypeBase.isInstantiable(destType) === TypeBase.isInstantiable(srcType) && srcType.props?.condition) {
                 let hasMatchingCondition = false;
                 for (const cond of srcType.props.condition) {
                     if (
@@ -27368,9 +27364,7 @@ export function createTypeEvaluator(
             let positionOnlyEndIndex = -1;
             for (let i = 0; i < srcDetails.params.length; i++) {
                 const p = srcDetails.params[i];
-                if (
-                    p.kind !== ParamKind.Positional || p.param.category !== ParamCategory.Simple || !!p.defaultType
-                ) {
+                if (p.kind !== ParamKind.Positional || p.param.category !== ParamCategory.Simple || !!p.defaultType) {
                     positionOnlyEndIndex = i;
                     break;
                 }
@@ -28375,12 +28369,7 @@ export function createTypeEvaluator(
                 }
 
                 if (
-                    !validateOverrideMethodInternal(
-                        overload,
-                        overrideMethod,
-                        diag?.createAddendum(),
-                        enforceParamNames
-                    )
+                    !validateOverrideMethodInternal(overload, overrideMethod, diag?.createAddendum(), enforceParamNames)
                 ) {
                     allOverloadsMatch = false;
                     break;

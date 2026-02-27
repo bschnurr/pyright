@@ -54,19 +54,19 @@ export function addDeclarationsToDefinitions(
         return;
     }
 
-    declarations.forEach((decl) => {
+    for (const decl of declarations) {
         let resolvedDecl = evaluator.resolveAliasDeclaration(decl, /* resolveLocalNames */ true, {
             allowExternallyHiddenAccess: true,
         });
 
         if (!resolvedDecl || resolvedDecl.uri.isEmpty()) {
-            return;
+            continue;
         }
 
         // If the decl is an unresolved import, skip it.
         if (resolvedDecl.type === DeclarationType.Alias) {
             if (resolvedDecl.isUnresolved || isUnresolvedAliasDeclaration(resolvedDecl)) {
-                return;
+                continue;
             }
         }
 
@@ -103,17 +103,18 @@ export function addDeclarationsToDefinitions(
         }
 
         if (!isStubFile(resolvedDecl.uri)) {
-            return;
+            continue;
         }
 
         if (resolvedDecl.type === DeclarationType.Alias) {
             // Add matching source module
-            sourceMapper
+            for (const f of sourceMapper
                 .findModules(resolvedDecl.uri)
                 .map((m) => getFileInfo(m)?.fileUri)
-                .filter(isDefined)
-                .forEach((f) => _addIfUnique(definitions, _createModuleEntry(f)));
-            return;
+                .filter(isDefined)) {
+                _addIfUnique(definitions, _createModuleEntry(f));
+            }
+            continue;
         }
 
         const implDecls = sourceMapper.findDeclarations(resolvedDecl);
@@ -125,7 +126,7 @@ export function addDeclarationsToDefinitions(
                 });
             }
         }
-    });
+    }
 }
 
 export function filterDefinitions(filter: DefinitionFilter, definitions: DocumentRange[]) {
@@ -162,10 +163,10 @@ class DefinitionProviderBase {
 
         const factories = this._serviceProvider?.tryGet(ServiceKeys.symbolDefinitionProvider);
         if (factories) {
-            factories.forEach((f) => {
+            for (const f of factories) {
                 const declarations = f.tryGetDeclarations(node, offset, this.token);
                 this.resolveDeclarations(declarations, definitions);
-            });
+            }
         }
 
         // There should be only one 'definition', so only if extensions failed should we try again.

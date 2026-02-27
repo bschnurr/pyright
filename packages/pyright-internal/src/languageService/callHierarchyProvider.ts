@@ -321,9 +321,9 @@ class FindOutgoingCallTreeWalker extends ParseTreeWalker {
                 // TODO - it would be better if we could match the call to the
                 // specific declaration (e.g. a specific overload of a property
                 // setter vs getter). For now, add callees for all declarations.
-                declarations.forEach((decl) => {
+                for (const decl of declarations) {
                     this._addOutgoingCallForDeclaration(nameNode!, decl);
-                });
+                }
             }
         }
 
@@ -361,9 +361,9 @@ class FindOutgoingCallTreeWalker extends ParseTreeWalker {
                 }
 
                 if (isClassInstance(memberType) && ClassType.isPropertyClass(memberType)) {
-                    propertyDecls.forEach((decl) => {
+                    for (const decl of propertyDecls) {
                         this._addOutgoingCallForDeclaration(node.d.member, decl);
-                    });
+                    }
                 }
             });
         }
@@ -442,7 +442,9 @@ class FindIncomingCallTreeWalker extends ParseTreeWalker {
             .filter(isDefined);
 
         this._declarations.push(this._targetDeclaration);
-        this._usageProviders.forEach((p) => p.appendDeclarationsTo(this._declarations));
+        for (const p of this._usageProviders) {
+            p.appendDeclarationsTo(this._declarations);
+        }
     }
 
     findCalls(): CallHierarchyIncomingCall[] {
@@ -546,7 +548,9 @@ class FindIncomingCallTreeWalker extends ParseTreeWalker {
         );
 
         const results = [...declarations];
-        this._usageProviders.forEach((p) => p.appendDeclarationsAt(node, declarations, results));
+        for (const p of this._usageProviders) {
+            p.appendDeclarationsAt(node, declarations, results);
+        }
 
         return results;
     }

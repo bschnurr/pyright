@@ -119,17 +119,17 @@ export type AutoImportResultMap = Map<string, AutoImportResult[]>;
 export function buildModuleSymbolsMap(program: ProgramView, files: readonly SourceFileInfo[]): ModuleSymbolMap {
     const moduleSymbolMap = new Map<string, ModuleSymbolTable>();
 
-    files.forEach((file) => {
+    for (const file of files) {
         if (file.shadows.length > 0) {
             // There is corresponding stub file. Don't add
             // duplicated files in the map.
-            return;
+            continue;
         }
 
         const uri = file.uri;
         const symbolTable = program.getModuleSymbolTable(uri);
         if (!symbolTable) {
-            return;
+            continue;
         }
 
         const fileName = stripFileExtension(uri.fileName);
@@ -137,7 +137,7 @@ export function buildModuleSymbolsMap(program: ProgramView, files: readonly Sour
         // Don't offer imports from files that are named with private
         // naming semantics like "_ast.py" unless they're in the current userfile list.
         if (SymbolNameUtils.isPrivateOrProtectedName(fileName) && !isUserCode(file)) {
-            return;
+            continue;
         }
 
         moduleSymbolMap.set(uri.key, {
@@ -179,8 +179,8 @@ export function buildModuleSymbolsMap(program: ProgramView, files: readonly Sour
                 }
             },
         });
-        return;
-    });
+        continue;
+    }
 
     return moduleSymbolMap;
 }
@@ -212,7 +212,9 @@ export class AutoImporter {
         const results: AutoImportResult[] = [];
         const map = this.getCandidates(word, similarityLimit, abbrFromUsers, token);
 
-        map.forEach((v) => appendArray(results, v));
+        for (const v of map.values()) {
+            appendArray(results, v);
+        }
         return results;
     }
 
@@ -247,7 +249,7 @@ export class AutoImporter {
         results: AutoImportResultMap,
         token: CancellationToken
     ) {
-        this.moduleSymbolMap.forEach((topLevelSymbols, key) => {
+        for (const topLevelSymbols of this.moduleSymbolMap.values()) {
             // See if this file should be offered as an implicit import.
             const uriProperties = this.getUriProperties(this.moduleSymbolMap!, topLevelSymbols.uri);
             this.processModuleSymbolTable(
@@ -261,7 +263,7 @@ export class AutoImporter {
                 results,
                 token
             );
-        });
+        }
     }
 
     protected addImportsFromImportAliasMap(
@@ -272,8 +274,8 @@ export class AutoImporter {
     ) {
         throwIfCancellationRequested(token);
 
-        importAliasMap.forEach((mapPerSymbolName) => {
-            mapPerSymbolName.forEach((importAliasData, originalName) => {
+        for (const mapPerSymbolName of importAliasMap.values()) {
+            for (const [originalName, importAliasData] of mapPerSymbolName) {
                 if (abbrFromUsers) {
                     // When alias name is used, our regular exclude mechanism would not work. we need to check
                     // whether import, the alias is referring to, already exists.
@@ -286,7 +288,7 @@ export class AutoImporter {
                     // If import statement for the module already exist, then bail out.
                     // ex) import module[.submodule] or from module[.submodule] import symbol
                     if (this._importStatements.mapByFilePath.has(importAliasData.importParts.fileUri.key)) {
-                        return;
+                        continue;
                     }
 
                     // If it is the module itself that got imported, make sure we don't import it again.
@@ -303,7 +305,7 @@ export class AutoImporter {
                                 (i) => i.d.name.d.value === importAliasData.importParts.symbolName
                             )
                         ) {
-                            return;
+                            continue;
                         }
                     }
                 }
@@ -314,7 +316,7 @@ export class AutoImporter {
                     results
                 );
                 if (alreadyIncluded) {
-                    return;
+                    continue;
                 }
 
                 const autoImportTextEdits = this._getTextEditsForAutoImportByFilePath(
@@ -339,8 +341,8 @@ export class AutoImporter {
                     originalName,
                     originalDeclUri: importAliasData.fileUri,
                 });
-            });
-        });
+            }
+        }
     }
 
     protected processModuleSymbolTable(

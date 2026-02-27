@@ -117,7 +117,9 @@ export class DocumentSymbolCollector extends ParseTreeWalker {
         this._aliasResolver = new AliasResolver(this._program.evaluator!);
 
         // Start with the symbols passed in
-        symbolNames.forEach((s) => this._symbolNames.add(s));
+        for (const s of symbolNames) {
+            this._symbolNames.add(s);
+        }
         this._declarations.push(...declarations);
 
         this._treatModuleInImportAndFromImportSame = options?.treatModuleInImportAndFromImportSame ?? false;
@@ -132,10 +134,10 @@ export class DocumentSymbolCollector extends ParseTreeWalker {
 
         if (options?.providers === undefined) {
             // Check whether we need to add new symbol names and declarations.
-            this._usageProviders.forEach((p) => {
+            for (const p of this._usageProviders) {
                 p.appendSymbolNamesTo(this._symbolNames);
                 p.appendDeclarationsTo(this._declarations);
-            });
+            }
         }
 
         // Don't report strings in __all__ right away, that will
@@ -194,7 +196,7 @@ export class DocumentSymbolCollector extends ParseTreeWalker {
 
         const resolvedDeclarations: Declaration[] = [];
         const sourceMapper = findImplementations ? program.getSourceMapper(fileUri, token) : undefined;
-        declarations.forEach((decl) => {
+        for (const decl of declarations) {
             const resolvedDecl = evaluator.resolveAliasDeclaration(decl, resolveLocalNames);
             if (resolvedDecl) {
                 addDeclarationIfUnique(resolvedDeclarations, resolvedDecl);
@@ -207,7 +209,7 @@ export class DocumentSymbolCollector extends ParseTreeWalker {
                     }
                 }
             }
-        });
+        }
 
         const sourceFileInfo = program.getSourceFileInfo(fileUri);
         if (sourceFileInfo && sourceFileInfo.ipythonMode === IPythonMode.CellDocs) {
@@ -221,28 +223,30 @@ export class DocumentSymbolCollector extends ParseTreeWalker {
 
             // Add declarations from files that implicitly import the target file.
             const implicitlyImportedBy = collectImportedByCells(program, sourceFileInfo);
-            implicitlyImportedBy.forEach((implicitImport) => {
+            for (const implicitImport of implicitlyImportedBy) {
                 const parseTree = program.getParseResults(implicitImport.uri)?.parserOutput.parseTree;
                 if (parseTree) {
                     const scope = AnalyzerNodeInfo.getScope(parseTree);
                     const symbol = scope?.lookUpSymbol(node.d.value);
                     appendSymbolDeclarations(symbol, resolvedDeclarations);
                 }
-            });
+            }
         }
 
         return resolvedDeclarations;
 
         function appendSymbolDeclarations(symbol: Symbol | undefined, declarations: Declaration[]) {
-            symbol
+            const decls = symbol
                 ?.getDeclarations()
-                .filter((d) => !isAliasDeclaration(d))
-                .forEach((decl) => {
+                .filter((d) => !isAliasDeclaration(d));
+            if (decls) {
+                for (const decl of decls) {
                     const resolvedDecl = evaluator!.resolveAliasDeclaration(decl, resolveLocalNames);
                     if (resolvedDecl) {
                         addDeclarationIfUnique(declarations, resolvedDecl);
                     }
-                });
+                }
+            }
         }
     }
 
@@ -326,7 +330,9 @@ export class DocumentSymbolCollector extends ParseTreeWalker {
 
     private _resultsContainsDeclaration(usage: ParseNode, declarations: readonly Declaration[]) {
         const results = [...declarations];
-        this._usageProviders.forEach((p) => p.appendDeclarationsAt(usage, declarations, results));
+        for (const p of this._usageProviders) {
+            p.appendDeclarationsAt(usage, declarations, results);
+        }
 
         return results.some((declaration) => {
             // Resolve the declaration.
@@ -391,22 +397,22 @@ export class DocumentSymbolCollector extends ParseTreeWalker {
             return;
         }
 
-        dunderAllInfo.stringNodes.forEach((stringNode) => {
+        for (const stringNode of dunderAllInfo.stringNodes) {
             if (!this._symbolNames.has(stringNode.d.value)) {
-                return;
+                continue;
             }
 
             const symbolInScope = moduleScope.lookUpSymbolRecursive(stringNode.d.value);
             if (!symbolInScope) {
-                return;
+                continue;
             }
 
             if (!this._resultsContainsDeclaration(stringNode, symbolInScope.symbol.getDeclarations())) {
-                return;
+                continue;
             }
 
             this._dunderAllNameNodes.add(stringNode);
-        });
+        }
     }
 }
 
