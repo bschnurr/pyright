@@ -64,13 +64,16 @@ function applyTotalOrderingTransform(
 
     // Verify that the class has at least one of the required functions.
     let firstMemberFound: ClassMember | undefined;
-    const missingMethods = orderingMethods.filter((methodName) => {
+    const missingMethods: string[] = [];
+    for (const methodName of orderingMethods) {
         const memberInfo = lookUpObjectMember(instanceType, methodName, MemberAccessFlags.SkipInstanceMembers);
         if (memberInfo && !firstMemberFound) {
             firstMemberFound = memberInfo;
         }
-        return !memberInfo;
-    });
+        if (!memberInfo) {
+            missingMethods.push(methodName);
+        }
+    }
 
     if (!firstMemberFound) {
         evaluator.addDiagnostic(
@@ -123,7 +126,7 @@ function applyTotalOrderingTransform(
     );
 
     // Add the missing members to the class's symbol table.
-    missingMethods.forEach((methodName) => {
+    for (const methodName of missingMethods) {
         const methodToAdd = FunctionType.createSynthesizedInstance(methodName);
         FunctionType.addParam(methodToAdd, selfParam);
         FunctionType.addParam(methodToAdd, objParam);
@@ -133,7 +136,7 @@ function applyTotalOrderingTransform(
             methodName,
             Symbol.createWithType(SymbolFlags.ClassMember, methodToAdd)
         );
-    });
+    }
 
     return result;
 }

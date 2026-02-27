@@ -96,7 +96,9 @@ export class BackgroundAnalysisProgram {
         this._backgroundAnalysis?.setImportResolver(importResolver);
 
         this._program.setImportResolver(importResolver);
-        this.configOptions.getExecutionEnvironments().forEach((e) => this._ensurePartialStubPackages(e));
+        for (const e of this.configOptions.getExecutionEnvironments()) {
+            this._ensurePartialStubPackages(e);
+        }
     }
 
     setTrackedFiles(fileUris: Uri[]) {

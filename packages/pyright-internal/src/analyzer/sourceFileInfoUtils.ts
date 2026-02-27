@@ -29,15 +29,15 @@ export function collectImportedByCells<T extends SourceFileInfo>(program: Progra
 }
 
 export function collectImportedByRecursively(fileInfo: SourceFileInfo, importedBy: Set<SourceFileInfo>) {
-    fileInfo.importedBy.forEach((dep) => {
+    for (const dep of fileInfo.importedBy) {
         if (importedBy.has(dep)) {
             // Already visited.
-            return;
+            continue;
         }
 
         importedBy.add(dep);
         collectImportedByRecursively(dep, importedBy);
-    });
+    }
 }
 
 export function verifyNoCyclesInChainedFiles<T extends SourceFileInfo>(program: ProgramView, fileInfo: T): void {

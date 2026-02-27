@@ -29,7 +29,7 @@ export class TestWalker extends ParseTreeWalker {
 
     // Make sure that all of the children point to their parent.
     private _verifyParentChildLinks(node: ParseNode, children: ParseNodeArray) {
-        children.forEach((child) => {
+        for (const child of children) {
             if (child) {
                 if (child.parent !== node) {
                     fail(
@@ -37,7 +37,7 @@ export class TestWalker extends ParseTreeWalker {
                     );
                 }
             }
-        });
+        }
     }
 
     // Verify that:
@@ -48,7 +48,7 @@ export class TestWalker extends ParseTreeWalker {
         let prevNode: ParseNode | undefined;
 
         const compliant = isCompliantWithNodeRangeRules(node);
-        children.forEach((child) => {
+        for (const child of children) {
             if (child) {
                 let skipCheck = false;
 
@@ -100,7 +100,7 @@ export class TestWalker extends ParseTreeWalker {
                     prevNode = child;
                 }
             }
-        });
+        }
     }
 }
 

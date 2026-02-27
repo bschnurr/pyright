@@ -310,10 +310,22 @@ export function formatControlFlowGraph(flowNode: FlowNode) {
 
     function renderGraph() {
         const columnCount = columnWidths.length;
-        const laneCount = nodes.reduce((x, n) => Math.max(x, n.lane), 0) + 1;
+        let laneCount = 0;
+        for (const n of nodes) {
+            if (n.lane > laneCount) {
+                laneCount = n.lane;
+            }
+        }
+        laneCount += 1;
         const lanes: string[] = fill(Array(laneCount), '');
-        const grid: (FlowGraphNode | undefined)[][] = columnWidths.map(() => Array(laneCount));
-        const connectors: Connection[][] = columnWidths.map(() => fill(Array(laneCount), 0));
+        const grid: (FlowGraphNode | undefined)[][] = [];
+        for (let i = 0; i < columnWidths.length; i++) {
+            grid.push(Array(laneCount));
+        }
+        const connectors: Connection[][] = [];
+        for (let i = 0; i < columnWidths.length; i++) {
+            connectors.push(fill(Array(laneCount), 0));
+        }
 
         // Build connectors.
         for (const node of nodes) {

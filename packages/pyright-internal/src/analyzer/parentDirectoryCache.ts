@@ -52,17 +52,14 @@ export class ParentDirectoryCache {
             return false;
         }
 
-        this._libPathCache =
-            this._libPathCache ??
-            this._importRootGetter()
-                .map((r) => fs.realCasePath(r))
-                .filter((r) => !r.equals(root))
-                .filter((r) => r.startsWith(root));
+        this._libPathCache = this._libPathCache ?? _computeLibPaths(this._importRootGetter(), fs, root);
 
-        if (this._libPathCache.some((p) => sourceFileUri.startsWith(p))) {
-            // Make sure it is not lib folders under user code root.
-            // ex) .venv folder
-            return false;
+        for (const p of this._libPathCache) {
+            if (sourceFileUri.startsWith(p)) {
+                // Make sure it is not lib folders under user code root.
+                // ex) .venv folder
+                return false;
+            }
         }
 
         return true;
@@ -84,4 +81,15 @@ export class ParentDirectoryCache {
         this._cachedResults.clear();
         this._libPathCache = undefined;
     }
+}
+
+function _computeLibPaths(importRoots: Uri[], fs: FileSystem, root: Uri): Uri[] {
+    const result: Uri[] = [];
+    for (const r of importRoots) {
+        const real = fs.realCasePath(r);
+        if (!real.equals(root) && real.startsWith(root)) {
+            result.push(real);
+        }
+    }
+    return result;
 }

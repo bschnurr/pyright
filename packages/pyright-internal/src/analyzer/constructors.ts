@@ -320,10 +320,7 @@ function validateNewAndInitMethods(
         // but didn't supply solved type arguments, we'll ignore its specialized return
         // type and rely on the __init__ method to supply the type arguments instead.
         let initMethodBindToType = newMethodReturnType;
-        if (
-            initMethodBindToType.priv.typeArgs &&
-            initMethodBindToType.priv.typeArgs.some((typeArg) => isUnknown(typeArg))
-        ) {
+        if (initMethodBindToType.priv.typeArgs && _hasUnknownTypeArg(initMethodBindToType)) {
             initMethodBindToType = ClassType.cloneAsInstance(type);
         }
 
@@ -1136,4 +1133,16 @@ function isDefaultNewMethod(newMethod?: Type): boolean {
     }
 
     return true;
+}
+
+function _hasUnknownTypeArg(type: ClassType): boolean {
+    if (!type.priv.typeArgs) {
+        return false;
+    }
+    for (const typeArg of type.priv.typeArgs) {
+        if (isUnknown(typeArg)) {
+            return true;
+        }
+    }
+    return false;
 }

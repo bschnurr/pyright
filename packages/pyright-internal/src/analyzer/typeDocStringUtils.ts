@@ -257,7 +257,12 @@ export function getClassDocString(
     if (!docString && resolvedDecl) {
         const implDecls = sourceMapper.findClassDeclarationsByType(resolvedDecl.uri, classType);
         if (implDecls) {
-            const classDecls = implDecls.filter((d) => isClassDeclaration(d)).map((d) => d);
+            const classDecls: ClassDeclaration[] = [];
+            for (const d of implDecls) {
+                if (isClassDeclaration(d)) {
+                    classDecls.push(d);
+                }
+            }
             docString = _getFunctionOrClassDeclsDocString(classDecls);
         }
     }
@@ -280,7 +285,13 @@ export function getVariableDocString(
     if (decl.docString !== undefined) {
         return decl.docString;
     } else {
-        return getVariableInStubFileDocStrings(decl, sourceMapper).find((doc) => doc);
+        const docs = getVariableInStubFileDocStrings(decl, sourceMapper);
+        for (const doc of docs) {
+            if (doc) {
+                return doc;
+            }
+        }
+        return undefined;
     }
 }
 
@@ -293,12 +304,20 @@ export function getOverloadedDocStrings(type: Type, resolvedDecl: Declaration | 
     const overloads = OverloadedType.getOverloads(type);
     const impl = OverloadedType.getImplementation(type);
 
-    if (overloads.some((o) => o.shared.docString)) {
-        overloads.forEach((overload) => {
+    let hasOverloadDocString = false;
+    for (const o of overloads) {
+        if (o.shared.docString) {
+            hasOverloadDocString = true;
+            break;
+        }
+    }
+
+    if (hasOverloadDocString) {
+        for (const overload of overloads) {
             if (overload.shared.docString) {
                 docStrings.push(overload.shared.docString);
             }
-        });
+        }
     }
 
     if (impl && isFunction(impl) && impl.shared.docString) {

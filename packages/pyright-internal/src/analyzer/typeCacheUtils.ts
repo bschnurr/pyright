@@ -100,9 +100,9 @@ export class SpeculativeTypeTracker {
 
         // Delete all of the speculative type cache entries
         // that were tracked in this context.
-        context!.entriesToUndo.forEach((entry) => {
+        for (const entry of context!.entriesToUndo) {
             entry.cache.delete(entry.id);
-        });
+        }
     }
 
     isSpeculative(node: ParseNode | undefined, ignoreIfDiagnosticsAllowed = false) {
@@ -206,11 +206,7 @@ export class SpeculativeTypeTracker {
     }
 
     getSpeculativeType(node: ParseNode, expectedType: Type | undefined): SpeculativeTypeEntry | undefined {
-        if (
-            this._speculativeContextStack.some((context) =>
-                ParseTreeUtils.isNodeContainedWithin(node, context.speculativeRootNode)
-            )
-        ) {
+        if (_isNodeInSpeculativeContext(this._speculativeContextStack, node)) {
             const entries = this._speculativeTypeCache.get(node.id);
             if (entries) {
                 for (const entry of entries) {
@@ -241,13 +237,27 @@ export class SpeculativeTypeTracker {
             return false;
         }
 
-        return cachedDependentTypes.every((cachedDepType, index) => {
+        for (let index = 0; index < cachedDependentTypes.length; index++) {
+            const cachedDepType = cachedDependentTypes[index];
             const activeDepType = this._activeDependentTypes[index];
             if (cachedDepType.speculativeRootNode !== activeDepType.speculativeRootNode) {
                 return false;
             }
 
-            return isTypeSame(cachedDepType.dependentType, activeDepType.dependentType);
-        });
+            if (!isTypeSame(cachedDepType.dependentType, activeDepType.dependentType)) {
+                return false;
+            }
+        }
+
+        return true;
     }
+}
+
+function _isNodeInSpeculativeContext(stack: SpeculativeContext[], node: ParseNode): boolean {
+    for (const context of stack) {
+        if (ParseTreeUtils.isNodeContainedWithin(node, context.speculativeRootNode)) {
+            return true;
+        }
+    }
+    return false;
 }

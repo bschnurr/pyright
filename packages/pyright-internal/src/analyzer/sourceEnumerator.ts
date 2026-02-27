@@ -133,7 +133,7 @@ export class SourceEnumerator {
         this._seenDirs.add(realDirPath.key);
 
         if (this._autoExcludeVenv) {
-            if (envMarkers.some((f) => this._fs.existsSync(dir.uri.resolvePaths(...f)))) {
+            if (_someEnvMarker(envMarkers, dir.uri, this._fs)) {
                 this._autoExcludeDirs.push(dir.uri);
                 this._console.info(`Auto-excluding ${dir.uri.toUserVisibleString()}`);
                 return;
@@ -195,4 +195,13 @@ export class SourceEnumerator {
             this._console.info(`Found ${fileCount} ` + `source ${fileCount === 1 ? 'file' : 'files'}`);
         }
     }
+}
+
+function _someEnvMarker(markers: string[][], dirUri: Uri, fs: FileSystem): boolean {
+    for (const f of markers) {
+        if (fs.existsSync(dirUri.resolvePaths(...f))) {
+            return true;
+        }
+    }
+    return false;
 }

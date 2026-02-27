@@ -43,7 +43,7 @@ function _buildImportTreeImpl(
         return previous.length ? previous : [from];
     }
 
-    if (previous.length > 1 && previous.find((s) => s.equals(from))) {
+    if (previous.length > 1 && previous.some((s) => s.equals(from))) {
         // Fail the search, we're stuck in a loop.
         return [];
     }

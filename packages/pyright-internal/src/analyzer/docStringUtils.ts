@@ -21,7 +21,8 @@ export function cleanAndSplitDocString(rawString: string): string[] {
 
     // Determine the max indent amount.
     let leftSpacesToRemove = Number.MAX_VALUE;
-    lines.forEach((line, index) => {
+    for (let index = 0; index < lines.length; index++) {
+        const line = lines[index];
         // First line is special.
         if (lines.length <= 1 || index > 0) {
             const trimmed = line.trimLeft();
@@ -29,7 +30,7 @@ export function cleanAndSplitDocString(rawString: string): string[] {
                 leftSpacesToRemove = Math.min(leftSpacesToRemove, line.length - trimmed.length);
             }
         }
-    });
+    }
 
     // Handle the case where there were only empty lines.
     if (leftSpacesToRemove >= Number.MAX_VALUE) {
@@ -38,13 +39,14 @@ export function cleanAndSplitDocString(rawString: string): string[] {
 
     // Trim the lines.
     const trimmedLines: string[] = [];
-    lines.forEach((line, index) => {
+    for (let index = 0; index < lines.length; index++) {
+        const line = lines[index];
         if (index === 0) {
             trimmedLines.push(line.trim());
         } else {
             trimmedLines.push(line.substr(leftSpacesToRemove).trimRight());
         }
-    });
+    }
 
     // Strip off leading and trailing blank lines.
     while (trimmedLines.length > 0 && trimmedLines[0].length === 0) {

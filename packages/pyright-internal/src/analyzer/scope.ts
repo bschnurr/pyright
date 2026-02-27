@@ -10,7 +10,7 @@
  */
 
 import { fail } from '../common/debug';
-import { DeclarationType } from './declaration';
+import { Declaration, DeclarationType } from './declaration';
 import { Symbol, SymbolFlags, SymbolTable } from './symbol';
 
 export const enum ScopeType {
@@ -160,10 +160,7 @@ export class Scope {
             // If the symbol is a class variable that is defined only in terms of
             // member accesses, it is not accessible directly by name, so hide it.
             const decls = symbol.getDeclarations();
-            if (
-                decls.length === 0 ||
-                decls.some((decl) => decl.type !== DeclarationType.Variable || !decl.isDefinedByMemberAccess)
-            ) {
+            if (decls.length === 0 || _hasNonMemberAccessDecl(decls)) {
                 return {
                     symbol,
                     isOutsideCallerModule: !!options?.isOutsideCallerModule,
@@ -227,4 +224,13 @@ export class Scope {
     getSlotsNames(): string[] | undefined {
         return this.slotsNames;
     }
+}
+
+function _hasNonMemberAccessDecl(decls: Declaration[]): boolean {
+    for (const decl of decls) {
+        if (decl.type !== DeclarationType.Variable || !decl.isDefinedByMemberAccess) {
+            return true;
+        }
+    }
+    return false;
 }

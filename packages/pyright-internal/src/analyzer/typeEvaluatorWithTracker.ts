@@ -36,9 +36,9 @@ export function createTypeEvaluatorWithTracker(
                             s.add(printer?.printFileOrModuleName(args[0]));
                         } else {
                             // Print all parameters.
-                            args.forEach((a) => {
+                            for (const a of args) {
                                 s.add(printer?.print(a));
-                            });
+                            }
                         }
                         return timingStats.typeEvaluationTime.timeOperation(func, ...args);
                     },
@@ -59,13 +59,13 @@ export function createTypeEvaluatorWithTracker(
 
     // Track these apis external usages when logging is on. otherwise, it should be noop.
     const keys = Object.keys(evaluator);
-    keys.forEach((k) => {
+    for (const k of keys) {
         const entry = (evaluator as any)[k];
         if (typeof entry === 'function' && entry.name) {
             // Only wrap functions that aren't wrapped already.
             (evaluator as any)[k] = wrapWithLogger(entry);
         }
-    });
+    }
 
     return evaluator;
 }

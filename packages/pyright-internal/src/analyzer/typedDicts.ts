@@ -103,7 +103,11 @@ export function createTypedDictType(
                 argList[0].valueExpression || errorNode
             );
         } else {
-            className = nameArg.valueExpression.d.strings.map((s) => s.d.value).join('');
+            let joined = '';
+            for (const s of nameArg.valueExpression.d.strings) {
+                joined += s.d.value;
+            }
+            className = joined;
         }
     }
 
@@ -997,7 +1001,10 @@ function getTypedDictFieldsFromDictSyntax(
             continue;
         }
 
-        const entryName = entry.d.keyExpr.d.strings.map((s) => s.d.value).join('');
+        let entryName = '';
+        for (const s of entry.d.keyExpr.d.strings) {
+            entryName += s.d.value;
+        }
         if (!entryName) {
             evaluator.addDiagnostic(
                 DiagnosticRule.reportGeneralTypeIssues,

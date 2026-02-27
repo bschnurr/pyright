@@ -42,11 +42,11 @@ export class ConstraintSolutionSet {
     }
 
     doForEachTypeVar(callback: (type: Type, typeVarId: string) => void) {
-        this._typeVarMap.forEach((type, key) => {
+        for (const [key, type] of this._typeVarMap) {
             if (type) {
                 callback(type, key);
             }
-        });
+        }
     }
 }
 
@@ -59,13 +59,18 @@ export class ConstraintSolution {
     }
 
     isEmpty() {
-        return this._solutionSets.every((set) => set.isEmpty());
+        for (const set of this._solutionSets) {
+            if (!set.isEmpty()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     setType(typeVar: TypeVarType, type: Type) {
-        return this._solutionSets.forEach((set) => {
+        for (const set of this._solutionSets) {
             set.setType(typeVar, type);
-        });
+        }
     }
 
     getMainSolutionSet() {
@@ -77,9 +82,10 @@ export class ConstraintSolution {
     }
 
     doForEachSolutionSet(callback: (solutionSet: ConstraintSolutionSet, index: number) => void) {
-        this.getSolutionSets().forEach((set, index) => {
-            callback(set, index);
-        });
+        const sets = this.getSolutionSets();
+        for (let index = 0; index < sets.length; index++) {
+            callback(sets[index], index);
+        }
     }
 
     getSolutionSet(index: number) {

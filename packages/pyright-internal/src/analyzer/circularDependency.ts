@@ -27,11 +27,11 @@ export class CircularDependency {
         // Find the path that is alphabetically first and reorder
         // based on that.
         let firstIndex = 0;
-        this._paths.forEach((path, index) => {
-            if (path < this._paths[firstIndex]) {
+        for (let index = 0; index < this._paths.length; index++) {
+            if (this._paths[index] < this._paths[firstIndex]) {
                 firstIndex = index;
             }
-        });
+        }
 
         if (firstIndex !== 0) {
             this._paths = this._paths.slice(firstIndex).concat(this._paths.slice(0, firstIndex));

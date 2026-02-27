@@ -71,7 +71,7 @@ export class CacheManager {
     }
 
     unregisterCacheOwner(provider: CacheOwner) {
-        const index = this._cacheOwners.findIndex((p) => p === provider);
+        const index = this._cacheOwners.indexOf(provider);
         if (index < 0) {
             fail('Specified cache provider not found');
         } else {
@@ -96,9 +96,9 @@ export class CacheManager {
 
         let totalUsage = 0;
 
-        this._cacheOwners.forEach((p) => {
+        for (const p of this._cacheOwners) {
             totalUsage += p.getCacheUsage();
-        });
+        }
 
         return totalUsage;
     }
@@ -114,9 +114,9 @@ export class CacheManager {
             );
         }
 
-        this._cacheOwners.forEach((p) => {
+        for (const p of this._cacheOwners) {
             p.emptyCache();
-        });
+        }
     }
 
     // Returns a ratio of used bytes to total bytes.
@@ -178,7 +178,11 @@ export class CacheManager {
         if (buffer) {
             const view = new Float64Array(buffer);
             view[this._sharedUsagePosition] = heapStats.used_heap_size;
-            return view.reduce((a, b) => a + b, 0);
+            let total = 0;
+            for (let i = 0; i < view.length; i++) {
+                total += view[i];
+            }
+            return total;
         }
 
         return heapStats.used_heap_size;

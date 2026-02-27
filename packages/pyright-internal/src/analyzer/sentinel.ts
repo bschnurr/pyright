@@ -34,7 +34,11 @@ export function createSentinelType(
         nameArg.valueExpression &&
         nameArg.valueExpression.nodeType === ParseNodeType.StringList
     ) {
-        className = nameArg.valueExpression.d.strings.map((s) => s.d.value).join('');
+        let joined = '';
+        for (const s of nameArg.valueExpression.d.strings) {
+            joined += s.d.value;
+        }
+        className = joined;
     }
 
     if (!className) {

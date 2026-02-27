@@ -243,11 +243,11 @@ export class Symbol {
 
                 // If there is more than one declaration for a symbol, we will
                 // assume it is not a type alias.
-                this._declarations.forEach((decl) => {
+                for (const decl of this._declarations) {
                     if (decl.type === DeclarationType.Variable && decl.typeAliasName) {
                         delete decl.typeAliasName;
                     }
-                });
+                }
             } else {
                 // If the new declaration has a defined type, it should replace
                 // the existing one.
@@ -295,11 +295,24 @@ export class Symbol {
             return true;
         }
 
-        return this.getDeclarations().some((decl) => hasTypeForDeclaration(decl));
+        const decls = this.getDeclarations();
+        for (const decl of decls) {
+            if (hasTypeForDeclaration(decl)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     getTypedDeclarations() {
-        return this.getDeclarations().filter((decl) => hasTypeForDeclaration(decl));
+        const decls = this.getDeclarations();
+        const result: Declaration[] = [];
+        for (const decl of decls) {
+            if (hasTypeForDeclaration(decl)) {
+                result.push(decl);
+            }
+        }
+        return result;
     }
 
     getSynthesizedType() {

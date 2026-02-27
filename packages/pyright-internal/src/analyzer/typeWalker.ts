@@ -173,7 +173,15 @@ export class TypeWalker {
 
     visitClass(type: ClassType): void {
         if (!ClassType.isPseudoGenericClass(type)) {
-            const typeArgs = type.priv.tupleTypeArgs?.map((t) => t.type) || type.priv.typeArgs;
+            let typeArgs: Type[] | undefined;
+            if (type.priv.tupleTypeArgs) {
+                typeArgs = [];
+                for (const t of type.priv.tupleTypeArgs) {
+                    typeArgs.push(t.type);
+                }
+            } else {
+                typeArgs = type.priv.typeArgs;
+            }
             if (typeArgs) {
                 for (const argType of typeArgs) {
                     this.walk(argType);

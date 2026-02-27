@@ -49,10 +49,10 @@ export function getComplexityScoreForType(type: Type, recursionCount = 0): numbe
             // If this union has a very large number of subtypes, don't bother
             // accurately computing the score. Assume a fixed value.
             if (type.priv.subtypes.length < 16) {
-                type.priv.subtypes.forEach((subtype) => {
+                for (const subtype of type.priv.subtypes) {
                     const subtypeScore = getComplexityScoreForType(subtype, recursionCount);
                     maxScore = Math.max(maxScore, subtypeScore);
-                });
+                }
             } else {
                 maxScore = 0.5;
             }
@@ -74,20 +74,20 @@ function getComplexityScoreForClass(classType: ClassType, recursionCount: number
     let typeArgCount = 0;
 
     if (classType.priv.tupleTypeArgs) {
-        classType.priv.tupleTypeArgs.forEach((typeArg) => {
+        for (const typeArg of classType.priv.tupleTypeArgs) {
             typeArgScoreSum += getComplexityScoreForType(typeArg.type, recursionCount);
             typeArgCount++;
-        });
+        }
     } else if (classType.priv.typeArgs) {
-        classType.priv.typeArgs.forEach((type) => {
+        for (const type of classType.priv.typeArgs) {
             typeArgScoreSum += getComplexityScoreForType(type, recursionCount);
             typeArgCount++;
-        });
+        }
     } else if (classType.shared.typeParams) {
-        classType.shared.typeParams.forEach((type) => {
+        for (const _type of classType.shared.typeParams) {
             typeArgScoreSum += getComplexityScoreForType(AnyType.create(), recursionCount);
             typeArgCount++;
-        });
+        }
     }
 
     const averageTypeArgComplexity = typeArgCount > 0 ? typeArgScoreSum / typeArgCount : 0;
