@@ -161,10 +161,17 @@ export function getTypeOfTupleWithContext(
     let expectedTypes: Type[] = [];
 
     if (isTupleClass(inferenceContext.expectedType) && inferenceContext.expectedType.priv.tupleTypeArgs) {
-        expectedTypes = inferenceContext.expectedType.priv.tupleTypeArgs.map((t) =>
-            transformPossibleRecursiveTypeAlias(t.type)
-        );
-        const unboundedIndex = inferenceContext.expectedType.priv.tupleTypeArgs.findIndex((t) => t.isUnbounded);
+        const tupleTypeArgs = inferenceContext.expectedType.priv.tupleTypeArgs;
+        for (const t of tupleTypeArgs) {
+            expectedTypes.push(transformPossibleRecursiveTypeAlias(t.type));
+        }
+        let unboundedIndex = -1;
+        for (let i = 0; i < tupleTypeArgs.length; i++) {
+            if (tupleTypeArgs[i].isUnbounded) {
+                unboundedIndex = i;
+                break;
+            }
+        }
         if (unboundedIndex >= 0) {
             if (expectedTypes.length > node.d.items.length) {
                 expectedTypes.splice(unboundedIndex, 1);
@@ -200,34 +207,59 @@ export function getTypeOfTupleWithContext(
         }
     }
 
-    const entryTypeResults = node.d.items.map((expr, index) =>
-        evaluator.getTypeOfExpression(
-            expr,
-            flags | EvalFlags.StripTupleLiterals,
-            makeInferenceContext(
-                index < expectedTypes.length ? expectedTypes[index] : undefined,
-                inferenceContext.isTypeIncomplete
+    const entryTypeResults: TypeResult[] = [];
+    for (let index = 0; index < node.d.items.length; index++) {
+        entryTypeResults.push(
+            evaluator.getTypeOfExpression(
+                node.d.items[index],
+                flags | EvalFlags.StripTupleLiterals,
+                makeInferenceContext(
+                    index < expectedTypes.length ? expectedTypes[index] : undefined,
+                    inferenceContext.isTypeIncomplete
+                )
             )
-        )
-    );
-    const isIncomplete = entryTypeResults.some((result) => result.isIncomplete);
+        );
+    }
+    let isIncomplete = false;
+    for (const result of entryTypeResults) {
+        if (result.isIncomplete) {
+            isIncomplete = true;
+            break;
+        }
+    }
 
     // Copy any expected type diag addenda for precision error reporting.
     let expectedTypeDiagAddendum: DiagnosticAddendum | undefined;
-    if (entryTypeResults.some((result) => result.expectedTypeDiagAddendum)) {
+    let hasExpectedTypeDiag = false;
+    for (const result of entryTypeResults) {
+        if (result.expectedTypeDiagAddendum) {
+            hasExpectedTypeDiag = true;
+            break;
+        }
+    }
+    if (hasExpectedTypeDiag) {
         expectedTypeDiagAddendum = new DiagnosticAddendum();
-        entryTypeResults.forEach((result) => {
+        for (const result of entryTypeResults) {
             if (result.expectedTypeDiagAddendum) {
-                expectedTypeDiagAddendum!.addAddendum(result.expectedTypeDiagAddendum);
+                expectedTypeDiagAddendum.addAddendum(result.expectedTypeDiagAddendum);
             }
-        });
+        }
     }
 
     // If the tuple contains a very large number of entries, it's probably
     // generated code. If we encounter type errors, don't bother building
     // the full tuple type.
     let type: Type;
-    if (node.d.items.length > maxInferredTupleEntryCount && entryTypeResults.some((result) => result.typeErrors)) {
+    let hasTypeErrors = false;
+    if (node.d.items.length > maxInferredTupleEntryCount) {
+        for (const result of entryTypeResults) {
+            if (result.typeErrors) {
+                hasTypeErrors = true;
+                break;
+            }
+        }
+    }
+    if (hasTypeErrors) {
         type = makeTupleObject(evaluator, [{ type: UnknownType.create(), isUnbounded: true }]);
     } else {
         type = makeTupleObject(
@@ -240,10 +272,17 @@ export function getTypeOfTupleWithContext(
 }
 
 export function getTypeOfTupleInferred(evaluator: TypeEvaluator, node: TupleNode, flags: EvalFlags): TypeResult {
-    const entryTypeResults = node.d.items.map((expr) =>
-        evaluator.getTypeOfExpression(expr, flags | EvalFlags.StripTupleLiterals)
-    );
-    const isIncomplete = entryTypeResults.some((result) => result.isIncomplete);
+    const entryTypeResults: TypeResult[] = [];
+    for (const expr of node.d.items) {
+        entryTypeResults.push(evaluator.getTypeOfExpression(expr, flags | EvalFlags.StripTupleLiterals));
+    }
+    let isIncomplete = false;
+    for (const result of entryTypeResults) {
+        if (result.isIncomplete) {
+            isIncomplete = true;
+            break;
+        }
+    }
 
     // If the tuple contains a very large number of entries, it's probably
     // generated code. Rather than taking the time to evaluate every entry,
@@ -323,9 +362,23 @@ export function assignTupleTypeArgs(
             }
         }
     } else {
-        const isDestIndeterminate = destTypeArgs.some((t) => t.isUnbounded || isTypeVarTuple(t.type));
+        let isDestIndeterminate = false;
+        for (const t of destTypeArgs) {
+            if (t.isUnbounded || isTypeVarTuple(t.type)) {
+                isDestIndeterminate = true;
+                break;
+            }
+        }
 
-        if (srcTypeArgs.some((t) => t.isUnbounded || isTypeVarTuple(t.type))) {
+        let isSrcIndeterminate = false;
+        for (const t of srcTypeArgs) {
+            if (t.isUnbounded || isTypeVarTuple(t.type)) {
+                isSrcIndeterminate = true;
+                break;
+            }
+        }
+
+        if (isSrcIndeterminate) {
             if (isDestIndeterminate) {
                 diag?.addMessage(
                     LocAddendum.tupleSizeIndeterminateSrcDest().format({
@@ -374,11 +427,27 @@ export function adjustTupleTypeArgs(
     srcTypeArgs: TupleTypeArg[],
     flags: AssignTypeFlags
 ): boolean {
-    const destUnboundedOrVariadicIndex = destTypeArgs.findIndex(
-        (t) => t.isUnbounded || isUnpackedTypeVarTuple(t.type) || isUnpackedTypeVar(t.type)
-    );
-    const srcUnboundedIndex = srcTypeArgs.findIndex((t) => t.isUnbounded);
-    const srcVariadicIndex = srcTypeArgs.findIndex((t) => isUnpackedTypeVarTuple(t.type) || isUnpackedTypeVar(t.type));
+    let destUnboundedOrVariadicIndex = -1;
+    for (let i = 0; i < destTypeArgs.length; i++) {
+        if (destTypeArgs[i].isUnbounded || isUnpackedTypeVarTuple(destTypeArgs[i].type) || isUnpackedTypeVar(destTypeArgs[i].type)) {
+            destUnboundedOrVariadicIndex = i;
+            break;
+        }
+    }
+    let srcUnboundedIndex = -1;
+    for (let i = 0; i < srcTypeArgs.length; i++) {
+        if (srcTypeArgs[i].isUnbounded) {
+            srcUnboundedIndex = i;
+            break;
+        }
+    }
+    let srcVariadicIndex = -1;
+    for (let i = 0; i < srcTypeArgs.length; i++) {
+        if (isUnpackedTypeVarTuple(srcTypeArgs[i].type) || isUnpackedTypeVar(srcTypeArgs[i].type)) {
+            srcVariadicIndex = i;
+            break;
+        }
+    }
 
     if (srcUnboundedIndex >= 0) {
         if (isAnyOrUnknown(srcTypeArgs[srcUnboundedIndex].type)) {
@@ -436,17 +505,20 @@ export function adjustTupleTypeArgs(
             if (!skipAdjustment && tupleClass && isInstantiableClass(tupleClass)) {
                 const removedArgs = destTypeArgs.splice(srcVariadicIndex, destArgsToCapture);
 
+                const mappedArgs: TupleTypeArg[] = [];
+                for (const typeArg of removedArgs) {
+                    mappedArgs.push({
+                        type: typeArg.type,
+                        isUnbounded: typeArg.isUnbounded,
+                        isOptional: typeArg.isOptional,
+                    });
+                }
+
                 // Package up the remaining type arguments into a tuple object.
                 const variadicTuple = ClassType.cloneAsInstance(
                     specializeTupleClass(
                         tupleClass,
-                        removedArgs.map((typeArg) => {
-                            return {
-                                type: typeArg.type,
-                                isUnbounded: typeArg.isUnbounded,
-                                isOptional: typeArg.isOptional,
-                            };
-                        }),
+                        mappedArgs,
                         /* isTypeArgExplicit */ true,
                         /* isUnpacked */ true
                     )
@@ -477,17 +549,20 @@ export function adjustTupleTypeArgs(
                     if (removedArgs.length === 1 && isUnpackedTypeVarTuple(removedArgs[0].type)) {
                         variadicTuple = removedArgs[0].type;
                     } else {
+                        const mappedArgs: TupleTypeArg[] = [];
+                        for (const typeArg of removedArgs) {
+                            mappedArgs.push({
+                                type: typeArg.type,
+                                isUnbounded: typeArg.isUnbounded,
+                                isOptional: typeArg.isOptional,
+                            });
+                        }
+
                         // Package up the remaining type arguments into a tuple object.
                         variadicTuple = ClassType.cloneAsInstance(
                             specializeTupleClass(
                                 tupleClass,
-                                removedArgs.map((typeArg) => {
-                                    return {
-                                        type: typeArg.type,
-                                        isUnbounded: typeArg.isUnbounded,
-                                        isOptional: typeArg.isOptional,
-                                    };
-                                }),
+                                mappedArgs,
                                 /* isTypeArgExplicit */ true,
                                 /* isUnpacked */ true
                             )
@@ -514,12 +589,15 @@ export function adjustTupleTypeArgs(
             (srcUnboundedIndex >= destUnboundedOrVariadicIndex &&
                 srcUnboundedIndex < destUnboundedOrVariadicIndex + srcArgsToCapture)
         ) {
-            const removedArgTypes = srcTypeArgs.splice(destUnboundedOrVariadicIndex, srcArgsToCapture).map((t) => {
+            const removedArgs = srcTypeArgs.splice(destUnboundedOrVariadicIndex, srcArgsToCapture);
+            const removedArgTypes: Type[] = [];
+            for (const t of removedArgs) {
                 if (isTypeVar(t.type) && isUnpackedTypeVarTuple(t.type)) {
-                    return TypeVarType.cloneForUnpacked(t.type, /* isInUnion */ true);
+                    removedArgTypes.push(TypeVarType.cloneForUnpacked(t.type, /* isInUnion */ true));
+                } else {
+                    removedArgTypes.push(t.type);
                 }
-                return t.type;
-            });
+            }
 
             srcTypeArgs.splice(destUnboundedOrVariadicIndex, 0, {
                 type: removedArgTypes.length > 0 ? combineTypes(removedArgTypes) : AnyType.create(),
@@ -563,9 +641,19 @@ export function getSlicedTupleType(
 export function expandTuple(tupleType: ClassType, maxExpansion: number): Type[] | undefined {
     if (
         !isTupleClass(tupleType) ||
-        !tupleType.priv.tupleTypeArgs ||
-        tupleType.priv.tupleTypeArgs.some((typeArg) => typeArg.isUnbounded || isTypeVarTuple(typeArg.type))
+        !tupleType.priv.tupleTypeArgs
     ) {
+        return undefined;
+    }
+
+    let hasIndeterminateArg = false;
+    for (const typeArg of tupleType.priv.tupleTypeArgs) {
+        if (typeArg.isUnbounded || isTypeVarTuple(typeArg.type)) {
+            hasIndeterminateArg = true;
+            break;
+        }
+    }
+    if (hasIndeterminateArg) {
         return undefined;
     }
 
@@ -612,9 +700,13 @@ function getTupleSliceParam(
         }
 
         value = valType.priv.literalValue as number;
-        const unboundedIndex = tupleTypeArgs.findIndex(
-            (typeArg) => typeArg.isUnbounded || isTypeVarTuple(typeArg.type)
-        );
+        let unboundedIndex = -1;
+        for (let i = 0; i < tupleTypeArgs.length; i++) {
+            if (tupleTypeArgs[i].isUnbounded || isTypeVarTuple(tupleTypeArgs[i].type)) {
+                unboundedIndex = i;
+                break;
+            }
+        }
 
         if (value < 0) {
             value = tupleTypeArgs.length + value;
