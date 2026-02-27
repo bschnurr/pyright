@@ -344,27 +344,27 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
     }
 
     reanalyze() {
-        this.workspaceFactory.items().forEach((workspace) => {
+        for (const workspace of this.workspaceFactory.items()) {
             workspace.service.invalidateAndForceReanalysis(InvalidatedReason.Reanalyzed);
-        });
+        }
     }
 
     restart() {
-        this.workspaceFactory.items().forEach((workspace) => {
+        for (const workspace of this.workspaceFactory.items()) {
             workspace.service.restart();
-        });
+        }
     }
 
     updateSettingsForAllWorkspaces(): void {
         const tasks: Promise<void>[] = [];
-        this.workspaceFactory.items().forEach((workspace) => {
+        for (const workspace of this.workspaceFactory.items()) {
             // Updating settings can change workspace's file ownership. Make workspace uninitialized so that
             // features can wait until workspace gets new settings.
             // the file's ownership can also changed by `pyrightconfig.json` changes, but those are synchronous
             // operation, so it won't affect this.
             workspace.isInitialized = workspace.isInitialized.reset();
             tasks.push(this.updateSettingsForWorkspace(workspace, workspace.isInitialized));
-        });
+        }
 
         Promise.all(tasks).then(() => {
             this.dynamicFeatures.register();
@@ -1105,9 +1105,9 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
 
         // Send this open to all the workspaces that might contain this file.
         const workspaces = await this.getContainingWorkspacesForFile(uri);
-        workspaces.forEach((w) => {
+        for (const w of workspaces) {
             w.service.setFileOpened(uri, params.textDocument.version, params.textDocument.text, ipythonMode);
-        });
+        }
     }
 
     protected async onDidChangeTextDocument(params: DidChangeTextDocumentParams, ipythonMode = IPythonMode.None) {
@@ -1126,9 +1126,9 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
 
         // Send this change to all the workspaces that might contain this file.
         const workspaces = await this.getContainingWorkspacesForFile(uri);
-        workspaces.forEach((w) => {
+        for (const w of workspaces) {
             w.service.updateOpenFileContents(uri, params.textDocument.version, newContents, ipythonMode);
-        });
+        }
     }
 
     protected async onDidCloseTextDocument(params: DidCloseTextDocumentParams) {
@@ -1136,9 +1136,9 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
 
         // Send this close to all the workspaces that might contain this file.
         const workspaces = await this.getContainingWorkspacesForFile(uri);
-        workspaces.forEach((w) => {
+        for (const w of workspaces) {
             w.service.setFileClosed(uri);
-        });
+        }
 
         this.openFileMap.delete(uri.key);
     }
@@ -1227,9 +1227,9 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
             ? wrapProgressReporter(workDoneProgress)
             : undefined;
         this._workspaceDiagnosticsReporter = resultReporter;
-        this.workspaceFactory.getNonDefaultWorkspaces().forEach((workspace) => {
+        for (const workspace of this.workspaceFactory.getNonDefaultWorkspaces()) {
             workspace.service.invalidateAndScheduleReanalysis(InvalidatedReason.Reanalyzed);
-        });
+        }
 
         return new Promise<WorkspaceDiagnosticReport>((resolve, reject) => {
             // We never resolve as this should be a continually occurring process. Scheduling analysis
@@ -1242,11 +1242,11 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
     }
 
     protected onDidChangeWatchedFiles(params: DidChangeWatchedFilesParams) {
-        params.changes.forEach((change) => {
+        for (const change of params.changes) {
             const filePath = this.fs.realCasePath(this.convertLspUriStringToUri(change.uri));
             const eventType: FileWatcherEventType = change.type === 1 ? 'add' : 'change';
             this.serverOptions.fileWatcherHandler.onFileChange(eventType, filePath);
-        });
+        }
     }
 
     protected async onExecuteCommand(
@@ -1333,13 +1333,13 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
 
     protected onAnalysisCompletedHandler(fs: FileSystem, results: AnalysisResults): void {
         // Send the computed diagnostics to the client.
-        results.diagnostics.forEach((fileDiag) => {
+        for (const fileDiag of results.diagnostics) {
             if (!this.canNavigateToFile(fileDiag.fileUri, fs)) {
-                return;
+                continue;
             }
 
             this.sendDiagnostics(this.convertDiagnostics(fs, fileDiag));
-        });
+        }
 
         const reporter = this.getAnalysisProgressReporter();
         if (!reporter.isEnabled(results)) {
@@ -1442,9 +1442,9 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
         // Tell all of the services that the user is actively
         // interacting with one or more editors, so they should
         // back off from performing any work.
-        this.workspaceFactory.items().forEach((workspace: { service: { recordUserInteractionTime: () => void } }) => {
-            workspace.service.recordUserInteractionTime();
-        });
+        for (const workspace of this.workspaceFactory.items()) {
+            (workspace as { service: { recordUserInteractionTime: () => void } }).service.recordUserInteractionTime();
+        }
     }
 
     protected getDocumentationUrlForDiagnostic(diag: AnalyzerDiagnostic): string | undefined {
@@ -1527,7 +1527,7 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
     private _convertDiagnostics(fs: FileSystem, diags: AnalyzerDiagnostic[]): Diagnostic[] {
         const convertedDiags: Diagnostic[] = [];
 
-        diags.forEach((diag) => {
+        for (const diag of diags) {
             const severity = convertCategoryToSeverity(diag.category);
             const rule = diag.getRule();
             const code = this.getDiagCode(diag, rule);
@@ -1549,7 +1549,7 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
 
                 // If the client doesn't support "unnecessary" tags, don't report unused code.
                 if (!this.client.supportsUnnecessaryDiagnosticTag) {
-                    return;
+                    continue;
                 }
             } else if (diag.category === DiagnosticCategory.Deprecated) {
                 vsDiag.tags = [DiagnosticTag.Deprecated];
@@ -1557,11 +1557,11 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
 
                 // If the client doesn't support "deprecated" tags, don't report.
                 if (!this.client.supportsDeprecatedDiagnosticTag) {
-                    return;
+                    continue;
                 }
             } else if (diag.category === DiagnosticCategory.TaskItem) {
                 // TaskItem is not supported.
-                return;
+                continue;
             }
 
             if (rule) {
@@ -1586,7 +1586,7 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
             }
 
             convertedDiags.push(vsDiag);
-        });
+        }
 
         function convertCategoryToSeverity(category: DiagnosticCategory) {
             switch (category) {
