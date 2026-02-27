@@ -232,7 +232,7 @@ export class Program {
 
         // Tell all source files we're no longer in edit mode. Gather
         // up all of their edits and find files that no longer needed.
-        mutatedFiles.forEach((fileInfo) => {
+        for (const fileInfo of mutatedFiles) {
             if (fileInfo.isCreatedInEditMode) {
                 filesToDelete.add(fileInfo);
             }
@@ -252,7 +252,7 @@ export class Program {
                     replacementText: newContents,
                 });
             }
-        });
+        }
 
         // Delete files added while in edit mode
         if (filesToDelete.size > 0) {
@@ -298,18 +298,18 @@ export class Program {
         if (this._sourceFileList.length > 0) {
             // We need to determine which files to remove from the existing file list.
             const newFileMap = new Map<string, Uri>();
-            fileUris.forEach((path) => {
+            for (const path of fileUris) {
                 newFileMap.set(path.key, path);
-            });
+            }
 
             // Files that are not in the tracked file list are
             // marked as no longer tracked.
-            this._sourceFileList.forEach((oldFile) => {
+            for (const oldFile of this._sourceFileList) {
                 const fileUri = oldFile.uri;
                 if (!newFileMap.has(fileUri.key)) {
                     oldFile.isTracked = false;
                 }
-            });
+            }
         }
 
         // Add the new files. Only the new items will be added.
@@ -334,9 +334,9 @@ export class Program {
     }
 
     addTrackedFiles(fileUris: Uri[], isThirdPartyImport = false, isInPyTypedPackage = false) {
-        fileUris.forEach((fileUri) => {
+        for (const fileUri of fileUris) {
             this.addTrackedFile(fileUri, isThirdPartyImport, isInPyTypedPackage);
-        });
+        }
     }
 
     addInterimFile(fileUri: Uri): SourceFileInfo {
@@ -468,7 +468,7 @@ export class Program {
     markAllFilesDirty(evenIfContentsAreSame: boolean) {
         const markDirtySet = new Set<string>();
 
-        this._sourceFileList.forEach((sourceFileInfo) => {
+        for (const sourceFileInfo of this._sourceFileList) {
             if (evenIfContentsAreSame) {
                 sourceFileInfo.sourceFile.markDirty();
             } else if (sourceFileInfo.sourceFile.didContentsChangeOnDisk()) {
@@ -478,7 +478,7 @@ export class Program {
                 // also. This will retrigger analysis of these other files.
                 this._markFileDirtyRecursive(sourceFileInfo, markDirtySet);
             }
-        });
+        }
 
         if (markDirtySet.size > 0) {
             this._createNewEvaluator();
@@ -487,7 +487,7 @@ export class Program {
 
     markFilesDirty(fileUris: Uri[], evenIfContentsAreSame: boolean) {
         const markDirtySet = new Set<string>();
-        fileUris.forEach((fileUri) => {
+        for (const fileUri of fileUris) {
             const sourceFileInfo = this.getSourceFileInfo(fileUri);
             if (sourceFileInfo) {
                 const fileName = fileUri.fileName;
@@ -496,7 +496,7 @@ export class Program {
                 // included by all source files.
                 if (fileName === 'builtins.pyi' || fileName === '__builtins__.pyi') {
                     this.markAllFilesDirty(evenIfContentsAreSame);
-                    return;
+                    continue;
                 }
 
                 // If !evenIfContentsAreSame, see if the on-disk contents have
@@ -513,7 +513,7 @@ export class Program {
                     this._markFileDirtyRecursive(sourceFileInfo, markDirtySet);
                 }
             }
-        });
+        }
 
         if (markDirtySet.size > 0) {
             this._createNewEvaluator();
@@ -560,7 +560,7 @@ export class Program {
             return { files: 0, cells: 0 };
         }
 
-        this._sourceFileList.forEach((fileInfo) => {
+        for (const fileInfo of this._sourceFileList) {
             const sourceFile = fileInfo.sourceFile;
             if (sourceFile.isCheckingRequired()) {
                 if (this._shouldCheckFile(fileInfo)) {
@@ -569,7 +569,7 @@ export class Program {
                         : filesToAnalyzeCount++;
                 }
             }
-        });
+        }
 
         return {
             files: filesToAnalyzeCount,
@@ -796,10 +796,10 @@ export class Program {
         this._console.info('');
         this._console.info('Analysis time by file');
 
-        sortedFiles.forEach((sfInfo) => {
+        for (const sfInfo of sortedFiles) {
             const checkTimeInMs = sfInfo.sourceFile.getCheckTime()!;
             this._console.info(`${checkTimeInMs}ms: ${sfInfo.uri}`);
-        });
+        }
     }
 
     // Prints import dependency information for each of the files in
@@ -814,7 +814,7 @@ export class Program {
 
         const zeroImportFiles: SourceFile[] = [];
 
-        sortedFiles.forEach((sfInfo) => {
+        for (const sfInfo of sortedFiles) {
             this._console.info('');
             const fileUri = fs.getOriginalUri(sfInfo.uri);
             let fileString = fileUri.toString();
@@ -829,33 +829,33 @@ export class Program {
                 ` Imports     ${sfInfo.imports.length} ` + `file${sfInfo.imports.length === 1 ? '' : 's'}`
             );
             if (verbose) {
-                sfInfo.imports.forEach((importInfo) => {
+                for (const importInfo of sfInfo.imports) {
                     this._console.info(`    ${fs.getOriginalUri(importInfo.uri)}`);
-                });
+                }
             }
 
             this._console.info(
                 ` Imported by ${sfInfo.importedBy.length} ` + `file${sfInfo.importedBy.length === 1 ? '' : 's'}`
             );
             if (verbose) {
-                sfInfo.importedBy.forEach((importInfo) => {
+                for (const importInfo of sfInfo.importedBy) {
                     this._console.info(`    ${fs.getOriginalUri(importInfo.uri)}`);
-                });
+                }
             }
 
             if (sfInfo.importedBy.length === 0) {
                 zeroImportFiles.push(sfInfo.sourceFile);
             }
-        });
+        }
 
         if (zeroImportFiles.length > 0) {
             this._console.info('');
             this._console.info(
                 `${zeroImportFiles.length} file${zeroImportFiles.length === 1 ? '' : 's'}` + ` not explicitly imported`
             );
-            zeroImportFiles.forEach((importFile) => {
+            for (const importFile of zeroImportFiles) {
                 this._console.info(`    ${fs.getOriginalUri(importFile.getUri())}`);
-            });
+            }
         }
     }
 
@@ -946,7 +946,7 @@ export class Program {
     getDiagnostics(options: ConfigOptions, reportDeltasOnly = true): FileDiagnostics[] {
         const fileDiagnostics: FileDiagnostics[] = this._removeUnneededFiles();
 
-        this._sourceFileList.forEach((sourceFileInfo) => {
+        for (const sourceFileInfo of this._sourceFileList) {
             if (this._shouldCheckFile(sourceFileInfo)) {
                 let diagnostics = sourceFileInfo.sourceFile.getDiagnostics(
                     options,
@@ -983,7 +983,7 @@ export class Program {
                 });
                 sourceFileInfo.diagnosticsVersion = undefined;
             }
-        });
+        }
 
         return fileDiagnostics;
     }
@@ -1062,7 +1062,12 @@ export class Program {
         this._discardCachedParseResults();
         this._parsedFileCount = 0;
 
-        this.serviceProvider.tryGet(ServiceKeys.stateMutationListeners)?.forEach((l) => l.onClearCache?.());
+        const listeners = this.serviceProvider.tryGet(ServiceKeys.stateMutationListeners);
+        if (listeners) {
+            for (const l of listeners) {
+                l.onClearCache?.();
+            }
+        }
     }
 
     bindShadowFile(stubFileUri: Uri, shadowFile: Uri): SourceFile | undefined {
@@ -1188,10 +1193,10 @@ export class Program {
 
                 // Unlink any imports and remove them from the list if
                 // they are no longer referenced.
-                fileInfo.imports.forEach((importedFile) => {
+                for (const importedFile of fileInfo.imports) {
                     const indexToRemove = importedFile.importedBy.findIndex((fi) => fi === fileInfo);
                     if (indexToRemove < 0) {
-                        return;
+                        continue;
                     }
 
                     importedFile.mutate((s) => s.importedBy.splice(indexToRemove, 1));
@@ -1216,12 +1221,12 @@ export class Program {
                             i--;
                         }
                     }
-                });
+                }
 
                 // Remove any shadowed files corresponding to this file.
-                fileInfo.shadowedBy.forEach((shadowedFile) => {
+                for (const shadowedFile of fileInfo.shadowedBy) {
                     shadowedFile.mutate((s) => (s.shadows = s.shadows.filter((f) => f !== fileInfo)));
-                });
+                }
                 fileInfo.mutate((s) => (s.shadowedBy = []));
             } else {
                 // If we're showing the user errors only for open files, clear
@@ -1454,7 +1459,7 @@ export class Program {
             }
         }
 
-        imports.forEach((importResult) => {
+        for (const importResult of imports) {
             if (importResult.isImportFound) {
                 if (this._isImportAllowed(sourceFileInfo, importResult, importResult.isStubFile)) {
                     if (importResult.resolvedUris.length > 0) {
@@ -1472,20 +1477,22 @@ export class Program {
                     }
                 }
 
-                importResult.filteredImplicitImports?.forEach((implicitImport) => {
-                    if (this._isImportAllowed(sourceFileInfo, importResult, implicitImport.isStubFile)) {
-                        if (!implicitImport.isNativeLib) {
-                            const thirdPartyTypeInfo = getThirdPartyImportInfo(importResult);
-                            newImportPathMap.set(implicitImport.uri.key, {
-                                path: implicitImport.uri,
-                                isTypeshedFile:
-                                    !!importResult.isStdlibTypeshedFile || !!importResult.isThirdPartyTypeshedFile,
-                                isThirdPartyImport: thirdPartyTypeInfo.isThirdPartyImport,
-                                isPyTypedPresent: thirdPartyTypeInfo.isPyTypedPresent,
-                            });
+                if (importResult.filteredImplicitImports) {
+                    for (const implicitImport of importResult.filteredImplicitImports.values()) {
+                        if (this._isImportAllowed(sourceFileInfo, importResult, implicitImport.isStubFile)) {
+                            if (!implicitImport.isNativeLib) {
+                                const thirdPartyTypeInfo = getThirdPartyImportInfo(importResult);
+                                newImportPathMap.set(implicitImport.uri.key, {
+                                    path: implicitImport.uri,
+                                    isTypeshedFile:
+                                        !!importResult.isStdlibTypeshedFile || !!importResult.isThirdPartyTypeshedFile,
+                                    isThirdPartyImport: thirdPartyTypeInfo.isThirdPartyImport,
+                                    isPyTypedPresent: thirdPartyTypeInfo.isPyTypedPresent,
+                                });
+                            }
                         }
                     }
-                });
+                }
 
                 // If the stub was found but the non-stub (source) file was not, dump
                 // the failure to the log for diagnostic purposes.
@@ -1501,9 +1508,9 @@ export class Program {
                             );
 
                             if (importResult.nonStubImportResult.importFailureInfo) {
-                                importResult.nonStubImportResult.importFailureInfo.forEach((diag) => {
+                                for (const diag of importResult.nonStubImportResult.importFailureInfo) {
                                     this._console.info(`  ${diag}`);
-                                });
+                                }
                             }
                         }
                     }
@@ -1514,15 +1521,15 @@ export class Program {
                         `in file '${sourceFileInfo.uri.toUserVisibleString()}'`
                 );
                 if (importResult.importFailureInfo) {
-                    importResult.importFailureInfo.forEach((diag) => {
+                    for (const diag of importResult.importFailureInfo) {
                         this._console.info(`  ${diag}`);
-                    });
+                    }
                 }
             }
-        });
+        }
 
         const updatedImportMap = new Map<string, SourceFileInfo>();
-        sourceFileInfo.imports.forEach((importInfo) => {
+        for (const importInfo of sourceFileInfo.imports) {
             const oldFilePath = importInfo.uri;
 
             // A previous import was removed.
@@ -1533,10 +1540,10 @@ export class Program {
             } else {
                 updatedImportMap.set(oldFilePath.key, importInfo);
             }
-        });
+        }
 
         // See if there are any new imports to be added.
-        newImportPathMap.forEach((importInfo, normalizedImportPath) => {
+        for (const [normalizedImportPath, importInfo] of newImportPathMap) {
             if (!updatedImportMap.has(normalizedImportPath)) {
                 // We found a new import to add. See if it's already part
                 // of the program.
@@ -1567,17 +1574,17 @@ export class Program {
                 importedFileInfo.mutate((s) => s.importedBy.push(sourceFileInfo));
                 updatedImportMap.set(normalizedImportPath, importedFileInfo);
             }
-        });
+        }
 
         // Update the imports list. It should now map the set of imports
         // specified by the source file.
         const newImports: SourceFileInfo[] = [];
-        newImportPathMap.forEach((_, key) => {
+        for (const [key] of newImportPathMap) {
             const newImport = this._getSourceFileInfoFromKey(key);
             if (newImport) {
                 newImports.push(newImport);
             }
-        });
+        }
 
         // Mutate only when necessary to avoid extra binding operations.
         if (
@@ -1866,9 +1873,11 @@ export class Program {
     private _getEffectiveFutureImports(futureImports: Set<string>, chainedSourceFile: SourceFileInfo): Set<string> {
         const effectiveFutureImports = new Set<string>(futureImports);
 
-        chainedSourceFile.effectiveFutureImports?.forEach((value) => {
-            effectiveFutureImports.add(value);
-        });
+        if (chainedSourceFile.effectiveFutureImports) {
+            for (const value of chainedSourceFile.effectiveFutureImports) {
+                effectiveFutureImports.add(value);
+            }
+        }
 
         return effectiveFutureImports;
     }
@@ -2047,7 +2056,7 @@ export class Program {
                     const closureMap = new Map<string, SourceFileInfo>();
                     this._getImportsRecursive(fileToCheck, closureMap, 0);
 
-                    closureMap.forEach((file) => {
+                    for (const file of closureMap.values()) {
                         timingStats.cycleDetectionTime.timeOperation(() => {
                             const filesVisitedMap = new Map<string, SourceFileInfo>();
 
@@ -2055,12 +2064,12 @@ export class Program {
                                 // If no cycles were found in any of the files we visited,
                                 // set a flag to indicates that we don't need to visit them again
                                 // on subsequent cycle checks.
-                                filesVisitedMap.forEach((sourceFileInfo) => {
+                                for (const sourceFileInfo of filesVisitedMap.values()) {
                                     sourceFileInfo.sourceFile.setNoCircularDependencyConfirmed();
-                                });
+                                }
                             }
                         });
-                    });
+                    }
                 }
             }
 
@@ -2233,9 +2242,9 @@ export class Program {
 
     private _logImportCycle(dependencyChain: SourceFileInfo[]) {
         const circDep = new CircularDependency();
-        dependencyChain.forEach((sourceFileInfo) => {
+        for (const sourceFileInfo of dependencyChain) {
             circDep.appendPath(sourceFileInfo.uri);
-        });
+        }
 
         circDep.normalizeOrder();
         const firstFilePath = circDep.getPaths()[0];
@@ -2255,12 +2264,12 @@ export class Program {
         sourceFileInfo.sourceFile.markReanalysisRequired(forceRebinding);
         markSet.add(fileUri.key);
 
-        sourceFileInfo.importedBy.forEach((dep) => {
+        for (const dep of sourceFileInfo.importedBy) {
             // Changes on chained source file can change symbols in the symbol table and
             // dependencies on the dependent file. Force rebinding.
             const forceRebinding = dep.chainedSourceFile === sourceFileInfo;
             this._markFileDirtyRecursive(dep, markSet, forceRebinding);
-        });
+        }
 
         // Change in the current file could impact checker result of chainedSourceFile such as unused symbols.
         let reevaluationRequired = false;
