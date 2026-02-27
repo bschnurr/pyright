@@ -250,7 +250,8 @@ function printTypeInternal(
                             aliasInfo.typeArgs.some((typeArg) => !isUnknown(typeArg))
                         ) {
                             argumentStrings = [];
-                            aliasInfo.typeArgs.forEach((typeArg, index) => {
+                            for (let index = 0; index < aliasInfo.typeArgs.length; index++) {
+                                const typeArg = aliasInfo.typeArgs[index];
                                 // Which type parameter does this map to?
                                 const typeParam =
                                     index < typeParams.length ? typeParams[index] : typeParams[typeParams.length - 1];
@@ -263,7 +264,7 @@ function printTypeInternal(
                                     typeArg.priv.tupleTypeArgs &&
                                     typeArg.priv.tupleTypeArgs.every((typeArg) => !typeArg.isUnbounded)
                                 ) {
-                                    typeArg.priv.tupleTypeArgs.forEach((tupleTypeArg) => {
+                                    for (const tupleTypeArg of typeArg.priv.tupleTypeArgs) {
                                         argumentStrings!.push(
                                             printTypeInternal(
                                                 tupleTypeArg.type,
@@ -274,7 +275,7 @@ function printTypeInternal(
                                                 recursionCount
                                             )
                                         );
-                                    });
+                                    }
                                 } else {
                                     argumentStrings!.push(
                                         printTypeInternal(
@@ -287,7 +288,7 @@ function printTypeInternal(
                                         )
                                     );
                                 }
-                            });
+                            }
                         }
                     } else {
                         if (
@@ -295,7 +296,7 @@ function printTypeInternal(
                             typeParams.some((typeParam) => !isUnknown(typeParam))
                         ) {
                             argumentStrings = [];
-                            typeParams.forEach((typeParam) => {
+                            for (const typeParam of typeParams) {
                                 argumentStrings!.push(
                                     printTypeInternal(
                                         typeParam,
@@ -306,7 +307,7 @@ function printTypeInternal(
                                         recursionCount
                                     )
                                 );
-                            });
+                            }
                         }
                     }
 
@@ -726,7 +727,9 @@ function printUnionType(
                         recursionCount
                     )
                 );
-                indicesCoveredByTypeAlias.forEach((index) => subtypeHandledSet.add(index));
+                for (const index of indicesCoveredByTypeAlias) {
+                    subtypeHandledSet.add(index);
+                }
             }
         }
     }
@@ -794,17 +797,23 @@ function printUnionType(
     });
 
     const dedupedSubtypeStrings: string[] = [];
-    subtypeStrings.forEach((s) => dedupedSubtypeStrings.push(s));
+    for (const s of subtypeStrings) {
+        dedupedSubtypeStrings.push(s);
+    }
 
     if (literalObjectStrings.size > 0) {
         const literalStrings: string[] = [];
-        literalObjectStrings.forEach((s) => literalStrings.push(s));
+        for (const s of literalObjectStrings) {
+            literalStrings.push(s);
+        }
         dedupedSubtypeStrings.push(`Literal[${literalStrings.join(', ')}]`);
     }
 
     if (literalClassStrings.size > 0) {
         const literalStrings: string[] = [];
-        literalClassStrings.forEach((s) => literalStrings.push(s));
+        for (const s of literalClassStrings) {
+            literalStrings.push(s);
+        }
         dedupedSubtypeStrings.push(`type[Literal[${literalStrings.join(', ')}]]`);
     }
 
@@ -865,7 +874,8 @@ function printFunctionType(
         if (isPositionalParamsOnly) {
             const paramTypes: string[] = [];
 
-            typeWithoutParamSpec.shared.parameters.forEach((param, index) => {
+            for (let index = 0; index < typeWithoutParamSpec.shared.parameters.length; index++) {
+                const param = typeWithoutParamSpec.shared.parameters[index];
                 if (param.name) {
                     const paramType = FunctionType.getParamType(typeWithoutParamSpec, index);
                     if (recursionTypes.length < maxTypeRecursionCount) {
@@ -883,7 +893,7 @@ function printFunctionType(
                         paramTypes.push('Any');
                     }
                 }
-            });
+            }
 
             if (paramSpec) {
                 if (paramTypes.length > 0) {
@@ -973,7 +983,8 @@ function printObjectTypeForClassInternal(
                 const typeArgStrings: string[] = [];
                 let isAllUnknown = true;
 
-                typeArgs.forEach((typeArg, index) => {
+                for (let index = 0; index < typeArgs.length; index++) {
+                    const typeArg = typeArgs[index];
                     const typeParam = index < typeParams.length ? typeParams[index] : undefined;
                     if (
                         typeParam &&
@@ -1040,7 +1051,7 @@ function printObjectTypeForClassInternal(
                             typeArgStrings.push(typeArgTypeText);
                         }
                     }
-                });
+                }
 
                 if (type.priv.isUnpacked) {
                     objName = printUnpack(objName, printTypeFlags);
@@ -1115,7 +1126,8 @@ function printFunctionPartsInternal(
         type = FunctionType.cloneRemoveParamSpecArgsKwargs(type);
     }
 
-    type.shared.parameters.forEach((param, index) => {
+    for (let index = 0; index < type.shared.parameters.length; index++) {
+        const param = type.shared.parameters[index];
         const paramType = FunctionType.getParamType(type, index);
         const defaultType = FunctionType.getParamDefaultType(type, index);
 
@@ -1131,7 +1143,7 @@ function printFunctionPartsInternal(
                 ClassType.isBuiltIn(specializedParamType, 'tuple') &&
                 specializedParamType.priv.tupleTypeArgs
             ) {
-                specializedParamType.priv.tupleTypeArgs.forEach((paramType) => {
+                for (const paramType of specializedParamType.priv.tupleTypeArgs) {
                     const paramString = printTypeInternal(
                         paramType.type,
                         printTypeFlags,
@@ -1141,8 +1153,8 @@ function printFunctionPartsInternal(
                         recursionCount
                     );
                     paramTypeStrings.push(paramString);
-                });
-                return;
+                }
+                continue;
             }
         }
 
@@ -1152,7 +1164,7 @@ function printFunctionPartsInternal(
             printTypeFlags & PrintTypeFlags.ExpandTypedDictArgs &&
             paramType.category === TypeCategory.Class
         ) {
-            paramType.shared.typedDictEntries!.knownItems.forEach((v, k) => {
+            for (const [k, v] of paramType.shared.typedDictEntries!.knownItems) {
                 const valueTypeString = printTypeInternal(
                     v.valueType,
                     printTypeFlags,
@@ -1162,7 +1174,7 @@ function printFunctionPartsInternal(
                     recursionCount
                 );
                 paramTypeStrings.push(`${k}: ${valueTypeString}`);
-            });
+            }
 
             const extraItemsType = paramType.shared.typedDictEntries?.extraItems?.valueType;
             if (extraItemsType && !isNever(extraItemsType)) {
@@ -1177,7 +1189,7 @@ function printFunctionPartsInternal(
                 paramTypeStrings.push(`**kwargs: ${valueTypeString}`);
             }
 
-            return;
+            continue;
         }
 
         let paramString = '';
@@ -1261,7 +1273,7 @@ function printFunctionPartsInternal(
             if (sawDefinedName) {
                 paramString += '/';
             } else {
-                return;
+                continue;
             }
         }
 
@@ -1281,12 +1293,12 @@ function printFunctionPartsInternal(
             if (param.category === ParamCategory.ArgsList) {
                 paramString = '...';
             } else if (param.category === ParamCategory.KwargsDict) {
-                return;
+                continue;
             }
         }
 
         paramTypeStrings.push(paramString);
-    });
+    }
 
     if (paramSpec) {
         if (printTypeFlags & PrintTypeFlags.PythonSyntax) {
@@ -1396,9 +1408,9 @@ class UniqueNameMap {
                     recursionTypes.push(type);
 
                     try {
-                        aliasInfo.typeArgs.forEach((typeArg) => {
+                        for (const typeArg of aliasInfo.typeArgs) {
                             this.build(typeArg, recursionTypes, recursionCount);
-                        });
+                        }
                     } finally {
                         recursionTypes.pop();
                     }
@@ -1413,10 +1425,10 @@ class UniqueNameMap {
 
             switch (type.category) {
                 case TypeCategory.Function: {
-                    type.shared.parameters.forEach((_, index) => {
+                    for (let index = 0; index < type.shared.parameters.length; index++) {
                         const paramType = FunctionType.getParamType(type, index);
                         this.build(paramType, recursionTypes, recursionCount);
-                    });
+                    }
 
                     const returnType = this._returnTypeCallback(type);
                     this.build(returnType, recursionTypes, recursionCount);
@@ -1424,9 +1436,9 @@ class UniqueNameMap {
                 }
 
                 case TypeCategory.Overloaded: {
-                    OverloadedType.getOverloads(type).forEach((overload) => {
+                    for (const overload of OverloadedType.getOverloads(type)) {
                         this.build(overload, recursionTypes, recursionCount);
-                    });
+                    }
                     break;
                 }
 
@@ -1447,13 +1459,13 @@ class UniqueNameMap {
 
                     if (!ClassType.isPseudoGenericClass(type)) {
                         if (type.priv.tupleTypeArgs) {
-                            type.priv.tupleTypeArgs.forEach((typeArg) => {
+                            for (const typeArg of type.priv.tupleTypeArgs) {
                                 this.build(typeArg.type, recursionTypes, recursionCount);
-                            });
+                            }
                         } else if (type.priv.typeArgs) {
-                            type.priv.typeArgs.forEach((typeArg) => {
+                            for (const typeArg of type.priv.typeArgs) {
                                 this.build(typeArg, recursionTypes, recursionCount);
-                            });
+                            }
                         }
                     }
                     break;
@@ -1464,9 +1476,11 @@ class UniqueNameMap {
                         this.build(subtype, recursionTypes, recursionCount);
                     });
 
-                    type.priv.typeAliasSources?.forEach((typeAliasSource) => {
-                        this.build(typeAliasSource, recursionTypes, recursionCount);
-                    });
+                    if (type.priv.typeAliasSources) {
+                        for (const typeAliasSource of type.priv.typeAliasSources) {
+                            this.build(typeAliasSource, recursionTypes, recursionCount);
+                        }
+                    }
                     break;
                 }
             }
