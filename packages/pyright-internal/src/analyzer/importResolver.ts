@@ -218,8 +218,8 @@ export class ImportResolver {
         // When ImportResolver resolves an import to a stub file, a second resolve is done
         // ignoring stub files, which gives us an approximation of where the implementation
         // for that stub is located.
-        this._cachedImportResults.forEach((map) => {
-            map.forEach((result) => {
+        for (const map of this._cachedImportResults.values()) {
+            for (const result of map.values()) {
                 if (result.isStubFile && result.isImportFound && result.nonStubImportResult) {
                     if (result.resolvedUris[result.resolvedUris.length - 1].equals(stubFileUri)) {
                         if (result.nonStubImportResult.isImportFound) {
@@ -236,8 +236,8 @@ export class ImportResolver {
                         }
                     }
                 }
-            });
-        });
+            }
+        }
 
         // We haven't seen an import of that stub, attempt to find the source
         // in some other ways.
@@ -417,10 +417,14 @@ export class ImportResolver {
         // Add paths to search stub packages.
         addPaths(this._configOptions.stubPath);
         addPaths(execEnv.root ?? this._configOptions.projectRoot);
-        execEnv.extraPaths.forEach((p) => addPaths(p));
+        for (const p of execEnv.extraPaths) {
+            addPaths(p);
+        }
         addPaths(typeshedPathEx);
 
-        this.getPythonSearchPaths().forEach((p) => addPaths(p));
+        for (const p of this.getPythonSearchPaths()) {
+            addPaths(p);
+        }
 
         this.partialStubs.processPartialStubPackages(paths, this.getImportRoots(execEnv), typeshedPathEx);
         this._invalidateFileSystemCache();
@@ -471,7 +475,7 @@ export class ImportResolver {
             this._cachedTypeshedStdLibModuleVersionInfo = this._readTypeshedStdLibVersions(customTypeshedPath);
         }
 
-        this._cachedTypeshedStdLibModuleVersionInfo.forEach((versionInfo, moduleName) => {
+        for (const [moduleName, versionInfo] of this._cachedTypeshedStdLibModuleVersionInfo) {
             let shouldExcludeModule = false;
 
             if (versionInfo.max !== undefined && PythonVersion.isGreaterThan(pythonVersion, versionInfo.max)) {
@@ -506,7 +510,7 @@ export class ImportResolver {
                 const moduleFilePath = moduleDirPath.replaceExtension('.pyi');
                 excludes.push(moduleFilePath);
             }
-        });
+        }
 
         return excludes;
     }
@@ -548,7 +552,7 @@ export class ImportResolver {
                         resolvableName.substring(0, resolvableName.length - stubsSuffix.length)
                     );
                 }
-            });
+        }
         } catch {
             // Swallow error
         }
@@ -634,7 +638,9 @@ export class ImportResolver {
 
         if (importLogger) {
             const console = this.serviceProvider.console();
-            importLogger.getLogs().forEach((diag) => console.log(diag));
+            for (const diag of importLogger.getLogs()) {
+                console.log(diag);
+            }
         }
 
         return importResult;
@@ -828,11 +834,11 @@ export class ImportResolver {
         }
 
         const filteredImplicitImports = new Map<string, ImplicitImport>();
-        importResult.implicitImports.forEach((implicitImport) => {
+        for (const [, implicitImport] of importResult.implicitImports) {
             if (importedSymbols.has(implicitImport.name)) {
                 filteredImplicitImports.set(implicitImport.name, implicitImport);
             }
-        });
+        }
 
         if (filteredImplicitImports.size === importResult.implicitImports.size) {
             return importResult;
@@ -1952,7 +1958,7 @@ export class ImportResolver {
 
         if (stdlibRoot) {
             const readDir = (root: Uri, prefix: string | undefined) => {
-                this.readdirEntriesCached(root).entries.forEach((entry) => {
+                for (const entry of this.readdirEntriesCached(root).entries) {
                     if (entry.isDirectory()) {
                         const dirRoot = root.combinePaths(entry.name);
                         readDir(dirRoot, prefix ? `${prefix}.${entry.name}` : entry.name);
@@ -1972,7 +1978,7 @@ export class ImportResolver {
                             }
                         }
                     }
-                });
+                }
             };
             readDir(stdlibRoot, undefined);
         }
@@ -2072,7 +2078,7 @@ export class ImportResolver {
                     suggestions
                 );
             }
-        });
+        }
     }
 
     // Returns the directory for a module within the stdlib typeshed directory.
@@ -2540,18 +2546,18 @@ export class ImportResolver {
             currentPath
         );
 
-        entries.files.forEach((file) => {
+        for (const file of entries.files) {
             // Strip multi-dot extensions to handle file names like "foo.cpython-32m.so". We want
             // to detect the ".so" but strip off the entire ".cpython-32m.so" extension.
             const fileWithoutExtension = file.stripAllExtensions().fileName;
 
             if (ImportResolver.isSupportedImportFile(file)) {
                 if (fileWithoutExtension === '__init__') {
-                    return;
+                    continue;
                 }
 
                 if (filter && !StringUtils.isPatternInSymbol(filter, fileWithoutExtension)) {
-                    return;
+                    continue;
                 }
 
                 if (
@@ -2565,17 +2571,17 @@ export class ImportResolver {
                         strictOnly
                     )
                 ) {
-                    return;
+                    continue;
                 }
 
                 suggestions.set(fileWithoutExtension, file);
             }
-        });
+        }
 
-        entries.directories.forEach((dir) => {
+        for (const dir of entries.directories) {
             const dirSuggestion = dir.fileName;
             if (filter && !dirSuggestion.startsWith(filter)) {
-                return;
+                continue;
             }
 
             if (
@@ -2589,24 +2595,24 @@ export class ImportResolver {
                     strictOnly
                 )
             ) {
-                return;
+                continue;
             }
 
             const initPyiPath = dir.initPyiUri;
             if (this.fileExistsCached(initPyiPath)) {
                 suggestions.set(dirSuggestion, initPyiPath);
-                return;
+                continue;
             }
 
             const initPyPath = dir.initPyUri;
             if (this.fileExistsCached(initPyPath)) {
                 suggestions.set(dirSuggestion, initPyPath);
-                return;
+                continue;
             }
 
             // It is a namespace package. there is no corresponding module path.
             suggestions.set(dirSuggestion, Uri.empty());
-        });
+        }
     }
 
     // Fix for editable installed submodules where the suggested directory was a namespace directory that wouldn't resolve.
