@@ -236,9 +236,7 @@ export class DocumentSymbolCollector extends ParseTreeWalker {
         return resolvedDeclarations;
 
         function appendSymbolDeclarations(symbol: Symbol | undefined, declarations: Declaration[]) {
-            const decls = symbol
-                ?.getDeclarations()
-                .filter((d) => !isAliasDeclaration(d));
+            const decls = symbol?.getDeclarations().filter((d) => !isAliasDeclaration(d));
             if (decls) {
                 for (const decl of decls) {
                     const resolvedDecl = evaluator!.resolveAliasDeclaration(decl, resolveLocalNames);

@@ -2582,7 +2582,11 @@ export class CompletionProvider {
         const excludes = new Set(existingKeys);
 
         for (const typedDict of typedDicts) {
-            for (const key of getTypedDictMembersForClass(this.evaluator, typedDict, /* allowNarrowed */ true).knownItems.keys()) {
+            for (const key of getTypedDictMembersForClass(
+                this.evaluator,
+                typedDict,
+                /* allowNarrowed */ true
+            ).knownItems.keys()) {
                 // Unions of TypedDicts may define the same key.
                 if (excludes.has(key) || completionMap.has(key)) {
                     continue;
