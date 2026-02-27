@@ -4940,7 +4940,7 @@ export class Checker extends ParseTreeWalker {
                 !ClassType.isSameGenericClass(symbolType, ClassType.cloneAsInstance(classType)) ||
                 !(symbolType.priv.literalValue instanceof EnumLiteral)
             ) {
-                return;
+                continue;
             }
 
             // Enum members should not have type annotations.
@@ -4953,7 +4953,7 @@ export class Checker extends ParseTreeWalker {
                         typedDecls[0].node
                     );
                 }
-                return;
+                continue;
             }
 
             // Look for a duplicate assignment.
@@ -4965,11 +4965,11 @@ export class Checker extends ParseTreeWalker {
                     decls[1].node
                 );
 
-                return;
+                continue;
             }
 
             if (decls[0].type !== DeclarationType.Variable) {
-                return;
+                continue;
             }
 
             // Look for an enum attribute annotated with "Final".
