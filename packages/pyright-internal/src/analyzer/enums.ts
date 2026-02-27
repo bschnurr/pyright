@@ -48,9 +48,12 @@ const enumEvalStack: EnumEvalStackEntry[] = [];
 
 // Determines whether the class is an Enum metaclass or a subclass thereof.
 export function isEnumMetaclass(classType: ClassType) {
-    return classType.shared.mro.some(
-        (mroClass) => isClass(mroClass) && ClassType.isBuiltIn(mroClass, ['EnumMeta', 'EnumType'])
-    );
+    for (const mroClass of classType.shared.mro) {
+        if (isClass(mroClass) && ClassType.isBuiltIn(mroClass, ['EnumMeta', 'EnumType'])) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // Determines whether this is an enum class that has at least one enum
@@ -101,7 +104,11 @@ export function createEnumType(
         return undefined;
     }
 
-    const className = nameArg.valueExpression.d.strings.map((s) => s.d.value).join('');
+    let classNameParts = '';
+    for (const s of nameArg.valueExpression.d.strings) {
+        classNameParts += s.d.value;
+    }
+    const className = classNameParts;
     const classType = ClassType.createInstantiable(
         className,
         getClassFullName(errorNode, fileInfo.moduleName, className),
@@ -146,14 +153,22 @@ export function createEnumType(
     //   Enum('name', {'a': 1, 'b': 2, 'c': 3})
     if (initArg.valueExpression.nodeType === ParseNodeType.StringList) {
         // Don't allow format strings in the init arg.
-        if (!initArg.valueExpression.d.strings.every((str) => str.nodeType === ParseNodeType.String)) {
+        let hasNonString = false;
+        for (const str of initArg.valueExpression.d.strings) {
+            if (str.nodeType !== ParseNodeType.String) {
+                hasNonString = true;
+                break;
+            }
+        }
+        if (hasNonString) {
             return undefined;
         }
 
-        const initStr = initArg.valueExpression.d.strings
-            .map((s) => s.d.value)
-            .join('')
-            .trim();
+        let initStr = '';
+        for (const s of initArg.valueExpression.d.strings) {
+            initStr += s.d.value;
+        }
+        initStr = initStr.trim();
 
         // Split by comma or whitespace.
         const entryNames = initStr.split(/[\s,]+/);
@@ -325,11 +340,14 @@ export function transformTypeForEnumMember(
     recursionCount++;
 
     // Avoid infinite recursion.
-    if (
-        enumEvalStack.find(
-            (entry) => ClassType.isSameGenericClass(entry.classType, classType) && entry.memberName === memberName
-        )
-    ) {
+    let foundOnStack = false;
+    for (const entry of enumEvalStack) {
+        if (ClassType.isSameGenericClass(entry.classType, classType) && entry.memberName === memberName) {
+            foundOnStack = true;
+            break;
+        }
+    }
+    if (foundOnStack) {
         return undefined;
     }
 
@@ -625,14 +643,14 @@ export function getTypeOfEnumMember(
         // a union of all possible enum literals.
         const literalValues = enumerateLiteralsForType(evaluator, classType);
         if (literalValues && literalValues.length > 0) {
+            const nameTypes: Type[] = [];
+            for (const literalClass of literalValues) {
+                const literalValue = literalClass.priv.literalValue;
+                assert(literalValue instanceof EnumLiteral);
+                nameTypes.push(makeNameType(literalValue));
+            }
             return {
-                type: combineTypes(
-                    literalValues.map((literalClass) => {
-                        const literalValue = literalClass.priv.literalValue;
-                        assert(literalValue instanceof EnumLiteral);
-                        return makeNameType(literalValue);
-                    })
-                ),
+                type: combineTypes(nameTypes),
                 isIncomplete,
             };
         }
@@ -696,14 +714,14 @@ export function getTypeOfEnumMember(
         // a union of all possible enum literals.
         const literalValues = enumerateLiteralsForType(evaluator, classType);
         if (literalValues && literalValues.length > 0) {
+            const valueTypes: Type[] = [];
+            for (const literalClass of literalValues) {
+                const literalValue = literalClass.priv.literalValue;
+                assert(literalValue instanceof EnumLiteral);
+                valueTypes.push(literalValue.itemType);
+            }
             return {
-                type: combineTypes(
-                    literalValues.map((literalClass) => {
-                        const literalValue = literalClass.priv.literalValue;
-                        assert(literalValue instanceof EnumLiteral);
-                        return literalValue.itemType;
-                    })
-                ),
+                type: combineTypes(valueTypes),
                 isIncomplete,
             };
         }
@@ -746,5 +764,10 @@ export function getEnumAutoValueType(evaluator: TypeEvaluator, node: ExpressionN
 }
 
 function isReprEnumClass(enumClass: ClassType) {
-    return enumClass.shared.mro.some((mroClass) => isClass(mroClass) && ClassType.isBuiltIn(mroClass, 'ReprEnum'));
+    for (const mroClass of enumClass.shared.mro) {
+        if (isClass(mroClass) && ClassType.isBuiltIn(mroClass, 'ReprEnum')) {
+            return true;
+        }
+    }
+    return false;
 }
