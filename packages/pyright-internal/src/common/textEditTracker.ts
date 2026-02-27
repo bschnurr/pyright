@@ -49,7 +49,9 @@ export class TextEditTracker {
     }
 
     addEdits(...edits: FileEditAction[]) {
-        edits.forEach((e) => this.addEdit(e.fileUri, e.range, e.replacementText));
+        for (const e of edits) {
+            this.addEdit(e.fileUri, e.range, e.replacementText);
+        }
     }
 
     addEdit(fileUri: Uri, range: Range, replacementText: string) {
@@ -64,9 +66,9 @@ export class TextEditTracker {
             // first deleting existing edits and expanding the current edit's range
             // to cover all existing edits.
             this._removeEdits(edits, overlappingEdits);
-            overlappingEdits.forEach((e) => {
+            for (const e of overlappingEdits) {
                 extendRange(range, e.range);
-            });
+            }
         }
 
         edits.push({ fileUri: fileUri, range, replacementText });
@@ -99,7 +101,9 @@ export class TextEditTracker {
             imports.findIndex((v) => v === importToDelete)
         );
 
-        ranges.forEach((r) => this.addEditWithTextRange(parseFileResults, r, ''));
+        for (const r of ranges) {
+            this.addEditWithTextRange(parseFileResults, r, '');
+        }
 
         this._markNodeRemoved(importToDelete, parseFileResults);
 
@@ -170,7 +174,9 @@ export class TextEditTracker {
         this._processNodeRemoved(token);
 
         const edits: FileEditAction[] = [];
-        this._results.forEach((v) => appendArray(edits, v));
+        for (const v of this._results.values()) {
+            appendArray(edits, v);
+        }
 
         return edits;
     }
@@ -399,14 +405,18 @@ export class TextEditTracker {
         }
 
         const editSpans = getTextRangeForImportNameDeletion(nodeToRemove.parseFileResults, nameNodes, ...indices);
-        editSpans.forEach((e) => this.addEdit(info.fileUri, convertTextRangeToRange(e, info.lines), ''));
+        for (const e of editSpans) {
+            this.addEdit(info.fileUri, convertTextRangeToRange(e, info.lines), '');
+        }
 
         this._removeNodesHandled(nodesRemoved);
         return true;
     }
 
     private _removeNodesHandled(nodesRemoved: NodeToRemove[]) {
-        nodesRemoved.forEach((n) => this._markNodeRemoved(n.node, n.parseFileResults));
+        for (const n of nodesRemoved) {
+            this._markNodeRemoved(n.node, n.parseFileResults);
+        }
         removeArrayElements(this._pendingNodeToRemove, (n) => this._nodesRemoved.has(n.node));
     }
 
@@ -415,7 +425,9 @@ export class TextEditTracker {
         this._nodesRemoved.set(nodeToDelete, parseFileResults);
         if (nodeToDelete.nodeType === ParseNodeType.ImportAs) {
             this._nodesRemoved.set(nodeToDelete.d.module, parseFileResults);
-            nodeToDelete.d.module.d.nameParts.forEach((n) => this._nodesRemoved.set(n, parseFileResults));
+            for (const n of nodeToDelete.d.module.d.nameParts) {
+                this._nodesRemoved.set(n, parseFileResults);
+            }
             if (nodeToDelete.d.alias) {
                 this._nodesRemoved.set(nodeToDelete.d.alias, parseFileResults);
             }
