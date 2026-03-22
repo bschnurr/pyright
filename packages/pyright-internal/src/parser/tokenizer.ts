@@ -92,6 +92,63 @@ const _keywords: Map<string, KeywordType> = new Map([
 
 const _softKeywords = new Set(['match', 'case', 'type']);
 
+const _keywordFirstCharTable: boolean[] = (() => {
+    const table = new Array<boolean>(128).fill(false);
+    for (const keyword of _keywords.keys()) {
+        const firstCharCode = keyword.charCodeAt(0);
+        if (firstCharCode < 128) {
+            table[firstCharCode] = true;
+        }
+    }
+    return table;
+})();
+
+const _keywordMinLen = 2;
+const _keywordMaxLen = 9; // __debug__
+
+interface KeywordEntry {
+    text: string;
+    type: KeywordType;
+}
+
+// For keyword-like identifiers, compare directly against the source text slice
+// to avoid creating temporary substring objects on the keyword path.
+const _keywordEntriesByFirstChar: Array<KeywordEntry[] | undefined> = (() => {
+    const entriesByFirstChar: Array<KeywordEntry[] | undefined> = new Array(128);
+    for (const [text, type] of _keywords.entries()) {
+        const firstCharCode = text.charCodeAt(0);
+        if (firstCharCode < 128) {
+            const entries = entriesByFirstChar[firstCharCode] ?? (entriesByFirstChar[firstCharCode] = []);
+            entries.push({ text, type });
+        }
+    }
+    return entriesByFirstChar;
+})();
+
+function getKeywordTypeFromTextSlice(text: string, start: number, length: number): KeywordType | undefined {
+    if (length < _keywordMinLen || length > _keywordMaxLen) {
+        return undefined;
+    }
+
+    const firstCharCode = text.charCodeAt(start);
+    if (firstCharCode >= 128 || !_keywordFirstCharTable[firstCharCode]) {
+        return undefined;
+    }
+
+    const candidates = _keywordEntriesByFirstChar[firstCharCode];
+    if (!candidates) {
+        return undefined;
+    }
+
+    for (const candidate of candidates) {
+        if (candidate.text.length === length && text.startsWith(candidate.text, start)) {
+            return candidate.type;
+        }
+    }
+
+    return undefined;
+}
+
 const _operatorInfo: { [key: number]: OperatorFlags } = {
     [OperatorType.Add]: OperatorFlags.Unary | OperatorFlags.Binary,
     [OperatorType.AddEqual]: OperatorFlags.Assignment,
@@ -138,13 +195,116 @@ const _operatorInfo: { [key: number]: OperatorFlags } = {
     [OperatorType.NotIn]: OperatorFlags.Binary,
 };
 
+const _unsetSingleCharOperatorType = -1;
+const _singleCharOperatorTypeTable: Int16Array = (() => {
+    const table = new Int16Array(128);
+    table.fill(_unsetSingleCharOperatorType);
+    table[Char.Equal] = OperatorType.Assign;
+    table[Char.Plus] = OperatorType.Add;
+    table[Char.Hyphen] = OperatorType.Subtract;
+    table[Char.Asterisk] = OperatorType.Multiply;
+    table[Char.Slash] = OperatorType.Divide;
+    table[Char.Ampersand] = OperatorType.BitwiseAnd;
+    table[Char.Bar] = OperatorType.BitwiseOr;
+    table[Char.Caret] = OperatorType.BitwiseXor;
+    table[Char.Percent] = OperatorType.Mod;
+    table[Char.Tilde] = OperatorType.BitwiseInvert;
+    table[Char.At] = OperatorType.MatrixMultiply;
+    table[Char.Less] = OperatorType.LessThan;
+    table[Char.Greater] = OperatorType.GreaterThan;
+    return table;
+})();
+
+const _singleCharEqualOperatorTypeTable: Int16Array = (() => {
+    const table = new Int16Array(128);
+    table.fill(_unsetSingleCharOperatorType);
+    table[Char.Plus] = OperatorType.AddEqual;
+    table[Char.Hyphen] = OperatorType.SubtractEqual;
+    table[Char.Asterisk] = OperatorType.MultiplyEqual;
+    table[Char.Slash] = OperatorType.DivideEqual;
+    table[Char.Ampersand] = OperatorType.BitwiseAndEqual;
+    table[Char.Bar] = OperatorType.BitwiseOrEqual;
+    table[Char.Caret] = OperatorType.BitwiseXorEqual;
+    table[Char.Percent] = OperatorType.ModEqual;
+    table[Char.At] = OperatorType.MatrixMultiplyEqual;
+    return table;
+})();
+
+function getTwoCharKey(char1: number, char2: number): number {
+    return (char1 << 8) | char2;
+}
+
+const _unsetTwoCharOperatorType = -1;
+const _twoCharOperatorTypeTable: Int16Array = (() => {
+    const table = new Int16Array(1 << 16);
+    table.fill(_unsetTwoCharOperatorType);
+    table[getTwoCharKey(Char.Equal, Char.Equal)] = OperatorType.Equals;
+    table[getTwoCharKey(Char.ExclamationMark, Char.Equal)] = OperatorType.NotEquals;
+    table[getTwoCharKey(Char.Less, Char.Equal)] = OperatorType.LessThanOrEqual;
+    table[getTwoCharKey(Char.Greater, Char.Equal)] = OperatorType.GreaterThanOrEqual;
+    table[getTwoCharKey(Char.Less, Char.Greater)] = OperatorType.LessOrGreaterThan;
+    return table;
+})();
+
+const _unsetTwoCharSpecialTokenType = -1;
+const _twoCharSpecialTokenTypeTable: Int16Array = (() => {
+    const table = new Int16Array(1 << 16);
+    table.fill(_unsetTwoCharSpecialTokenType);
+    table[getTwoCharKey(Char.Hyphen, Char.Greater)] = TokenType.Arrow;
+    return table;
+})();
+
+const _repeatedCharOperatorTypeTable: Int16Array = (() => {
+    const table = new Int16Array(128);
+    table.fill(_unsetSingleCharOperatorType);
+    table[Char.Asterisk] = OperatorType.Power;
+    table[Char.Slash] = OperatorType.FloorDivide;
+    table[Char.Less] = OperatorType.LeftShift;
+    table[Char.Greater] = OperatorType.RightShift;
+    return table;
+})();
+
+const _repeatedCharEqualOperatorTypeTable: Int16Array = (() => {
+    const table = new Int16Array(128);
+    table.fill(_unsetSingleCharOperatorType);
+    table[Char.Asterisk] = OperatorType.PowerEqual;
+    table[Char.Slash] = OperatorType.FloorDivideEqual;
+    table[Char.Less] = OperatorType.LeftShiftEqual;
+    table[Char.Greater] = OperatorType.RightShiftEqual;
+    return table;
+})();
+
 const _byteOrderMarker = 0xfeff;
 
 const defaultTabSize = 8;
 const magicsRegEx = /\\\s*$/;
 const typeIgnoreCommentRegEx = /((^|#)\s*)type:\s*ignore(\s*\[([\s\w-,]*)\]|\s|$)/;
 const pyrightIgnoreCommentRegEx = /((^|#)\s*)pyright:\s*ignore(\s*\[([\s\w-,]*)\]|\s|$)/;
-const underscoreRegEx = /_/g;
+
+// Strip underscore characters from a source text range without first creating
+// an intermediate substring.
+function removeUnderscoresFromRange(text: string, start: number, end: number): string {
+    let firstUnderscoreIndex = -1;
+    for (let i = start; i < end; i++) {
+        if (text.charCodeAt(i) === Char.Underscore) {
+            firstUnderscoreIndex = i;
+            break;
+        }
+    }
+
+    if (firstUnderscoreIndex < 0) {
+        return text.slice(start, end);
+    }
+
+    let result = text.slice(start, firstUnderscoreIndex);
+    for (let i = firstUnderscoreIndex + 1; i < end; i++) {
+        if (text.charCodeAt(i) !== Char.Underscore) {
+            result += text[i];
+        }
+    }
+
+    return result;
+}
 
 export interface TokenizerOutput {
     // List of all tokens.
@@ -227,6 +387,7 @@ export class Tokenizer {
     private _typeIgnoreLines = new Map<number, IgnoreComment>();
     private _pyrightIgnoreLines = new Map<number, IgnoreComment>();
     private _comments: Comment[] | undefined;
+    private _identifierInternMap = new Map<string, string>();
     private _fStringStack: FStringContext[] = [];
     private _activeFString: FStringContext | undefined;
 
@@ -283,6 +444,7 @@ export class Tokenizer {
         this._parenDepth = initialParenDepth;
         this._lineRanges = [];
         this._indentAmounts = [];
+        this._identifierInternMap = new Map<string, string>();
         this._useNotebookMode = useNotebookMode;
 
         const end = start + length;
@@ -892,19 +1054,30 @@ export class Tokenizer {
         }
 
         if (this._cs.position > start) {
-            const value = this._cs.getText().slice(start, this._cs.position);
-            if (_keywords.has(value)) {
-                this._tokens.push(
-                    KeywordToken.create(start, this._cs.position - start, _keywords.get(value)!, this._getComments())
-                );
+            const end = this._cs.position;
+            const length = end - start;
+            const text = this._cs.getText();
+            const keywordType = getKeywordTypeFromTextSlice(text, start, length);
+
+            if (keywordType !== undefined) {
+                this._tokens.push(KeywordToken.create(start, length, keywordType, this._getComments()));
             } else {
-                this._tokens.push(
-                    IdentifierToken.create(start, this._cs.position - start, cloneStr(value), this._getComments())
-                );
+                const value = this._internIdentifierText(text.slice(start, end));
+                this._tokens.push(IdentifierToken.create(start, length, value, this._getComments()));
             }
             return true;
         }
         return false;
+    }
+
+    private _internIdentifierText(value: string): string {
+        const internedValue = this._identifierInternMap.get(value);
+        if (internedValue !== undefined) {
+            return internedValue;
+        }
+
+        this._identifierInternMap.set(value, value);
+        return value;
     }
 
     private _isPossibleNumber(): boolean {
@@ -973,8 +1146,9 @@ export class Tokenizer {
             }
 
             if (radix > 0) {
-                const text = this._cs.getText().slice(start, this._cs.position);
-                const simpleIntText = text.replace(underscoreRegEx, '');
+                const end = this._cs.position;
+                const text = this._cs.getText();
+                const simpleIntText = removeUnderscoresFromRange(text, start, end);
                 let intValue: number | bigint = parseInt(simpleIntText.slice(leadingChars), radix);
 
                 if (!isNaN(intValue)) {
@@ -988,7 +1162,7 @@ export class Tokenizer {
                     }
 
                     this._tokens.push(
-                        NumberToken.create(start, text.length, intValue, true, false, this._getComments())
+                        NumberToken.create(start, end - start, intValue, true, false, this._getComments())
                     );
                     return true;
                 }
@@ -1026,12 +1200,14 @@ export class Tokenizer {
         }
 
         if (isDecimalInteger) {
-            let text = this._cs.getText().slice(start, this._cs.position);
-            const simpleIntText = text.replace(underscoreRegEx, '');
+            const textEnd = this._cs.position;
+            const sourceText = this._cs.getText();
+            const simpleIntText = removeUnderscoresFromRange(sourceText, start, textEnd);
             let intValue: number | bigint = parseInt(simpleIntText, 10);
 
             if (!isNaN(intValue)) {
                 let isImaginary = false;
+                let tokenLength = textEnd - start;
 
                 const bigIntValue = BigInt(simpleIntText);
                 if (
@@ -1044,12 +1220,12 @@ export class Tokenizer {
 
                 if (this._cs.currentChar === Char.j || this._cs.currentChar === Char.J) {
                     isImaginary = true;
-                    text += String.fromCharCode(this._cs.currentChar);
                     this._cs.moveNext();
+                    tokenLength += 1;
                 }
 
                 this._tokens.push(
-                    NumberToken.create(start, text.length, intValue, true, isImaginary, this._getComments())
+                    NumberToken.create(start, tokenLength, intValue, true, isImaginary, this._getComments())
                 );
                 return true;
             }
@@ -1062,24 +1238,19 @@ export class Tokenizer {
             (this._cs.currentChar === Char.Period && this._cs.nextChar >= Char._0 && this._cs.nextChar <= Char._9)
         ) {
             if (this._skipFloatingPointCandidate()) {
-                let text = this._cs.getText().slice(start, this._cs.position);
-                const value = parseFloat(text);
+                const floatEnd = this._cs.position;
+                const floatText = this._cs.getText().slice(start, floatEnd);
+                const value = parseFloat(floatText);
                 if (!isNaN(value)) {
                     let isImaginary = false;
+                    let tokenLength = floatEnd - start;
                     if (this._cs.currentChar === Char.j || this._cs.currentChar === Char.J) {
                         isImaginary = true;
-                        text += String.fromCharCode(this._cs.currentChar);
                         this._cs.moveNext();
+                        tokenLength += 1;
                     }
                     this._tokens.push(
-                        NumberToken.create(
-                            start,
-                            this._cs.position - start,
-                            value,
-                            false,
-                            isImaginary,
-                            this._getComments()
-                        )
+                        NumberToken.create(start, tokenLength, value, false, isImaginary, this._getComments())
                     );
                     return true;
                 }
@@ -1091,139 +1262,80 @@ export class Tokenizer {
     }
 
     private _tryOperator(): boolean {
+        const currentChar = this._cs.currentChar;
         let length = 0;
         const nextChar = this._cs.nextChar;
         let operatorType: OperatorType;
 
-        switch (this._cs.currentChar) {
-            case Char.Plus:
-                length = nextChar === Char.Equal ? 2 : 1;
-                operatorType = length === 2 ? OperatorType.AddEqual : OperatorType.Add;
-                break;
+        if (currentChar < 128 && nextChar < 128) {
+            const twoCharKey = (currentChar << 8) | nextChar;
+            const specialTokenType = _twoCharSpecialTokenTypeTable[twoCharKey];
+            if (specialTokenType !== _unsetTwoCharSpecialTokenType) {
+                this._tokens.push(
+                    Token.create(specialTokenType as TokenType, this._cs.position, 2, this._getComments())
+                );
+                this._cs.advance(2);
+                return true;
+            }
 
-            case Char.Ampersand:
-                length = nextChar === Char.Equal ? 2 : 1;
-                operatorType = length === 2 ? OperatorType.BitwiseAndEqual : OperatorType.BitwiseAnd;
-                break;
+            const twoCharOperatorType = _twoCharOperatorTypeTable[twoCharKey];
+            if (twoCharOperatorType !== _unsetTwoCharOperatorType) {
+                this._tokens.push(
+                    OperatorToken.create(this._cs.position, 2, twoCharOperatorType as OperatorType, this._getComments())
+                );
+                this._cs.advance(2);
+                return true;
+            }
 
-            case Char.Bar:
-                length = nextChar === Char.Equal ? 2 : 1;
-                operatorType = length === 2 ? OperatorType.BitwiseOrEqual : OperatorType.BitwiseOr;
-                break;
-
-            case Char.Caret:
-                length = nextChar === Char.Equal ? 2 : 1;
-                operatorType = length === 2 ? OperatorType.BitwiseXorEqual : OperatorType.BitwiseXor;
-                break;
-
-            case Char.Equal:
-                if (
-                    this._activeFString?.activeReplacementField &&
-                    this._activeFString?.activeReplacementField.parenDepth === this._parenDepth &&
-                    !this._activeFString.activeReplacementField.inFormatSpecifier &&
-                    nextChar !== Char.Equal
-                ) {
-                    length = 1;
-                    operatorType = OperatorType.Assign;
-                    break;
-                }
-
-                length = nextChar === Char.Equal ? 2 : 1;
-                operatorType = length === 2 ? OperatorType.Equals : OperatorType.Assign;
-                break;
-
-            case Char.ExclamationMark:
-                if (nextChar !== Char.Equal) {
-                    if (this._activeFString) {
-                        // Handle the conversion separator (!) within an f-string.
-                        this._tokens.push(
-                            Token.create(TokenType.ExclamationMark, this._cs.position, 1, this._getComments())
-                        );
-                        this._cs.advance(1);
-                        return true;
-                    }
-
-                    return false;
-                }
-                length = 2;
-                operatorType = OperatorType.NotEquals;
-                break;
-
-            case Char.Percent:
-                length = nextChar === Char.Equal ? 2 : 1;
-                operatorType = length === 2 ? OperatorType.ModEqual : OperatorType.Mod;
-                break;
-
-            case Char.Tilde:
-                length = 1;
-                operatorType = OperatorType.BitwiseInvert;
-                break;
-
-            case Char.Hyphen:
-                if (nextChar === Char.Greater) {
-                    this._tokens.push(Token.create(TokenType.Arrow, this._cs.position, 2, this._getComments()));
-                    this._cs.advance(2);
+            if (currentChar === nextChar) {
+                const repeatedOperatorType = _repeatedCharOperatorTypeTable[currentChar];
+                if (repeatedOperatorType !== _unsetSingleCharOperatorType) {
+                    const hasTrailingEqual = this._cs.lookAhead(2) === Char.Equal;
+                    const repeatedLength = hasTrailingEqual ? 3 : 2;
+                    const operatorType = hasTrailingEqual
+                        ? _repeatedCharEqualOperatorTypeTable[currentChar]
+                        : repeatedOperatorType;
+                    this._tokens.push(
+                        OperatorToken.create(
+                            this._cs.position,
+                            repeatedLength,
+                            operatorType as OperatorType,
+                            this._getComments()
+                        )
+                    );
+                    this._cs.advance(repeatedLength);
                     return true;
                 }
-
-                length = nextChar === Char.Equal ? 2 : 1;
-                operatorType = length === 2 ? OperatorType.SubtractEqual : OperatorType.Subtract;
-                break;
-
-            case Char.Asterisk:
-                if (nextChar === Char.Asterisk) {
-                    length = this._cs.lookAhead(2) === Char.Equal ? 3 : 2;
-                    operatorType = length === 3 ? OperatorType.PowerEqual : OperatorType.Power;
-                } else {
-                    length = nextChar === Char.Equal ? 2 : 1;
-                    operatorType = length === 2 ? OperatorType.MultiplyEqual : OperatorType.Multiply;
-                }
-                break;
-
-            case Char.Slash:
-                if (nextChar === Char.Slash) {
-                    length = this._cs.lookAhead(2) === Char.Equal ? 3 : 2;
-                    operatorType = length === 3 ? OperatorType.FloorDivideEqual : OperatorType.FloorDivide;
-                } else {
-                    length = nextChar === Char.Equal ? 2 : 1;
-                    operatorType = length === 2 ? OperatorType.DivideEqual : OperatorType.Divide;
-                }
-                break;
-
-            case Char.Less:
-                if (nextChar === Char.Less) {
-                    length = this._cs.lookAhead(2) === Char.Equal ? 3 : 2;
-                    operatorType = length === 3 ? OperatorType.LeftShiftEqual : OperatorType.LeftShift;
-                } else if (nextChar === Char.Greater) {
-                    length = 2;
-                    operatorType = OperatorType.LessOrGreaterThan;
-                } else {
-                    length = nextChar === Char.Equal ? 2 : 1;
-                    operatorType = length === 2 ? OperatorType.LessThanOrEqual : OperatorType.LessThan;
-                }
-                break;
-
-            case Char.Greater:
-                if (nextChar === Char.Greater) {
-                    length = this._cs.lookAhead(2) === Char.Equal ? 3 : 2;
-                    operatorType = length === 3 ? OperatorType.RightShiftEqual : OperatorType.RightShift;
-                } else {
-                    length = nextChar === Char.Equal ? 2 : 1;
-                    operatorType = length === 2 ? OperatorType.GreaterThanOrEqual : OperatorType.GreaterThan;
-                }
-                break;
-
-            case Char.At:
-                length = nextChar === Char.Equal ? 2 : 1;
-                operatorType = length === 2 ? OperatorType.MatrixMultiplyEqual : OperatorType.MatrixMultiply;
-                break;
-
-            default:
-                return false;
+            }
         }
-        this._tokens.push(OperatorToken.create(this._cs.position, length, operatorType, this._getComments()));
-        this._cs.advance(length);
-        return length > 0;
+
+        if (currentChar < 128) {
+            const singleCharOperatorType = _singleCharOperatorTypeTable[currentChar];
+            if (singleCharOperatorType !== _unsetSingleCharOperatorType) {
+                const equalOperatorType = _singleCharEqualOperatorTypeTable[currentChar];
+                if (nextChar === Char.Equal && equalOperatorType !== _unsetSingleCharOperatorType) {
+                    length = 2;
+                    operatorType = equalOperatorType as OperatorType;
+                } else {
+                    length = 1;
+                    operatorType = singleCharOperatorType as OperatorType;
+                }
+
+                this._tokens.push(OperatorToken.create(this._cs.position, length, operatorType, this._getComments()));
+                this._cs.advance(length);
+                return true;
+            }
+        }
+
+        // `!=` is handled by the 2-char fast path above.
+        if (currentChar === Char.ExclamationMark && this._activeFString) {
+            // Handle the conversion separator (!) within an f-string.
+            this._tokens.push(Token.create(TokenType.ExclamationMark, this._cs.position, 1, this._getComments()));
+            this._cs.advance(1);
+            return true;
+        }
+
+        return false;
     }
 
     private _handleInvalid(): boolean {
