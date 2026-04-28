@@ -84,7 +84,7 @@ function getComplexityScoreForClass(classType: ClassType, recursionCount: number
             typeArgCount++;
         }
     } else if (classType.shared.typeParams) {
-        for (const _type of classType.shared.typeParams) {
+        for (let i = 0; i < classType.shared.typeParams.length; i++) {
             typeArgScoreSum += getComplexityScoreForType(AnyType.create(), recursionCount);
             typeArgCount++;
         }

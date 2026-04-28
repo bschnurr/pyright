@@ -8092,7 +8092,6 @@ export function createTypeEvaluator(
         doForEachSubtype(transformedType, (subtype) => {
             if (subtype.category === TypeCategory.Function) {
                 for (let index = 0; index < subtype.shared.parameters.length; index++) {
-                    const param = subtype.shared.parameters[index];
                     const paramType = FunctionType.getParamType(subtype, index);
                     updateUsageVarianceForType(paramType, invertVariance(varianceContext));
                 }
@@ -29071,7 +29070,7 @@ export function createTypeEvaluator(
                 // See if this class is introducing a new abstract symbol that has not been
                 // introduced previously or if it is overriding an abstract symbol with
                 // a non-abstract one.
-                for (const [symbolName, symbol] of ClassType.getSymbolTable(mroClass)) {
+                for (const symbolName of ClassType.getSymbolTable(mroClass).keys()) {
                     const abstractSymbolInfo = getAbstractSymbolInfo(mroClass, symbolName);
 
                     if (abstractSymbolInfo) {

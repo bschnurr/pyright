@@ -134,7 +134,6 @@ const _defaultTypeSameOptions: TypeSameOptions = {};
 const _honorTypeFormOptions: TypeSameOptions = { honorTypeForm: true };
 const _honorTypeFormPseudoGenericOptions: TypeSameOptions = { ignorePseudoGeneric: true, honorTypeForm: true };
 const _ignoreConditionsOptions: TypeSameOptions = { ignoreConditions: true };
-const _skipElideRedundantLiteralsOptions: CombineTypesOptions = { skipElideRedundantLiterals: true };
 
 export interface TypeAliasSharedInfo {
     name: string;

@@ -87,7 +87,7 @@ import {
     isExpressionNode,
 } from '../parser/parseNodes';
 import { ParserOutput } from '../parser/parser';
-import { UnescapeError, UnescapeErrorType, getUnescapedString } from '../parser/stringTokenUtils';
+import { UnescapeErrorType, getUnescapedString } from '../parser/stringTokenUtils';
 import { OperatorType, StringTokenFlags, TokenType } from '../parser/tokenizerTypes';
 import { AnalyzerFileInfo } from './analyzerFileInfo';
 import * as AnalyzerNodeInfo from './analyzerNodeInfo';
@@ -6171,7 +6171,7 @@ export class Checker extends ParseTreeWalker {
     // are decorated. For example, if the first overload is not marked @final
     // but subsequent ones are, an error should be reported.
     private _validateOverloadDecoratorConsistency(classType: ClassType) {
-        for (const [name, symbol] of ClassType.getSymbolTable(classType)) {
+        for (const symbol of ClassType.getSymbolTable(classType).values()) {
             const primaryDecl = getLastTypedDeclarationForSymbol(symbol);
 
             if (!primaryDecl || primaryDecl.type !== DeclarationType.Function) {

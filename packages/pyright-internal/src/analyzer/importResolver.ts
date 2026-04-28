@@ -533,7 +533,7 @@ export class ImportResolver {
         };
         try {
             const entries = this.fileSystem.readdirEntriesSync(uri);
-            entries.forEach((entry) => {
+            for (const entry of entries) {
                 newCachedDir.entries.set(entry.name, entry);
                 let isFile = entry.isFile();
                 let isDirectory = entry.isDirectory();
@@ -552,7 +552,7 @@ export class ImportResolver {
                         resolvableName.substring(0, resolvableName.length - stubsSuffix.length)
                     );
                 }
-        }
+            }
         } catch {
             // Swallow error
         }
@@ -1958,7 +1958,7 @@ export class ImportResolver {
 
         if (stdlibRoot) {
             const readDir = (root: Uri, prefix: string | undefined) => {
-                for (const entry of this.readdirEntriesCached(root).entries) {
+                for (const entry of this.readdirEntriesCached(root).entries.values()) {
                     if (entry.isDirectory()) {
                         const dirRoot = root.combinePaths(entry.name);
                         readDir(dirRoot, prefix ? `${prefix}.${entry.name}` : entry.name);
@@ -2068,7 +2068,7 @@ export class ImportResolver {
             return;
         }
 
-        typeshedPaths.forEach((typeshedPath) => {
+        for (const typeshedPath of typeshedPaths) {
             if (this.dirExistsCached(typeshedPath)) {
                 this._getCompletionSuggestionsAbsolute(
                     sourceFileUri,

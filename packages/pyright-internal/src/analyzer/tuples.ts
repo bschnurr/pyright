@@ -158,7 +158,7 @@ export function getTypeOfTupleWithContext(
     }
 
     // Build an array of expected types.
-    let expectedTypes: Type[] = [];
+    const expectedTypes: Type[] = [];
 
     if (isTupleClass(inferenceContext.expectedType) && inferenceContext.expectedType.priv.tupleTypeArgs) {
         const tupleTypeArgs = inferenceContext.expectedType.priv.tupleTypeArgs;

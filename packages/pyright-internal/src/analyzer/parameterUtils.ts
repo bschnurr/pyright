@@ -6,7 +6,7 @@
  * Utility functions for parameters.
  */
 
-import { assert, fail } from '../common/debug';
+import { fail } from '../common/debug';
 import { ParamCategory } from '../parser/parseNodes';
 import { isDunderName } from './symbolNameUtils';
 import {
