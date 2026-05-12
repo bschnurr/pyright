@@ -45,6 +45,11 @@ npm run fix:eslint
 npm run fix:prettier
 ```
 
+## Git and PR Workflow
+
+- Always make changes on a branch and open a pull request for review. Do not push directly to `main` or `upstream/main`.
+- Unless explicitly instructed otherwise, push branches to `origin` and create PRs from the fork rather than targeting `upstream` directly.
+
 ## Architecture
 
 ### Package Structure
