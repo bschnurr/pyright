@@ -145,7 +145,10 @@ benchmarkSuite('Benchmark Comparison', () => {
         expect(markdown).toContain('## Largest Regressions');
         expect(markdown).toContain('## Largest Improvements');
         expect(markdown).toContain('| case_a | medianMs | 100.00 | 110.00 |');
-        expect(markdown).toContain('| case_a | medianMs | 100.00 | 110.00 | 10.00 | 10.00% | 🔴 regression |');
+        expect(markdown).toContain('| Case | Metric | Baseline | Candidate | Delta | Delta % |');
+        expect(markdown).not.toContain('Direction');
+        expect(markdown).toContain('| case_a | medianMs | 100.00 | 110.00 | 🔴 10.00 | 🔴 10.00% |');
+        expect(markdown).toContain('| case_b | medianMs | 100.00 | 80.00 | 🟢 -20.00 | 🟢 -20.00% |');
     });
 
     test('renders a green markdown status when there are no regressions', () => {
@@ -173,6 +176,7 @@ benchmarkSuite('Benchmark Comparison', () => {
 
         expect(markdown).toContain('Status: ⚪ No benchmark changes');
         expect(markdown).toContain('Unchanged: ⚪ 1');
+        expect(markdown).toContain('| case_a | medianMs | 100.00 | 100.00 | ⚪ 0.00 | ⚪ 0.00% |');
     });
 
     test('summarizes benchmark comparison directions', () => {

@@ -229,8 +229,8 @@ export function renderBenchmarkComparisonMarkdown(comparison: BenchmarkResultSet
     lines.push(
         '## Details',
         '',
-        '| Case | Metric | Baseline | Candidate | Delta | Delta % | Direction |',
-        '|---|---:|---:|---:|---:|---:|---|'
+        '| Case | Metric | Baseline | Candidate | Delta | Delta % |',
+        '|---|---:|---:|---:|---:|---:|'
     );
 
     for (const result of comparison.compared) {
@@ -238,9 +238,10 @@ export function renderBenchmarkComparisonMarkdown(comparison: BenchmarkResultSet
             lines.push(
                 `| ${result.key} | ${metric.metric} | ${formatMetric(metric.baselineValue)} | ${formatMetric(
                     metric.candidateValue
-                )} | ${formatMetric(metric.absoluteDelta)} | ${formatPercent(
-                    metric.percentDelta
-                )} | ${formatDirectionWithColor(metric.direction)} |`
+                )} | ${formatDeltaWithColor(metric.absoluteDelta, metric.direction)} | ${formatPercentDeltaWithColor(
+                    metric.percentDelta,
+                    metric.direction
+                )} |`
             );
         }
     }
@@ -276,8 +277,12 @@ function formatCountWithColor(count: number, direction: BenchmarkMetricDirection
     return `${getDirectionColor(direction)} ${count}`;
 }
 
-function formatDirectionWithColor(direction: BenchmarkMetricDirection): string {
-    return `${getDirectionColor(direction)} ${direction}`;
+function formatDeltaWithColor(value: number, direction: BenchmarkMetricDirection): string {
+    return `${getDirectionColor(direction)} ${formatMetric(value)}`;
+}
+
+function formatPercentDeltaWithColor(value: number | undefined, direction: BenchmarkMetricDirection): string {
+    return `${getDirectionColor(direction)} ${formatPercent(value)}`;
 }
 
 function getDirectionColor(direction: BenchmarkMetricDirection): string {
@@ -309,7 +314,10 @@ function appendMetricEntryTable(
         lines.push(
             `| ${entry.key} | ${entry.metric} | ${formatMetric(entry.baselineValue)} | ${formatMetric(
                 entry.candidateValue
-            )} | ${formatMetric(entry.absoluteDelta)} | ${formatPercent(entry.percentDelta)} |`
+            )} | ${formatDeltaWithColor(entry.absoluteDelta, entry.direction)} | ${formatPercentDeltaWithColor(
+                entry.percentDelta,
+                entry.direction
+            )} |`
         );
     }
 
