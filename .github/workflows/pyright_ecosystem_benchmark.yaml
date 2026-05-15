@@ -107,7 +107,12 @@ jobs:
             ready=true
           fi
 
-          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          {
+            echo "ready=$ready"
+            echo "reason<<EOF"
+            echo "$reason"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
           if [[ "$ready" == "true" ]]; then
             exit 0
           fi
@@ -194,9 +199,11 @@ jobs:
           if-no-files-found: warn
 
       - name: Post ecosystem benchmark PR comment
-        if: ${{ success() && steps.baseline.outputs.ready == 'true' && (github.event_name == 'pull_request' || inputs.pr_number != '') && (github.event_name != 'workflow_dispatch' || inputs.mode == 'compare') }}
+        if: ${{ success() && (github.event_name == 'pull_request' || inputs.pr_number != '') && (github.event_name != 'workflow_dispatch' || inputs.mode == 'compare') }}
         uses: actions/github-script@v7
         env:
+          BASELINE_READY: ${{ steps.baseline.outputs.ready }}
+          BASELINE_REASON: ${{ steps.baseline.outputs.reason }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
           COMPARISON_MARKDOWN: packages/pyright-internal/src/tests/benchmarks/.generated/benchmark-results/ecosystem-pr/comparison.md
         with:
@@ -211,18 +218,34 @@ jobs:
 
             const marker = '<!-- pyright-ecosystem-benchmark-comment -->';
             const comparisonPath = process.env.COMPARISON_MARKDOWN;
-            if (!fs.existsSync(comparisonPath)) {
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const maxCharacters = 60000;
+            let body;
+
+            if (fs.existsSync(comparisonPath)) {
+              let comparison = fs.readFileSync(comparisonPath, 'utf8').trim();
+              if (comparison.length > maxCharacters) {
+                comparison = `${comparison.slice(0, maxCharacters)}\n\n... benchmark report truncated; see workflow artifacts for the full comparison.`;
+              }
+
+              body = [marker, comparison, '', `[Workflow run](${runUrl})`].join('\n');
+            } else if (process.env.BASELINE_READY !== 'true') {
+              const reason = process.env.BASELINE_REASON || 'The checked-in ecosystem smoke baseline is not ready.';
+              body = [
+                marker,
+                '## Pyright ecosystem benchmark',
+                '',
+                'Ecosystem benchmark comparison was skipped because the checked-in main baseline is not ready yet.',
+                '',
+                `> ${reason}`,
+                '',
+                'Run `refresh-baseline` on fork `main` and commit the generated `ecosystem-smoke-main.json` baseline to enable benchmark stats on PRs.',
+                '',
+                `[Workflow run](${runUrl})`,
+              ].join('\n');
+            } else {
               throw new Error(`Missing ecosystem benchmark comparison markdown at ${comparisonPath}`);
             }
-
-            const maxCharacters = 60000;
-            let comparison = fs.readFileSync(comparisonPath, 'utf8').trim();
-            if (comparison.length > maxCharacters) {
-              comparison = `${comparison.slice(0, maxCharacters)}\n\n... benchmark report truncated; see workflow artifacts for the full comparison.`;
-            }
-
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = [marker, comparison, '', `[Workflow run](${runUrl})`].join('\n');
 
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,

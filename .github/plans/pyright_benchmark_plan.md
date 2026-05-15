@@ -47,8 +47,8 @@ PRs against `upstream`/`microsoft/pyright`.
 
 1. Replace the seed `ecosystem-smoke-main.json` with a CI-generated smoke baseline from a known `main` commit. The runner
   now rejects seed placeholders and empty baselines to avoid misleading compare artifacts.
-2. Enable automatic PR triggering only after the real checked-in baseline exists. The current workflow remains manual for
-  compare and refresh-baseline runs.
+2. Replace the current seed-baseline PR status comment with real benchmark stats once the checked-in baseline is generated
+  on fork `main` and committed.
 
 ---
 
@@ -1247,6 +1247,7 @@ First useful version:
    - [x] In manual refresh mode, run smoke benchmarks and upload the refreshed checked-in baseline candidate.
    - [x] Add automatic PR triggering, still effectively gated by the checked-in baseline guard until a real baseline exists.
    - [x] Post `comparison.md` as an updatable PR comment for pull requests and manual compare runs with `pr_number`.
+   - [x] Post an updatable PR status comment when comparison is skipped because only the seed baseline exists.
 12. [ ] Add one heuristic sweep:
    - `recursionDepthLimit` or `unionExpansionLimit`
 13. [x] Add two synthetic heuristic cases:

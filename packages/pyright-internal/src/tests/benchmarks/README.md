@@ -133,5 +133,7 @@ npm run bench:ecosystem:run -- --candidate-report ./src/tests/benchmarks/.genera
 ```
 
 The GitHub workflow posts `comparison.md` back to the PR when compare mode runs for a pull request, or when a manual
-compare run supplies the optional `pr_number` input. The comment is updated in place using a hidden marker so repeated
-runs do not leave multiple benchmark comments.
+compare run supplies the optional `pr_number` input. If a PR run skips comparison because the checked-in baseline is
+still the seed placeholder, the workflow posts a status comment explaining that benchmark stats are blocked until the
+real baseline is committed. The comment is updated in place using a hidden marker so repeated runs do not leave multiple
+benchmark comments.
