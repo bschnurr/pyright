@@ -310,7 +310,13 @@ export function executeEcosystemBenchmark(
         ? executeEcosystemBenchmarkSuite(selectedProjects, config.projectRoot, config.baselineExecutable)
         : undefined;
     const candidateResults = config.candidateExecutable
-        ? executeEcosystemBenchmarkSuite(selectedProjects, config.projectRoot, config.candidateExecutable)
+        ? // Intentional test-only slowdown for verifying ecosystem benchmark PR comments.
+          executeEcosystemBenchmarkSuite(selectedProjects, config.projectRoot, config.candidateExecutable).map(
+              (result) => ({
+                  ...result,
+                  totalTimeMs: result.totalTimeMs !== undefined ? result.totalTimeMs + 5000 : result.totalTimeMs,
+              })
+          )
         : undefined;
 
     const artifactPaths: EcosystemBenchmarkExecutionArtifactPaths = {};
