@@ -72,7 +72,7 @@ function getBenchmarkFilePath(filename: string): string {
         return sourceFilePath;
     }
 
-    return path.resolve(__dirname, '..', '..', '..', '..', 'src', 'tests', 'benchmarks', filename);
+    return path.resolve(__dirname, '..', '..', '..', '..', '..', '..', 'src', 'tests', 'benchmarks', filename);
 }
 
 function getWritableBenchmarkFilePath(filename: string): string {
@@ -81,7 +81,7 @@ function getWritableBenchmarkFilePath(filename: string): string {
         return sourceFilePath;
     }
 
-    return path.resolve(__dirname, '..', '..', '..', '..', 'src', 'tests', 'benchmarks', filename);
+    return path.resolve(__dirname, '..', '..', '..', '..', '..', '..', 'src', 'tests', 'benchmarks', filename);
 }
 
 function extractProjectBlocks(sourceText: string): string[] {
