@@ -204,7 +204,7 @@ function deriveProjectName(location: string | undefined): string {
 }
 
 function matchSingleQuotedOrDoubleQuotedValue(block: string, fieldName: string): string | undefined {
-    const match = block.match(new RegExp(`${fieldName}\\s*=\\s*(['\"])(.*?)\\1`, 's'));
+    const match = block.match(new RegExp(`${fieldName}\\s*=\\s*(['"])(.*?)\\1`, 's'));
     return match?.[2];
 }
 
@@ -223,7 +223,7 @@ function matchStringArrayValue(block: string, fieldName: string): string[] | und
         return undefined;
     }
 
-    return Array.from(match[1].matchAll(/(['\"])(.*?)\1/g)).map((entry) => entry[2]);
+    return Array.from(match[1].matchAll(/(['"])(.*?)\1/g)).map((entry) => entry[2]);
 }
 
 if (require.main === module) {

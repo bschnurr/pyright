@@ -800,12 +800,10 @@ export function buildPyrightInvocation(
     const executableArgs = executableTokens.slice(1);
     const pyrightArgs: string[] = [];
     let command = executableTokens[0];
-    let insertedExecutable = false;
 
     for (const token of tokens) {
         if (token === '{pyright}') {
             command = executableTokens[0];
-            insertedExecutable = true;
             continue;
         }
 
