@@ -131,3 +131,7 @@ PR comparison mode can then use the checked-in baseline by passing only the cand
 ```bash
 npm run bench:ecosystem:run -- --candidate-report ./src/tests/benchmarks/.generated/benchmark-results/ecosystem-pr/candidate-report.json --output ./src/tests/benchmarks/.generated/benchmark-results/ecosystem-pr-comparison
 ```
+
+The GitHub workflow posts `comparison.md` back to the PR when compare mode runs for a pull request, or when a manual
+compare run supplies the optional `pr_number` input. The comment is updated in place using a hidden marker so repeated
+runs do not leave multiple benchmark comments.

@@ -1242,10 +1242,11 @@ First useful version:
    - [x] Add a script or runner option to update the checked-in baseline from a verified main-branch run.
    - [x] Make PR comparison mode default to the checked-in baseline when no explicit baseline report is supplied.
 11. [~] Add GitHub workflow.
-  - [x] Add a manual workflow for smoke comparison and baseline refresh runs.
-  - [x] In manual compare mode, run smoke benchmarks as `new.json` and compare against the checked-in main baseline.
-  - [x] In manual refresh mode, run smoke benchmarks and upload the refreshed checked-in baseline candidate.
-  - [ ] Add automatic PR triggering once the checked-in main baseline exists.
+   - [x] Add a manual workflow for smoke comparison and baseline refresh runs.
+   - [x] In manual compare mode, run smoke benchmarks as `new.json` and compare against the checked-in main baseline.
+   - [x] In manual refresh mode, run smoke benchmarks and upload the refreshed checked-in baseline candidate.
+   - [x] Add automatic PR triggering, still effectively gated by the checked-in baseline guard until a real baseline exists.
+   - [x] Post `comparison.md` as an updatable PR comment for pull requests and manual compare runs with `pr_number`.
 12. [ ] Add one heuristic sweep:
    - `recursionDepthLimit` or `unionExpansionLimit`
 13. [x] Add two synthetic heuristic cases:

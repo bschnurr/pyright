@@ -1,6 +1,16 @@
 name: Pyright ecosystem benchmark
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/pyright_ecosystem_benchmark.yaml'
+      - 'packages/pyright/**'
+      - 'packages/pyright-internal/package.json'
+      - 'packages/pyright-internal/package-lock.json'
+      - 'packages/pyright-internal/src/**'
+      - 'packages/pyright-internal/typeshed-fallback/**'
   workflow_dispatch:
     inputs:
       mode:
@@ -26,9 +36,14 @@ on:
         required: false
         default: false
         type: boolean
+      pr_number:
+        description: 'Optional PR number for posting a compare-mode benchmark comment from a manual run'
+        required: false
+        default: ''
+        type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.mode }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.mode || 'compare' }}
   cancel-in-progress: true
 
 jobs:
@@ -38,6 +53,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      issues: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -61,24 +78,23 @@ jobs:
           npm run build
           npm run bench:ecosystem:sync
 
-      - name: Run ecosystem smoke comparison
-        if: ${{ inputs.mode == 'compare' }}
+      - name: Check ecosystem smoke baseline
+        id: baseline
+        if: ${{ github.event_name == 'pull_request' || inputs.mode == 'compare' }}
         shell: bash
         env:
-          PROJECT_DATE: ${{ inputs.project_date }}
-          PROJECT_FILTER: ${{ inputs.project }}
-          INSTALL_DEPENDENCIES: ${{ inputs.install_dependencies }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           cd packages/pyright-internal
 
           baseline_path="./src/tests/benchmarks/baselines/ecosystem-smoke-main.json"
-          if [[ ! -f "$baseline_path" ]]; then
-            echo "Missing checked-in ecosystem smoke baseline at $baseline_path" >&2
-            exit 1
-          fi
+          ready=false
+          reason=""
 
-          node - "$baseline_path" <<'NODE'
+          if [[ ! -f "$baseline_path" ]]; then
+            reason="Missing checked-in ecosystem smoke baseline at $baseline_path"
+          elif reason=$(node - "$baseline_path" 2>&1 <<'NODE'
           const fs = require('fs');
           const baselinePath = process.argv[2];
           const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
@@ -87,6 +103,35 @@ jobs:
             process.exit(1);
           }
           NODE
+          ); then
+            ready=true
+          fi
+
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          if [[ "$ready" == "true" ]]; then
+            exit 0
+          fi
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            echo "::notice::$reason"
+            exit 0
+          fi
+
+          echo "$reason" >&2
+          exit 1
+
+      - name: Run ecosystem smoke comparison
+        if: ${{ steps.baseline.outputs.ready == 'true' }}
+        shell: bash
+        env:
+          PROJECT_DATE: ${{ inputs.project_date || '2026-01-01' }}
+          PROJECT_FILTER: ${{ inputs.project || '' }}
+          INSTALL_DEPENDENCIES: ${{ inputs.install_dependencies || false }}
+        run: |
+          set -euo pipefail
+          cd packages/pyright-internal
+
+          baseline_path="./src/tests/benchmarks/baselines/ecosystem-smoke-main.json"
 
           args=(
             --suite smoke
@@ -109,7 +154,7 @@ jobs:
           npm run bench:ecosystem:run -- "${args[@]}"
 
       - name: Refresh ecosystem smoke baseline
-        if: ${{ inputs.mode == 'refresh-baseline' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'refresh-baseline' }}
         shell: bash
         env:
           PROJECT_DATE: ${{ inputs.project_date }}
@@ -139,10 +184,66 @@ jobs:
           npm run bench:ecosystem:update-main-baseline -- "${args[@]}"
 
       - name: Upload ecosystem benchmark artifacts
+        if: ${{ always() && ((github.event_name == 'workflow_dispatch' && inputs.mode == 'refresh-baseline') || steps.baseline.outputs.ready == 'true') }}
         uses: actions/upload-artifact@v4
         with:
-          name: pyright-ecosystem-benchmark-${{ inputs.mode }}
+          name: pyright-ecosystem-benchmark-${{ inputs.mode || 'compare' }}
           path: |
             packages/pyright-internal/src/tests/benchmarks/.generated/benchmark-results/
             packages/pyright-internal/src/tests/benchmarks/baselines/ecosystem-smoke-main.json
           if-no-files-found: warn
+
+      - name: Post ecosystem benchmark PR comment
+        if: ${{ success() && steps.baseline.outputs.ready == 'true' && (github.event_name == 'pull_request' || inputs.pr_number != '') && (github.event_name != 'workflow_dispatch' || inputs.mode == 'compare') }}
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          COMPARISON_MARKDOWN: packages/pyright-internal/src/tests/benchmarks/.generated/benchmark-results/ecosystem-pr/comparison.md
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+
+            const prNumber = Number(process.env.PR_NUMBER);
+            if (!Number.isInteger(prNumber) || prNumber <= 0) {
+              throw new Error(`Invalid PR number for ecosystem benchmark comment: ${process.env.PR_NUMBER}`);
+            }
+
+            const marker = '<!-- pyright-ecosystem-benchmark-comment -->';
+            const comparisonPath = process.env.COMPARISON_MARKDOWN;
+            if (!fs.existsSync(comparisonPath)) {
+              throw new Error(`Missing ecosystem benchmark comparison markdown at ${comparisonPath}`);
+            }
+
+            const maxCharacters = 60000;
+            let comparison = fs.readFileSync(comparisonPath, 'utf8').trim();
+            if (comparison.length > maxCharacters) {
+              comparison = `${comparison.slice(0, maxCharacters)}\n\n... benchmark report truncated; see workflow artifacts for the full comparison.`;
+            }
+
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [marker, comparison, '', `[Workflow run](${runUrl})`].join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const existingComment = comments.find((comment) => comment.body?.includes(marker));
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }
