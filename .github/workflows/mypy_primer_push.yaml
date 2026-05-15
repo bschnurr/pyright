@@ -27,7 +27,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      MYPY_PRIMER_BASE_DIR: ${{ runner.temp }}/mypy_primer_cache
     strategy:
+      matrix:
+        shard-index: [0, 1, 2, 3, 4, 5, 6, 7]
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +41,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Restore mypy_primer project cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.MYPY_PRIMER_BASE_DIR }}
+          key: ${{ runner.os }}-mypy-primer-push-shard-${{ matrix.shard-index }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-mypy-primer-push-shard-${{ matrix.shard-index }}-
+            ${{ runner.os }}-mypy-primer-
       - name: Install dependencies
         run: |
           python -m pip install -U pip
@@ -55,12 +67,14 @@ jobs:
             --repo pyright_to_test \
             --type-checker pyright \
             --new $GITHUB_SHA \
+            --num-shards 8 --shard-index ${{ matrix.shard-index }} \
+            --base-dir "$MYPY_PRIMER_BASE_DIR" \
             --debug \
             --output concise \
-            | tee diff.txt
+            | tee diff_${{ matrix.shard-index }}.txt
           ) || [ $? -eq 1 ]
       - name: Upload mypy_primer diff
         uses: actions/upload-artifact@v4
         with:
-          name: mypy_primer_diffs
-          path: diff.txt
+          name: mypy_primer_diffs_${{ matrix.shard-index }}
+          path: diff_${{ matrix.shard-index }}.txt
