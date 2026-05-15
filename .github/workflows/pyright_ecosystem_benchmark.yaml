@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   ecosystem-smoke:
-    if: github.repository == 'microsoft/pyright' || github.repository == 'bschnurr/pyright'
+    if: github.repository == 'bschnurr/pyright'
     name: Ecosystem smoke benchmark
     runs-on: ubuntu-latest
     permissions:
@@ -64,6 +64,10 @@ jobs:
       - name: Run ecosystem smoke comparison
         if: ${{ inputs.mode == 'compare' }}
         shell: bash
+        env:
+          PROJECT_DATE: ${{ inputs.project_date }}
+          PROJECT_FILTER: ${{ inputs.project }}
+          INSTALL_DEPENDENCIES: ${{ inputs.install_dependencies }}
         run: |
           set -euo pipefail
           cd packages/pyright-internal
@@ -74,21 +78,31 @@ jobs:
             exit 1
           fi
 
+          node - "$baseline_path" <<'NODE'
+          const fs = require('fs');
+          const baselinePath = process.argv[2];
+          const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+          if (baseline.mainBaseline?.sourceCommit === 'seed-placeholder' || !Array.isArray(baseline.results) || baseline.results.length === 0) {
+            console.error(`Checked-in ecosystem smoke baseline at ${baselinePath} is not ready. Run refresh-baseline on main and commit the generated baseline before compare or PR automation.`);
+            process.exit(1);
+          }
+          NODE
+
           args=(
             --suite smoke
             --project-root "$GITHUB_WORKSPACE/.ecosystem-projects"
             --prepare-projects
-            --project-date "${{ inputs.project_date }}"
+            --project-date "$PROJECT_DATE"
             --candidate-executable "node ../pyright/index.js"
             --main-baseline-report "$baseline_path"
             --output ./src/tests/benchmarks/.generated/benchmark-results/ecosystem-pr
           )
 
-          if [[ -n "${{ inputs.project }}" ]]; then
-            args+=(--project "${{ inputs.project }}")
+          if [[ -n "$PROJECT_FILTER" ]]; then
+            args+=(--project "$PROJECT_FILTER")
           fi
 
-          if [[ "${{ inputs.install_dependencies }}" == "true" ]]; then
+          if [[ "$INSTALL_DEPENDENCIES" == "true" ]]; then
             args+=(--install-dependencies)
           fi
 
@@ -97,6 +111,10 @@ jobs:
       - name: Refresh ecosystem smoke baseline
         if: ${{ inputs.mode == 'refresh-baseline' }}
         shell: bash
+        env:
+          PROJECT_DATE: ${{ inputs.project_date }}
+          PROJECT_FILTER: ${{ inputs.project }}
+          INSTALL_DEPENDENCIES: ${{ inputs.install_dependencies }}
         run: |
           set -euo pipefail
           cd packages/pyright-internal
@@ -105,16 +123,16 @@ jobs:
             --suite smoke
             --project-root "$GITHUB_WORKSPACE/.ecosystem-projects"
             --prepare-projects
-            --project-date "${{ inputs.project_date }}"
+            --project-date "$PROJECT_DATE"
             --output ./src/tests/benchmarks/.generated/benchmark-results/ecosystem-main
             --baseline-source-commit "$GITHUB_SHA"
           )
 
-          if [[ -n "${{ inputs.project }}" ]]; then
-            args+=(--project "${{ inputs.project }}")
+          if [[ -n "$PROJECT_FILTER" ]]; then
+            args+=(--project "$PROJECT_FILTER")
           fi
 
-          if [[ "${{ inputs.install_dependencies }}" == "true" ]]; then
+          if [[ "$INSTALL_DEPENDENCIES" == "true" ]]; then
             args+=(--install-dependencies)
           fi
 

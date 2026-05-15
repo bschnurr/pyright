@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "suiteName": "ecosystem-smoke",
+  "timestamp": "2026-05-12T00:00:00.000Z",
+  "system": {
+    "platform": "seed",
+    "arch": "seed",
+    "cpus": "seed",
+    "cpuCount": 0,
+    "totalMemoryMB": 0,
+    "nodeVersion": "seed"
+  },
+  "config": {
+    "warmupIterations": 0,
+    "benchmarkIterations": 1
+  },
+  "results": [],
+  "mainBaseline": {
+    "sourceCommit": "seed-placeholder",
+    "projectDate": "2026-01-01",
+    "configMode": "generated-benchmark-config",
+    "refreshedAt": "2026-05-12T00:00:00.000Z"
+  }
+}

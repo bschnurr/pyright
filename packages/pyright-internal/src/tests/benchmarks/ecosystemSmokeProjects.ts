@@ -182,5 +182,5 @@ function getBenchmarkFilePath(filename: string): string {
         return sourceFilePath;
     }
 
-    return path.resolve(__dirname, '..', '..', '..', '..', '..', '..', 'src', 'tests', 'benchmarks', filename);
+    return path.resolve(__dirname, '..', '..', '..', '..', 'src', 'tests', 'benchmarks', filename);
 }

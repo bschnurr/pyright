@@ -175,6 +175,8 @@ const ecosystemBenchmarkComparisonMetrics: readonly BenchmarkMetricDefinition<Ec
     { name: 'informationCount', getValue: (result) => result.informationCount },
 ];
 
+const maxSyncProcessBufferBytes = 16 * 1024 * 1024;
+
 export function parseEcosystemBenchmarkArgs(args: string[]): EcosystemBenchmarkCommand {
     const parsedArgs = commandLineArgs(optionDefinitions, { argv: args }) as CommandLineOptions;
     const outputDir = parsedArgs.output as string | undefined;
@@ -490,9 +492,10 @@ export function prepareEcosystemProjectCheckout(
     }
 
     if (projectDate) {
+        const historyRef = resolveProjectHistoryRef(workingDirectory);
         const commit = runRequiredProcess(
             'git',
-            ['rev-list', '-n', '1', `--before=${projectDate}`, 'HEAD'],
+            ['rev-list', '-n', '1', `--before=${projectDate}`, historyRef],
             workingDirectory,
             `resolve ${project.name} project-date commit`
         ).trim();
@@ -502,6 +505,22 @@ export function prepareEcosystemProjectCheckout(
 
         runRequiredProcess('git', ['checkout', '--force', commit], workingDirectory, `checkout ${project.name}`);
     }
+}
+
+function resolveProjectHistoryRef(workingDirectory: string): string {
+    for (const candidate of ['origin/HEAD', 'HEAD']) {
+        const result = spawnSync('git', ['rev-parse', '--verify', candidate], {
+            cwd: workingDirectory,
+            encoding: 'utf-8',
+            maxBuffer: maxSyncProcessBufferBytes,
+        });
+
+        if (!result.error && result.status === 0) {
+            return candidate;
+        }
+    }
+
+    throw new Error(`Could not determine a git history reference for ${workingDirectory}.`);
 }
 
 function installEcosystemProjectDependencies(project: GeneratedEcosystemProject, workingDirectory: string): void {
@@ -529,6 +548,7 @@ function runRequiredProcess(
     const result = spawnSync(command, args, {
         cwd,
         encoding: 'utf-8',
+        maxBuffer: maxSyncProcessBufferBytes,
         shell,
     });
 
@@ -580,6 +600,7 @@ export function executePyrightProjectCommand(
     const result = spawnSync(invocation.command, invocation.args, {
         cwd: workingDirectory,
         encoding: 'utf-8',
+        maxBuffer: maxSyncProcessBufferBytes,
     });
     const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
 
@@ -620,6 +641,8 @@ function compareAndWriteEcosystemBenchmarkReportFiles(
 ): BenchmarkReportComparisonArtifactPaths {
     const baselineReport = loadBenchmarkReport<EcosystemBenchmarkResult>(baselineReportPath);
     const candidateReport = loadBenchmarkReport<EcosystemBenchmarkResult>(candidateReportPath);
+    validateEcosystemBenchmarkBaselineReport(baselineReport, baselineReportPath);
+
     const comparison = compareEcosystemBenchmarkReportData(baselineReport, candidateReport);
     const artifactPaths = writeBenchmarkReportComparisonArtifacts(
         outputDir,
@@ -630,6 +653,31 @@ function compareAndWriteEcosystemBenchmarkReportFiles(
 
     fs.writeFileSync(artifactPaths.markdownPath, renderEcosystemBenchmarkComparisonMarkdown(comparison), 'utf-8');
     return artifactPaths;
+}
+
+function validateEcosystemBenchmarkBaselineReport(
+    baselineReport: BenchmarkReport<EcosystemBenchmarkResult>,
+    baselineReportPath: string
+): void {
+    const mainBaseline = (
+        baselineReport as BenchmarkReport<EcosystemBenchmarkResult> & {
+            mainBaseline?: MainBaselineMetadata;
+        }
+    ).mainBaseline;
+
+    if (mainBaseline?.sourceCommit === 'seed-placeholder') {
+        throw new Error(
+            `The ecosystem benchmark baseline at ${baselineReportPath} is a seed placeholder. ` +
+                'Run the refresh-baseline workflow on main and commit the generated baseline before comparing.'
+        );
+    }
+
+    if (baselineReport.results.length === 0) {
+        throw new Error(
+            `The ecosystem benchmark baseline at ${baselineReportPath} contains no project results. ` +
+                'Run the refresh-baseline workflow on main and commit the generated baseline before comparing.'
+        );
+    }
 }
 
 function compareEcosystemDiagnosticResults(
@@ -931,7 +979,7 @@ function getWritableBenchmarkFilePath(...pathParts: string[]): string {
         return sourceFilePath;
     }
 
-    return path.resolve(__dirname, '..', '..', '..', '..', '..', '..', 'src', 'tests', 'benchmarks', ...pathParts);
+    return path.resolve(__dirname, '..', '..', '..', '..', 'src', 'tests', 'benchmarks', ...pathParts);
 }
 
 function writeNamedBenchmarkReport<ResultT>(

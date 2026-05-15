@@ -18,7 +18,7 @@ The plan combines three ideas:
 
 ## Status Update
 
-Current implementation status as of 2026-05-08:
+Current implementation status as of 2026-05-15:
 
 - Completed: benchmark test directory layout, shared benchmark utilities, benchmark README, parser/tokenizer JSON artifact output,
   synthetic evaluator microbenchmarks, structured timing snapshots, evaluator phase timing metrics, curated ecosystem smoke
@@ -29,10 +29,9 @@ Current implementation status as of 2026-05-08:
 - Completed externally: CodSpeed bootstrap work has an initial PR in `bschnurr/pyright`, so the remaining local work is
   to align this benchmark suite with that setup rather than starting CodSpeed integration from zero.
 - In progress: ecosystem benchmark runner implementation. The manifest, selectors, report schema, comparison pipeline,
-  and a `runEcosystemBenchmark.ts` entry point are in place for smoke-suite selection, local project execution with
-  per-project generated `pyrightconfig.json` files, packaged-CLI local runs, and report comparison. There is not yet a
-  `mypy_primer`-backed runner that prepares project checkouts, installs dependencies, honors project dates, and executes
-  base/head Pyright across the smoke suite automatically.
+  and a `runEcosystemBenchmark.ts` entry point are in place for smoke-suite selection, project checkout preparation,
+  dependency installation, project-date pinning, local project execution with per-project generated `pyrightconfig.json`
+  files, packaged-CLI local runs, checked-in baseline fallback, and report comparison.
 - In progress: `mypy_primer` metadata synchronization now has a checked-in smoke snapshot, generated project metadata,
   and local overrides for smoke-suite source roots. The sync parser handles the known upstream smoke metadata shape,
   including `name_override`, `pyright_cmd=None`, dependency/install/platform/cost fields, duplicate derived names, and
@@ -43,14 +42,13 @@ Current implementation status as of 2026-05-08:
 
 The branch review identified the following gaps that should be treated as near-term work before broad CI use:
 
-Current PR staging note: create PRs against `origin` (`bschnurr/pyright`) for now. Do not target `upstream`
-(`microsoft/pyright`) until the benchmark baseline and workflow shape are ready for upstream review.
+Current PR staging note: this is fork-only testing work. Use only `origin` (`bschnurr/pyright`); do not push to or open
+PRs against `upstream`/`microsoft/pyright`.
 
-1. Add base/head Pyright orchestration. Project checkout preparation now exists, but CI still needs a workflow-level way
-  to build and pass distinct baseline and candidate Pyright commands for the selected project set.
-2. Add a checked-in main-branch baseline report. PR runs need a stable comparison target before CI artifact lookup is in
-  place. Running the smoke suite on a known `main` commit should update a committed baseline artifact that PRs can use
-  as `old.json` when producing comparison reports.
+1. Replace the seed `ecosystem-smoke-main.json` with a CI-generated smoke baseline from a known `main` commit. The runner
+  now rejects seed placeholders and empty baselines to avoid misleading compare artifacts.
+2. Enable automatic PR triggering only after the real checked-in baseline exists. The current workflow remains manual for
+  compare and refresh-baseline runs.
 
 ---
 
@@ -732,8 +730,11 @@ packages/pyright-internal/src/tests/benchmarks/baselines/
 Baseline policy:
 
 - The checked-in baseline is generated only from `main` or an explicitly recorded main-branch commit.
+- The checked-in baseline should come from the same CI environment used for PR comparisons; locally generated wall-clock
+  baselines are not stable enough to commit as PR comparison targets.
 - The baseline report records the Pyright commit SHA, project snapshot date, benchmark suite, selected projects, Node and
   Python versions, platform, and generated config mode.
+- Seed placeholders and empty baseline reports are rejected by the runner.
 - PR benchmark runs generate `new.json` and compare it against `baselines/ecosystem-smoke-main.json` unless a fresher CI
   artifact is supplied explicitly.
 - Updating the checked-in baseline should be a deliberate maintenance action after benchmark harness changes, project
@@ -1233,11 +1234,13 @@ First useful version:
   - [x] Include diagnostic and analyzed-file metrics in ecosystem comparison artifacts.
   - [x] Add diagnostic-diff sections to comparison artifacts once diagnostic identities are captured.
 10. [ ] Add checked-in main-branch smoke baseline.
-  - [x] Add `src/tests/benchmarks/baselines/README.md` documenting checked-in baseline policy.
-  - [ ] Add `src/tests/benchmarks/baselines/ecosystem-smoke-main.json`.
-  - [x] Stamp refreshed baselines with source commit SHA, project snapshot date, refresh timestamp, and config mode.
-  - [x] Add a script or runner option to update the checked-in baseline from a verified main-branch run.
-  - [x] Make PR comparison mode default to the checked-in baseline when no explicit baseline report is supplied.
+   - [x] Add `src/tests/benchmarks/baselines/README.md` documenting checked-in baseline policy.
+   - [~] Add `src/tests/benchmarks/baselines/ecosystem-smoke-main.json`.
+   - [x] Reject seed placeholders and empty baseline reports during comparison.
+   - [ ] Replace the seed placeholder with a CI-generated baseline from a known `main` commit.
+   - [x] Stamp refreshed baselines with source commit SHA, project snapshot date, refresh timestamp, and config mode.
+   - [x] Add a script or runner option to update the checked-in baseline from a verified main-branch run.
+   - [x] Make PR comparison mode default to the checked-in baseline when no explicit baseline report is supplied.
 11. [~] Add GitHub workflow.
   - [x] Add a manual workflow for smoke comparison and baseline refresh runs.
   - [x] In manual compare mode, run smoke benchmarks as `new.json` and compare against the checked-in main baseline.

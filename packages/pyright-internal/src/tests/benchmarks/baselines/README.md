@@ -4,4 +4,6 @@ This directory is reserved for checked-in smoke benchmark baselines generated fr
 
 `ecosystem-smoke-main.json` should be updated only from a deliberate main-branch run. PR comparisons can use that file as the default baseline when no fresher CI artifact is supplied.
 
+The runner rejects seed placeholders and baseline reports with no project results. If the checked-in file still has `sourceCommit: "seed-placeholder"`, run the `refresh-baseline` workflow on `main` and commit the generated artifact before using compare or PR automation.
+
 Full ecosystem reports and exploratory local runs should stay under `.generated/benchmark-results/` or CI artifacts rather than being checked in here.

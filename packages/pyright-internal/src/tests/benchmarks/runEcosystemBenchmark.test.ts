@@ -469,6 +469,54 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
         }
     });
 
+    test('refreshes a detached checkout using fetched remote history', () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pyright-ecosystem-refresh-'));
+        const sourceRepo = path.join(tempDir, 'source');
+        const checkoutDir = path.join(tempDir, 'checkout');
+
+        try {
+            fs.mkdirSync(sourceRepo, { recursive: true });
+            runGit(['init'], sourceRepo);
+            runGit(['config', 'core.autocrlf', 'false'], sourceRepo);
+            runGit(['config', 'user.email', 'pyright-benchmark@example.com'], sourceRepo);
+            runGit(['config', 'user.name', 'Pyright Benchmark'], sourceRepo);
+            fs.writeFileSync(path.join(sourceRepo, 'sample.py'), 'x = 1\n', 'utf-8');
+            runGit(['add', 'sample.py'], sourceRepo);
+            runGit(['commit', '-m', 'initial'], sourceRepo, {
+                GIT_AUTHOR_DATE: '2025-01-01T00:00:00Z',
+                GIT_COMMITTER_DATE: '2025-01-01T00:00:00Z',
+            });
+            const initialCommit = runGit(['rev-parse', 'HEAD'], sourceRepo);
+
+            prepareEcosystemProjectCheckout(
+                createGeneratedProject({ location: sourceRepo }),
+                checkoutDir,
+                '2025-02-01'
+            );
+
+            expect(runGit(['rev-parse', 'HEAD'], checkoutDir)).toBe(initialCommit);
+
+            fs.writeFileSync(path.join(sourceRepo, 'sample.py'), 'x = 2\n', 'utf-8');
+            runGit(['add', 'sample.py'], sourceRepo);
+            runGit(['commit', '-m', 'update'], sourceRepo, {
+                GIT_AUTHOR_DATE: '2025-06-01T00:00:00Z',
+                GIT_COMMITTER_DATE: '2025-06-01T00:00:00Z',
+            });
+            const updatedCommit = runGit(['rev-parse', 'HEAD'], sourceRepo);
+
+            prepareEcosystemProjectCheckout(
+                createGeneratedProject({ location: sourceRepo }),
+                checkoutDir,
+                '2026-01-01'
+            );
+
+            expect(runGit(['rev-parse', 'HEAD'], checkoutDir)).toBe(updatedCommit);
+            expect(fs.readFileSync(path.join(checkoutDir, 'sample.py'), 'utf-8').trim()).toBe('x = 2');
+        } finally {
+            fs.rmSync(tempDir, { force: true, recursive: true });
+        }
+    });
+
     test('includes command details when pyright emits no JSON', () => {
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pyright-ecosystem-execute-error-'));
         const workingDirectory = path.join(tempDir, 'black');
@@ -528,6 +576,55 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
             expect(result.diagnosticCount).toBe(0);
         } finally {
             process.chdir(previousCwd);
+            fs.rmSync(tempDir, { force: true, recursive: true });
+        }
+    });
+
+    test('executes a project command when pyright emits large JSON output', () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pyright-ecosystem-large-output-'));
+        const workingDirectory = path.join(tempDir, 'black');
+        const fakePyrightScriptPath = path.join(tempDir, 'fake-pyright-large.js');
+
+        try {
+            fs.mkdirSync(workingDirectory, { recursive: true });
+            fs.writeFileSync(
+                fakePyrightScriptPath,
+                [
+                    'const diagnosticCount = 25000;',
+                    'const diagnostics = Array.from({ length: diagnosticCount }, (_, index) => ({',
+                    '  severity: "error",',
+                    '  message: `synthetic diagnostic ${index}`',
+                    '}));',
+                    'const result = {',
+                    '  generalDiagnostics: diagnostics,',
+                    '  summary: {',
+                    '    filesAnalyzed: 3,',
+                    '    errorCount: diagnosticCount,',
+                    '    warningCount: 0,',
+                    '    informationCount: 0,',
+                    '    timeInSec: 0.25',
+                    '  }',
+                    '};',
+                    'console.log(JSON.stringify(result));',
+                ].join('\n'),
+                'utf-8'
+            );
+
+            const result = executePyrightProjectCommand(
+                'black',
+                createGeneratedProject({
+                    pyrightCommand: `{pyright} "${fakePyrightScriptPath}" {paths}`,
+                    paths: ['src'],
+                }),
+                workingDirectory,
+                process.execPath
+            );
+
+            expect(result.projectName).toBe('black');
+            expect(result.filesAnalyzed).toBe(3);
+            expect(result.diagnosticCount).toBe(25000);
+            expect(result.errorCount).toBe(25000);
+        } finally {
             fs.rmSync(tempDir, { force: true, recursive: true });
         }
     });
@@ -650,6 +747,75 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
             ).toBe(true);
         } finally {
             fs.rmSync(tempDir, { force: true, recursive: true });
+        }
+    });
+
+    test('rejects a seed placeholder baseline report', () => {
+        const reportsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pyright-ecosystem-seed-baseline-'));
+        const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pyright-ecosystem-seed-compare-'));
+
+        try {
+            const baselinePath = path.join(reportsDir, 'ecosystem-smoke-main.json');
+            const candidatePath = path.join(reportsDir, 'candidate-report.json');
+            const seedBaseline = {
+                ...createEcosystemBenchmarkReport('2026-05-07T00:00:00.000Z', []),
+                mainBaseline: {
+                    sourceCommit: 'seed-placeholder',
+                    projectDate: '2026-01-01',
+                    configMode: 'generated-benchmark-config',
+                    refreshedAt: '2026-05-07T00:00:00.000Z',
+                },
+            };
+
+            fs.writeFileSync(baselinePath, JSON.stringify(seedBaseline, undefined, 2), 'utf-8');
+            fs.writeFileSync(
+                candidatePath,
+                JSON.stringify(
+                    createEcosystemBenchmarkReport('2026-05-07T01:00:00.000Z', [{ projectName: 'black' }]),
+                    undefined,
+                    2
+                ),
+                'utf-8'
+            );
+
+            expect(() => compareEcosystemBenchmarkReports(baselinePath, candidatePath, outputDir)).toThrow(
+                /seed placeholder/
+            );
+        } finally {
+            fs.rmSync(reportsDir, { force: true, recursive: true });
+            fs.rmSync(outputDir, { force: true, recursive: true });
+        }
+    });
+
+    test('rejects an empty baseline report', () => {
+        const reportsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pyright-ecosystem-empty-baseline-'));
+        const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pyright-ecosystem-empty-compare-'));
+
+        try {
+            const baselinePath = path.join(reportsDir, 'old.json');
+            const candidatePath = path.join(reportsDir, 'new.json');
+
+            fs.writeFileSync(
+                baselinePath,
+                JSON.stringify(createEcosystemBenchmarkReport('2026-05-07T00:00:00.000Z', []), undefined, 2),
+                'utf-8'
+            );
+            fs.writeFileSync(
+                candidatePath,
+                JSON.stringify(
+                    createEcosystemBenchmarkReport('2026-05-07T01:00:00.000Z', [{ projectName: 'black' }]),
+                    undefined,
+                    2
+                ),
+                'utf-8'
+            );
+
+            expect(() => compareEcosystemBenchmarkReports(baselinePath, candidatePath, outputDir)).toThrow(
+                /contains no project results/
+            );
+        } finally {
+            fs.rmSync(reportsDir, { force: true, recursive: true });
+            fs.rmSync(outputDir, { force: true, recursive: true });
         }
     });
 

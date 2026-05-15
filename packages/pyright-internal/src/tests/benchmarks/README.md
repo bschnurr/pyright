@@ -116,12 +116,15 @@ Add `--prepare-projects` to clone or update selected project checkouts under `--
 provided, preparation checks out the newest project commit before that date. Add `--install-dependencies` to install
 synced dependency metadata and run synced install commands after checkout preparation.
 
-To refresh the checked-in smoke baseline from a verified main-branch run, execute the baseline side of the local runner,
-pass `--update-main-baseline`, and stamp the source commit:
+To refresh the checked-in smoke baseline from a verified main-branch run, execute the baseline side of the runner on the
+same CI environment used for comparisons, pass `--update-main-baseline`, and stamp the source commit:
 
 ```bash
 npm run bench:ecosystem:update-main-baseline -- --suite smoke --project-root q:/path/to/main-checkouts --prepare-projects --project-date 2026-01-01 --output ./src/tests/benchmarks/.generated/benchmark-results/ecosystem-main --baseline-source-commit <main-commit-sha>
 ```
+
+The checked-in `baselines/ecosystem-smoke-main.json` must contain real smoke-suite project results. The runner rejects
+seed placeholders and empty baseline reports so manual compare runs do not produce misleading all-new project diffs.
 
 PR comparison mode can then use the checked-in baseline by passing only the candidate report:
 
