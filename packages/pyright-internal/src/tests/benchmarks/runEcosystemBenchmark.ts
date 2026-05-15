@@ -3,7 +3,7 @@ import commandLineArgs, { CommandLineOptions, OptionDefinition } from 'command-l
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { parse } from '../../common/tomlUtils';
+import { ensureTomlModuleLoaded, parse } from '../../common/tomlUtils';
 
 import {
     BenchmarkMetricDefinition,
@@ -991,5 +991,10 @@ function writeNamedBenchmarkReport<ResultT>(
 }
 
 if (require.main === module) {
-    runEcosystemBenchmark(process.argv.slice(2));
+    void ensureTomlModuleLoaded()
+        .then(() => runEcosystemBenchmark(process.argv.slice(2)))
+        .catch((error: unknown) => {
+            console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+            process.exitCode = 1;
+        });
 }
