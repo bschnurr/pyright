@@ -214,11 +214,12 @@ export function renderBenchmarkComparisonMarkdown(comparison: BenchmarkResultSet
     const lines = [
         '## Summary',
         '',
+        `Status: ${formatSummaryStatus(summary)}`,
         `Compared cases: ${summary.comparedResultCount}`,
         `Compared metrics: ${summary.metricCount}`,
-        `Regressions: ${summary.regressionCount}`,
-        `Improvements: ${summary.improvementCount}`,
-        `Unchanged: ${summary.unchangedCount}`,
+        `Regressions: ${formatCountWithColor(summary.regressionCount, 'regression')}`,
+        `Improvements: ${formatCountWithColor(summary.improvementCount, 'improvement')}`,
+        `Unchanged: ${formatCountWithColor(summary.unchangedCount, 'unchanged')}`,
         '',
     ];
 
@@ -237,9 +238,9 @@ export function renderBenchmarkComparisonMarkdown(comparison: BenchmarkResultSet
             lines.push(
                 `| ${result.key} | ${metric.metric} | ${formatMetric(metric.baselineValue)} | ${formatMetric(
                     metric.candidateValue
-                )} | ${formatMetric(metric.absoluteDelta)} | ${formatPercent(metric.percentDelta)} | ${
-                    metric.direction
-                } |`
+                )} | ${formatMetric(metric.absoluteDelta)} | ${formatPercent(
+                    metric.percentDelta
+                )} | ${formatDirectionWithColor(metric.direction)} |`
             );
         }
     }
@@ -253,6 +254,41 @@ export function renderBenchmarkComparisonMarkdown(comparison: BenchmarkResultSet
     }
 
     return `${lines.join('\n')}\n`;
+}
+
+function formatSummaryStatus(summary: BenchmarkComparisonSummary): string {
+    if (summary.regressionCount > 0) {
+        return '🔴 Regressions detected';
+    }
+
+    if (summary.improvementCount > 0) {
+        return '🟢 No regressions; improvements detected';
+    }
+
+    return '⚪ No benchmark changes';
+}
+
+function formatCountWithColor(count: number, direction: BenchmarkMetricDirection): string {
+    if (count === 0) {
+        return '0';
+    }
+
+    return `${getDirectionColor(direction)} ${count}`;
+}
+
+function formatDirectionWithColor(direction: BenchmarkMetricDirection): string {
+    return `${getDirectionColor(direction)} ${direction}`;
+}
+
+function getDirectionColor(direction: BenchmarkMetricDirection): string {
+    switch (direction) {
+        case 'regression':
+            return '🔴';
+        case 'improvement':
+            return '🟢';
+        case 'unchanged':
+            return '⚪';
+    }
 }
 
 function appendMetricEntryTable(

@@ -139,11 +139,40 @@ benchmarkSuite('Benchmark Comparison', () => {
         const markdown = renderBenchmarkComparisonMarkdown(comparison);
 
         expect(markdown).toContain('## Summary');
-        expect(markdown).toContain('Regressions: 1');
-        expect(markdown).toContain('Improvements: 1');
+        expect(markdown).toContain('Status: 🔴 Regressions detected');
+        expect(markdown).toContain('Regressions: 🔴 1');
+        expect(markdown).toContain('Improvements: 🟢 1');
         expect(markdown).toContain('## Largest Regressions');
         expect(markdown).toContain('## Largest Improvements');
         expect(markdown).toContain('| case_a | medianMs | 100.00 | 110.00 |');
+        expect(markdown).toContain('| case_a | medianMs | 100.00 | 110.00 | 10.00 | 10.00% | 🔴 regression |');
+    });
+
+    test('renders a green markdown status when there are no regressions', () => {
+        const comparison = compareBenchmarkResultSets<TestResult>(
+            [{ name: 'case_a', medianMs: 100 }],
+            [{ name: 'case_a', medianMs: 80 }],
+            (result) => result.name,
+            [{ name: 'medianMs', getValue: (result) => result.medianMs }]
+        );
+        const markdown = renderBenchmarkComparisonMarkdown(comparison);
+
+        expect(markdown).toContain('Status: 🟢 No regressions; improvements detected');
+        expect(markdown).toContain('Regressions: 0');
+        expect(markdown).toContain('Improvements: 🟢 1');
+    });
+
+    test('renders a neutral markdown status when there are no benchmark changes', () => {
+        const comparison = compareBenchmarkResultSets<TestResult>(
+            [{ name: 'case_a', medianMs: 100 }],
+            [{ name: 'case_a', medianMs: 100 }],
+            (result) => result.name,
+            [{ name: 'medianMs', getValue: (result) => result.medianMs }]
+        );
+        const markdown = renderBenchmarkComparisonMarkdown(comparison);
+
+        expect(markdown).toContain('Status: ⚪ No benchmark changes');
+        expect(markdown).toContain('Unchanged: ⚪ 1');
     });
 
     test('summarizes benchmark comparison directions', () => {
