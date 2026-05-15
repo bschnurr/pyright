@@ -977,7 +977,7 @@ function getWritableBenchmarkFilePath(...pathParts: string[]): string {
         return sourceFilePath;
     }
 
-    return path.resolve(__dirname, '..', '..', '..', '..', 'src', 'tests', 'benchmarks', ...pathParts);
+    return path.resolve(__dirname, '..', '..', '..', '..', '..', '..', 'src', 'tests', 'benchmarks', ...pathParts);
 }
 
 function writeNamedBenchmarkReport<ResultT>(
