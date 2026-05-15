@@ -259,14 +259,14 @@ export function renderBenchmarkComparisonMarkdown(comparison: BenchmarkResultSet
 
 function formatSummaryStatus(summary: BenchmarkComparisonSummary): string {
     if (summary.regressionCount > 0) {
-        return '🔴 Regressions detected';
+        return formatTextWithColor('Regressions detected', 'regression');
     }
 
     if (summary.improvementCount > 0) {
-        return '🟢 No regressions; improvements detected';
+        return formatTextWithColor('No regressions; improvements detected', 'improvement');
     }
 
-    return '⚪ No benchmark changes';
+    return formatTextWithColor('No benchmark changes', 'unchanged');
 }
 
 function formatCountWithColor(count: number, direction: BenchmarkMetricDirection): string {
@@ -274,26 +274,34 @@ function formatCountWithColor(count: number, direction: BenchmarkMetricDirection
         return '0';
     }
 
-    return `${getDirectionColor(direction)} ${count}`;
+    return formatTextWithColor(count.toString(), direction);
 }
 
 function formatDeltaWithColor(value: number, direction: BenchmarkMetricDirection): string {
-    return `${getDirectionColor(direction)} ${formatMetric(value)}`;
+    return formatTextWithColor(formatMetric(value), direction);
 }
 
 function formatPercentDeltaWithColor(value: number | undefined, direction: BenchmarkMetricDirection): string {
-    return `${getDirectionColor(direction)} ${formatPercent(value)}`;
+    return formatTextWithColor(formatPercent(value), direction);
 }
 
-function getDirectionColor(direction: BenchmarkMetricDirection): string {
+function formatTextWithColor(text: string, direction: BenchmarkMetricDirection): string {
+    return `$\\textcolor{${getDirectionTextColor(direction)}}{${escapeMathText(text)}}$`;
+}
+
+function getDirectionTextColor(direction: BenchmarkMetricDirection): string {
     switch (direction) {
         case 'regression':
-            return '🔴';
+            return 'red';
         case 'improvement':
-            return '🟢';
+            return 'green';
         case 'unchanged':
-            return '⚪';
+            return 'gray';
     }
+}
+
+function escapeMathText(text: string): string {
+    return text.replace(/\\/g, '\\backslash{}').replace(/ /g, '\\ ').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
 function appendMetricEntryTable(

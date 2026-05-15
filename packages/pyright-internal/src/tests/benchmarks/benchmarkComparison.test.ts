@@ -139,16 +139,20 @@ benchmarkSuite('Benchmark Comparison', () => {
         const markdown = renderBenchmarkComparisonMarkdown(comparison);
 
         expect(markdown).toContain('## Summary');
-        expect(markdown).toContain('Status: 🔴 Regressions detected');
-        expect(markdown).toContain('Regressions: 🔴 1');
-        expect(markdown).toContain('Improvements: 🟢 1');
+        expect(markdown).toContain('Status: $\\textcolor{red}{Regressions\\ detected}$');
+        expect(markdown).toContain('Regressions: $\\textcolor{red}{1}$');
+        expect(markdown).toContain('Improvements: $\\textcolor{green}{1}$');
         expect(markdown).toContain('## Largest Regressions');
         expect(markdown).toContain('## Largest Improvements');
         expect(markdown).toContain('| case_a | medianMs | 100.00 | 110.00 |');
         expect(markdown).toContain('| Case | Metric | Baseline | Candidate | Delta | Delta % |');
         expect(markdown).not.toContain('Direction');
-        expect(markdown).toContain('| case_a | medianMs | 100.00 | 110.00 | 🔴 10.00 | 🔴 10.00% |');
-        expect(markdown).toContain('| case_b | medianMs | 100.00 | 80.00 | 🟢 -20.00 | 🟢 -20.00% |');
+        expect(markdown).toContain(
+            '| case_a | medianMs | 100.00 | 110.00 | $\\textcolor{red}{10.00}$ | $\\textcolor{red}{10.00\\%}$ |'
+        );
+        expect(markdown).toContain(
+            '| case_b | medianMs | 100.00 | 80.00 | $\\textcolor{green}{-20.00}$ | $\\textcolor{green}{-20.00\\%}$ |'
+        );
     });
 
     test('renders a green markdown status when there are no regressions', () => {
@@ -160,9 +164,9 @@ benchmarkSuite('Benchmark Comparison', () => {
         );
         const markdown = renderBenchmarkComparisonMarkdown(comparison);
 
-        expect(markdown).toContain('Status: 🟢 No regressions; improvements detected');
+        expect(markdown).toContain('Status: $\\textcolor{green}{No\\ regressions;\\ improvements\\ detected}$');
         expect(markdown).toContain('Regressions: 0');
-        expect(markdown).toContain('Improvements: 🟢 1');
+        expect(markdown).toContain('Improvements: $\\textcolor{green}{1}$');
     });
 
     test('renders a neutral markdown status when there are no benchmark changes', () => {
@@ -174,9 +178,11 @@ benchmarkSuite('Benchmark Comparison', () => {
         );
         const markdown = renderBenchmarkComparisonMarkdown(comparison);
 
-        expect(markdown).toContain('Status: ⚪ No benchmark changes');
-        expect(markdown).toContain('Unchanged: ⚪ 1');
-        expect(markdown).toContain('| case_a | medianMs | 100.00 | 100.00 | ⚪ 0.00 | ⚪ 0.00% |');
+        expect(markdown).toContain('Status: $\\textcolor{gray}{No\\ benchmark\\ changes}$');
+        expect(markdown).toContain('Unchanged: $\\textcolor{gray}{1}$');
+        expect(markdown).toContain(
+            '| case_a | medianMs | 100.00 | 100.00 | $\\textcolor{gray}{0.00}$ | $\\textcolor{gray}{0.00\\%}$ |'
+        );
     });
 
     test('summarizes benchmark comparison directions', () => {
