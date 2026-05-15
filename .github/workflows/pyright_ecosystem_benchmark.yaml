@@ -228,7 +228,9 @@ jobs:
                 comparison = `${comparison.slice(0, maxCharacters)}\n\n... benchmark report truncated; see workflow artifacts for the full comparison.`;
               }
 
-              body = [marker, comparison, '', `[Workflow run](${runUrl})`].join('\n');
+              body = [marker, '## Pyright ecosystem benchmark stats', '', comparison, '', `[Workflow run](${runUrl})`].join(
+                '\n'
+              );
             } else if (process.env.BASELINE_READY !== 'true') {
               const reason = process.env.BASELINE_REASON || 'The checked-in ecosystem smoke baseline is not ready.';
               body = [
