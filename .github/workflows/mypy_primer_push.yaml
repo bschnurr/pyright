@@ -28,7 +28,7 @@ jobs:
     permissions:
       contents: read
     env:
-      MYPY_PRIMER_BASE_DIR: ${{ runner.temp }}/mypy_primer_cache
+      MYPY_PRIMER_BASE_DIR: ${{ github.workspace }}/.mypy_primer_cache
     strategy:
       matrix:
         shard-index: [0, 1, 2, 3, 4, 5, 6, 7]
