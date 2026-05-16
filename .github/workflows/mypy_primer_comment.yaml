@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
   pull-requests: write
 
 concurrency:
@@ -84,25 +85,49 @@ jobs:
             console.log("Diff from mypy_primer:")
             console.log(data)
 
+            const marker = '<!-- pyright-mypy-primer-benchmark-comment -->'
+            const heading = '## Pyright mypy_primer benchmark results'
             let body
             if (data.trim()) {
-              body = 'Diff from [mypy_primer](https://github.com/hauntsaninja/mypy_primer), showing the effect of this PR on open source code:\n```diff\n' + data + '```'
+              body = [
+                marker,
+                heading,
+                '',
+                'Diff from [mypy_primer](https://github.com/hauntsaninja/mypy_primer), showing the effect of this PR on open source code:',
+                '```diff',
+                data,
+                '```',
+              ].join('\n')
             } else {
-              body = "According to [mypy_primer](https://github.com/hauntsaninja/mypy_primer), this change doesn't affect type check results on a corpus of open source code. ✅"
+              body = [
+                marker,
+                heading,
+                '',
+                "According to [mypy_primer](https://github.com/hauntsaninja/mypy_primer), this change doesn't affect type check results on a corpus of open source code. ✅",
+              ].join('\n')
             }
             const prNumber = parseInt(fs.readFileSync("pr_number.txt", { encoding: "utf8" }))
-            await github.rest.issues.createComment({
-              issue_number: prNumber,
+            const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body
+              issue_number: prNumber,
+              per_page: 100,
             })
-            return prNumber
+            const existingComment = comments.find(comment => comment.body?.includes(marker))
 
-      - name: Hide old comments
-        # v0.4.0
-        uses: kanga333/comment-hider@c12bb20b48aeb8fc098e35967de8d4f8018fffdf
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          leave_visible: 1
-          issue_number: ${{ steps.post-comment.outputs.result }}
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body,
+              })
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: prNumber,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body
+              })
+            }
+            return prNumber
