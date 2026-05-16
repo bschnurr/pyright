@@ -17,6 +17,7 @@ on:
   # Run on the creation or update of a PR.
   pull_request:
     paths:
+      - '.github/workflows/mypy_primer_*.yaml'
       - 'packages/pyright/**'
       - 'packages/pyright-internal/src/**'
       - 'packages/pyright-internal/typeshed-fallback/**'
