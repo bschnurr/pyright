@@ -31,7 +31,7 @@ jobs:
       MYPY_PRIMER_BASE_DIR: ${{ github.workspace }}/.mypy_primer_cache
     strategy:
       matrix:
-        shard-index: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard-index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +44,7 @@ jobs:
       - name: Restore mypy_primer project cache
         uses: actions/cache@v4
         with:
-          path: ${{ env.MYPY_PRIMER_BASE_DIR }}
+          path: ${{ env.MYPY_PRIMER_BASE_DIR }}/projects
           key: ${{ runner.os }}-mypy-primer-push-shard-${{ matrix.shard-index }}-${{ github.run_id }}
           restore-keys: |
             ${{ runner.os }}-mypy-primer-push-shard-${{ matrix.shard-index }}-
@@ -67,12 +67,19 @@ jobs:
             --repo pyright_to_test \
             --type-checker pyright \
             --new $GITHUB_SHA \
-            --num-shards 8 --shard-index ${{ matrix.shard-index }} \
+            --num-shards 16 --shard-index ${{ matrix.shard-index }} \
             --base-dir "$MYPY_PRIMER_BASE_DIR" \
             --debug \
             --output concise \
             | tee diff_${{ matrix.shard-index }}.txt
           ) || [ $? -eq 1 ]
+      - name: Trim mypy_primer project cache
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if [[ -d "$MYPY_PRIMER_BASE_DIR/projects" ]]; then
+            find "$MYPY_PRIMER_BASE_DIR/projects" -maxdepth 1 -type d -name '_*_venv' -exec rm -rf {} +
+          fi
       - name: Upload mypy_primer diff
         uses: actions/upload-artifact@v4
         with:

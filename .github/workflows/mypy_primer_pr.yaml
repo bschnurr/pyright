@@ -50,7 +50,7 @@ jobs:
       - name: Restore mypy_primer project cache
         uses: actions/cache@v4
         with:
-          path: ${{ env.MYPY_PRIMER_BASE_DIR }}
+          path: ${{ env.MYPY_PRIMER_BASE_DIR }}/projects
           key: ${{ runner.os }}-mypy-primer-pr-shard-${{ matrix.shard-index }}-${{ github.run_id }}
           restore-keys: |
             ${{ runner.os }}-mypy-primer-pr-shard-${{ matrix.shard-index }}-
@@ -85,6 +85,13 @@ jobs:
             --output concise \
             | tee diff_${{ matrix.shard-index }}.txt
           ) || [ $? -eq 1 ]
+      - name: Trim mypy_primer project cache
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if [[ -d "$MYPY_PRIMER_BASE_DIR/projects" ]]; then
+            find "$MYPY_PRIMER_BASE_DIR/projects" -maxdepth 1 -type d -name '_*_venv' -exec rm -rf {} +
+          fi
       - name: Upload mypy_primer diff
         uses: actions/upload-artifact@v4
         with:
