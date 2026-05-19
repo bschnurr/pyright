@@ -18,9 +18,23 @@ export interface GeneratedEcosystemProject {
     cost?: number;
 }
 
+export interface MypyPrimerSnapshotMetadata {
+    schemaVersion: 1;
+    upstreamRepository: string;
+    upstreamCommit: string;
+    upstreamProjectsUrl: string;
+    syncedAt: string;
+    projectCount: number;
+    sourceInputFile: string;
+}
+
 const optionDefinitions: OptionDefinition[] = [
     { name: 'input', type: String },
     { name: 'output', type: String },
+    { name: 'metadata-output', type: String },
+    { name: 'upstream-repo', type: String },
+    { name: 'upstream-commit', type: String },
+    { name: 'upstream-url', type: String },
 ];
 
 const defaultMypyPrimerProjectSourcePath = getBenchmarkFilePath('mypy_primer.smoke_projects.snapshot.py');
@@ -49,13 +63,31 @@ export function syncMypyPrimerProjects(args: string[]): string {
     const inputPath = (parsedArgs.input as string | undefined) ?? defaultMypyPrimerProjectSourcePath;
     const outputPath =
         (parsedArgs.output as string | undefined) ?? getWritableBenchmarkFilePath('ecosystem-projects.generated.json');
+    const metadataOutputPath = parsedArgs['metadata-output'] as string | undefined;
 
     const sourceText = fs.readFileSync(inputPath, 'utf-8');
     const projects = parseMypyPrimerProjectSource(sourceText, inputPath);
     writeGeneratedEcosystemProjects(outputPath, projects);
+    if (metadataOutputPath) {
+        writeMypyPrimerSnapshotMetadata(metadataOutputPath, {
+            schemaVersion: 1,
+            upstreamRepository: (parsedArgs['upstream-repo'] as string | undefined) ?? 'hauntsaninja/mypy_primer',
+            upstreamCommit: (parsedArgs['upstream-commit'] as string | undefined) ?? 'unknown',
+            upstreamProjectsUrl:
+                (parsedArgs['upstream-url'] as string | undefined) ?? normalizeInputFileReference(inputPath),
+            syncedAt: new Date().toISOString(),
+            projectCount: projects.length,
+            sourceInputFile: normalizeInputFileReference(inputPath),
+        });
+    }
     console.log(`Wrote ${projects.length} ecosystem project definitions to ${outputPath}`);
 
     return outputPath;
+}
+
+export function writeMypyPrimerSnapshotMetadata(outputPath: string, metadata: MypyPrimerSnapshotMetadata): void {
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, `${JSON.stringify(metadata, undefined, 2)}\n`, 'utf-8');
 }
 
 export function getBenchmarkSourceDirectory(): string {
