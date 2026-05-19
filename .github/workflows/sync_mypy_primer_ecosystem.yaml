@@ -1,0 +1,102 @@
+name: Sync mypy_primer ecosystem metadata
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '20 9 * * 1'
+
+concurrency:
+  group: sync-mypy-primer-ecosystem
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'bschnurr/pyright'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Fetch upstream mypy_primer projects
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          upstream_repo="hauntsaninja/mypy_primer"
+          upstream_ref="$(gh api "repos/${upstream_repo}/commits/main" --jq .sha)"
+          snapshot_path="packages/pyright-internal/src/tests/benchmarks/mypy_primer.smoke_projects.snapshot.py"
+          url="https://raw.githubusercontent.com/${upstream_repo}/${upstream_ref}/mypy_primer/projects.py"
+
+          curl --fail --show-error --location "$url" --output "$snapshot_path"
+          project_count="$(grep -c 'Project(' "$snapshot_path")"
+          if [[ "$project_count" -lt 10 ]]; then
+            echo "Fetched projects.py contains only ${project_count} Project entries." >&2
+            exit 1
+          fi
+
+          {
+            echo "sha=$upstream_ref"
+            echo "project_count=$project_count"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Regenerate ecosystem metadata
+        run: |
+          npm ci
+          cd packages/pyright-internal
+          npm run build
+          npm run bench:ecosystem:sync
+
+      - name: Check for changes
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- packages/pyright-internal/src/tests/benchmarks/mypy_primer.smoke_projects.snapshot.py packages/pyright-internal/src/tests/benchmarks/ecosystem-projects.generated.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open sync pull request
+        if: steps.changes.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="automation/sync-mypy-primer-ecosystem"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$branch"
+          git add packages/pyright-internal/src/tests/benchmarks/mypy_primer.smoke_projects.snapshot.py packages/pyright-internal/src/tests/benchmarks/ecosystem-projects.generated.json
+          git commit -m "Sync ecosystem mypy_primer metadata"
+          git push --force-with-lease origin "$branch"
+
+          body_file="$(mktemp)"
+          printf '%s\n' \
+            "Syncs the checked-in ecosystem benchmark mypy_primer snapshot and generated metadata from upstream mypy_primer." \
+            "" \
+            "Upstream: https://github.com/hauntsaninja/mypy_primer/commit/${{ steps.upstream.outputs.sha }}" \
+            "Project definitions fetched: ${{ steps.upstream.outputs.project_count }}" \
+            "" \
+            "After merge, run the ecosystem benchmark \`refresh-baseline\` workflow on main if the smoke project set changed." \
+            "" \
+            "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>" \
+            > "$body_file"
+
+          existing_pr="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // ""')"
+          if [[ -n "$existing_pr" ]]; then
+            gh pr edit "$existing_pr" --title "Sync ecosystem mypy_primer metadata" --body-file "$body_file"
+          else
+            gh pr create --head "$branch" --base main --title "Sync ecosystem mypy_primer metadata" --body-file "$body_file"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}

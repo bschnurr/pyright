@@ -26,7 +26,7 @@ src/tests/benchmarks/.generated/benchmark-results/
     filters, writes a run manifest artifact, executes selected local project checkouts with provided Pyright commands,
     and compares existing or freshly executed ecosystem report files into
     `old.json`/`new.json`/`comparison.json`/`comparison.md` artifacts, including diagnostic count metrics and added/removed
-    diagnostic summaries.
+    diagnostic changes rendered as a mypy_primer-style diff block.
 - `syncMypyPrimerProjects.ts` is the first sync scaffold for normalizing `mypy_primer` project definitions into the
     generated ecosystem metadata file consumed by the smoke manifest. The checked-in smoke snapshot now carries the
     upstream `pyright_cmd` and `paths` data for the current smoke suite, so generated project configs can target real
@@ -132,8 +132,15 @@ PR comparison mode can then use the checked-in baseline by passing only the cand
 npm run bench:ecosystem:run -- --candidate-report ./src/tests/benchmarks/.generated/benchmark-results/ecosystem-pr/candidate-report.json --output ./src/tests/benchmarks/.generated/benchmark-results/ecosystem-pr-comparison
 ```
 
-The GitHub workflow posts `comparison.md` back to the PR when compare mode runs for a pull request, or when a manual
-compare run supplies the optional `pr_number` input. If a PR run skips comparison because the checked-in baseline is
-still the seed placeholder, the workflow posts a status comment explaining that benchmark stats are blocked until the
-real baseline is committed. The comment is updated in place using a hidden marker so repeated runs do not leave multiple
-benchmark comments.
+The GitHub workflow posts `comparison.md` back to the PR when compare mode runs for an ecosystem benchmark
+infrastructure pull request, or when a manual compare run supplies the optional `pr_number` input. General Pyright
+source changes use the `mypy_primer` PR workflow as the automatic ecosystem check; run this workflow manually when
+reviewers need the performance table. If a PR run skips comparison because the checked-in baseline is still the seed
+placeholder, the workflow posts a status comment explaining that benchmark stats are blocked until the real baseline is
+committed. The comment is updated in place using a hidden marker so repeated runs do not leave multiple benchmark
+comments.
+
+The checked-in mypy_primer snapshot can be refreshed with the `Sync mypy_primer ecosystem metadata` workflow. It runs on
+a weekly schedule and can also be dispatched manually. When upstream project metadata changes, the workflow updates
+`mypy_primer.smoke_projects.snapshot.py` and `ecosystem-projects.generated.json` on an automation branch and opens or
+updates a PR. If the smoke project set changes, refresh the main ecosystem baseline after merging the sync PR.

@@ -429,8 +429,8 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
             expect(result.warningCount).toBe(1);
             expect(result.informationCount).toBe(0);
             expect(result.diagnostics).toEqual([
-                { file: undefined, severity: 'error', message: '' },
-                { file: undefined, severity: 'warning', message: '' },
+                { file: undefined, range: undefined, severity: 'error', message: '' },
+                { file: undefined, range: undefined, severity: 'warning', message: '' },
             ]);
             expect(result.totalTimeMs).toBeGreaterThanOrEqual(0);
         } finally {
@@ -978,7 +978,14 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
                             diagnosticCount: 1,
                             errorCount: 1,
                             warningCount: 0,
-                            diagnostics: [{ file: 'src/a.py', severity: 'error', message: 'old diagnostic' }],
+                            diagnostics: [
+                                {
+                                    file: 'src/a.py',
+                                    range: { start: { line: 4, character: 8 } },
+                                    severity: 'error',
+                                    message: 'old diagnostic',
+                                },
+                            ],
                         },
                     ]),
                     undefined,
@@ -996,8 +1003,18 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
                             errorCount: 1,
                             warningCount: 1,
                             diagnostics: [
-                                { file: 'src/a.py', severity: 'error', message: 'old diagnostic' },
-                                { file: 'src/b.py', severity: 'warning', message: 'new diagnostic' },
+                                {
+                                    file: 'src/a.py',
+                                    range: { start: { line: 4, character: 8 } },
+                                    severity: 'error',
+                                    message: 'old diagnostic',
+                                },
+                                {
+                                    file: 'src/b.py',
+                                    range: { start: { line: 9, character: 1 } },
+                                    severity: 'warning',
+                                    message: 'new diagnostic',
+                                },
                             ],
                         },
                     ]),
@@ -1018,12 +1035,16 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
             expect(comparison.diagnosticDiffs).toEqual([
                 {
                     projectName: 'black',
-                    added: ['warning | src/b.py | new diagnostic'],
+                    added: ['warning | src/b.py:10:2 | new diagnostic'],
                     removed: [],
                 },
             ]);
             expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain('diagnosticCount');
-            expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain('## Diagnostic Diffs');
+            expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain('## Type Check Result Diff');
+            expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain('```diff');
+            expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain(
+                '+ warning | src/b.py:10:2 | new diagnostic'
+            );
         } finally {
             fs.rmSync(reportsDir, { force: true, recursive: true });
             fs.rmSync(outputDir, { force: true, recursive: true });
@@ -1045,7 +1066,12 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
                 {
                     projectName: 'black',
                     diagnostics: [
-                        { file: 'src/b.py', severity: 'information', message: 'new diagnostic' },
+                        {
+                            file: 'src/b.py',
+                            range: { start: { line: 2, character: 3 } },
+                            severity: 'information',
+                            message: 'new diagnostic',
+                        },
                         { file: 'src/stable.py', severity: 'warning', message: 'stable diagnostic' },
                     ],
                 },
@@ -1055,9 +1081,44 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
         expect(comparison.diagnosticDiffs).toEqual([
             {
                 projectName: 'black',
-                added: ['information | src/b.py | new diagnostic'],
+                added: ['information | src/b.py:3:4 | new diagnostic'],
                 removed: ['error | src/a.py | old diagnostic'],
             },
+        ]);
+    });
+
+    test('keeps repeated diagnostic messages distinct by location', () => {
+        const comparison = compareEcosystemBenchmarkReportData(
+            createEcosystemBenchmarkReport('2026-05-07T00:00:00.000Z', [
+                {
+                    projectName: 'black',
+                    diagnostics: [],
+                },
+            ]),
+            createEcosystemBenchmarkReport('2026-05-07T01:00:00.000Z', [
+                {
+                    projectName: 'black',
+                    diagnostics: [
+                        {
+                            file: 'src/repeated.py',
+                            range: { start: { line: 0, character: 0 } },
+                            severity: 'error',
+                            message: 'same diagnostic',
+                        },
+                        {
+                            file: 'src/repeated.py',
+                            range: { start: { line: 1, character: 0 } },
+                            severity: 'error',
+                            message: 'same diagnostic',
+                        },
+                    ],
+                },
+            ])
+        );
+
+        expect(comparison.diagnosticDiffs[0].added).toEqual([
+            'error | src/repeated.py:1:1 | same diagnostic',
+            'error | src/repeated.py:2:1 | same diagnostic',
         ]);
     });
 

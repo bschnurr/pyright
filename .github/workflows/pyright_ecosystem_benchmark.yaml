@@ -5,13 +5,11 @@ on:
     branches:
       - main
     paths:
-      - '.github/workflows/mypy_primer_*.yaml'
       - '.github/workflows/pyright_ecosystem_benchmark.yaml'
-      - 'packages/pyright/**'
+      - '.github/workflows/sync_mypy_primer_ecosystem.yaml'
       - 'packages/pyright-internal/package.json'
       - 'packages/pyright-internal/package-lock.json'
-      - 'packages/pyright-internal/src/**'
-      - 'packages/pyright-internal/typeshed-fallback/**'
+      - 'packages/pyright-internal/src/tests/benchmarks/**'
   workflow_dispatch:
     inputs:
       mode:

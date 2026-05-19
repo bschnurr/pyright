@@ -75,6 +75,12 @@ export interface EcosystemBenchmarkResult {
 
 export interface EcosystemBenchmarkDiagnostic {
     file?: string;
+    range?: {
+        start: {
+            line: number;
+            character: number;
+        };
+    };
     severity: string;
     message: string;
 }
@@ -111,8 +117,20 @@ export interface EcosystemBenchmarkExecutionArtifactPaths {
     comparisonArtifactPaths?: BenchmarkReportComparisonArtifactPaths;
 }
 
+interface PyrightJsonDiagnostic {
+    file?: string;
+    message?: string;
+    range?: {
+        start: {
+            line: number;
+            character: number;
+        };
+    };
+    severity: string;
+}
+
 interface PyrightJsonResults {
-    generalDiagnostics: { file?: string; message?: string; severity: string }[];
+    generalDiagnostics: PyrightJsonDiagnostic[];
     summary: {
         errorCount: number;
         warningCount: number;
@@ -176,6 +194,7 @@ const ecosystemBenchmarkComparisonMetrics: readonly BenchmarkMetricDefinition<Ec
 ];
 
 const maxSyncProcessBufferBytes = 16 * 1024 * 1024;
+const maxDiagnosticDiffLinesPerProject = 200;
 
 export function parseEcosystemBenchmarkArgs(args: string[]): EcosystemBenchmarkCommand {
     const parsedArgs = commandLineArgs(optionDefinitions, { argv: args }) as CommandLineOptions;
@@ -686,43 +705,61 @@ function compareEcosystemDiagnosticResults(
 ): EcosystemBenchmarkDiagnosticDiff[] {
     const candidateByProject = new Map(candidateResults.map((result) => [result.projectName, result]));
 
-    return baselineResults.flatMap((baselineResult) => {
-        const candidateResult = candidateByProject.get(baselineResult.projectName);
-        if (!candidateResult) {
-            return [];
-        }
+    return baselineResults
+        .flatMap((baselineResult) => {
+            const candidateResult = candidateByProject.get(baselineResult.projectName);
+            if (!candidateResult) {
+                return [];
+            }
 
-        const baselineDiagnostics = getDiagnosticSignatureSet(baselineResult);
-        const candidateDiagnostics = getDiagnosticSignatureSet(candidateResult);
-        const added = [...candidateDiagnostics].filter((entry) => !baselineDiagnostics.has(entry)).sort();
-        const removed = [...baselineDiagnostics].filter((entry) => !candidateDiagnostics.has(entry)).sort();
+            const baselineDiagnostics = getDiagnosticSignatureSet(baselineResult);
+            const candidateDiagnostics = getDiagnosticSignatureSet(candidateResult);
+            const added = [...candidateDiagnostics].filter((entry) => !baselineDiagnostics.has(entry)).sort();
+            const removed = [...baselineDiagnostics].filter((entry) => !candidateDiagnostics.has(entry)).sort();
 
-        return added.length > 0 || removed.length > 0
-            ? [{ projectName: baselineResult.projectName, added, removed }]
-            : [];
-    });
+            return added.length > 0 || removed.length > 0
+                ? [{ projectName: baselineResult.projectName, added, removed }]
+                : [];
+        })
+        .sort((left, right) => left.projectName.localeCompare(right.projectName));
 }
 
 function getDiagnosticSignatureSet(result: EcosystemBenchmarkResult): Set<string> {
     return new Set((result.diagnostics ?? []).map(formatDiagnosticSignature));
 }
 
-function normalizePyrightDiagnostic(
-    diagnostic: PyrightJsonResults['generalDiagnostics'][number]
-): EcosystemBenchmarkDiagnostic {
+function normalizePyrightDiagnostic(diagnostic: PyrightJsonDiagnostic): EcosystemBenchmarkDiagnostic {
     return {
         file: diagnostic.file,
+        range: diagnostic.range,
         severity: diagnostic.severity,
         message: diagnostic.message ?? '',
     };
 }
 
 function formatDiagnosticSignature(diagnostic: EcosystemBenchmarkDiagnostic): string {
-    return [diagnostic.severity, diagnostic.file ?? '<unknown>', diagnostic.message].join(' | ');
+    return [diagnostic.severity, formatDiagnosticLocation(diagnostic), diagnostic.message].join(' | ');
+}
+
+function formatDiagnosticLocation(diagnostic: EcosystemBenchmarkDiagnostic): string {
+    const location = diagnostic.file ?? '<unknown>';
+    const start = diagnostic.range?.start;
+    if (!start) {
+        return location;
+    }
+
+    return `${location}:${start.line + 1}:${start.character + 1}`;
 }
 
 function renderEcosystemBenchmarkComparisonMarkdown(comparison: EcosystemBenchmarkReportComparison): string {
-    const lines = [renderBenchmarkComparisonMarkdown(comparison).trimEnd(), '', '## Diagnostic Diffs', ''];
+    const lines = [
+        renderBenchmarkComparisonMarkdown(comparison).trimEnd(),
+        '',
+        '## Type Check Result Diff',
+        '',
+        'Diff from the custom ecosystem runner, showing the effect of this PR on Pyright diagnostics:',
+        '',
+    ];
 
     if (comparison.diagnosticDiffs.length === 0) {
         lines.push('None.');
@@ -731,26 +768,33 @@ function renderEcosystemBenchmarkComparisonMarkdown(comparison: EcosystemBenchma
 
     for (const diff of comparison.diagnosticDiffs) {
         lines.push(`### ${diff.projectName}`, '');
-        appendDiagnosticDiffList(lines, 'Added diagnostics', diff.added);
-        appendDiagnosticDiffList(lines, 'Removed diagnostics', diff.removed);
+        appendDiagnosticDiffBlock(lines, diff);
     }
 
     return `${lines.join('\n')}\n`;
 }
 
-function appendDiagnosticDiffList(lines: string[], heading: string, diagnostics: readonly string[]): void {
-    lines.push(`#### ${heading}`, '');
+function appendDiagnosticDiffBlock(lines: string[], diff: EcosystemBenchmarkDiagnosticDiff): void {
+    const diffLines = [
+        ...diff.removed.map((diagnostic) => `- ${diagnostic}`),
+        ...diff.added.map((diagnostic) => `+ ${diagnostic}`),
+    ];
 
-    if (diagnostics.length === 0) {
-        lines.push('None.', '');
-        return;
+    lines.push('```diff');
+
+    for (const diagnosticLine of diffLines.slice(0, maxDiagnosticDiffLinesPerProject)) {
+        lines.push(diagnosticLine);
     }
 
-    for (const diagnostic of diagnostics) {
-        lines.push(`- ${diagnostic}`);
+    if (diffLines.length > maxDiagnosticDiffLinesPerProject) {
+        lines.push(
+            `... ${
+                diffLines.length - maxDiagnosticDiffLinesPerProject
+            } additional diagnostic change(s) omitted; see comparison.json for the full diff.`
+        );
     }
 
-    lines.push('');
+    lines.push('```', '');
 }
 
 function createPyrightExecutionError(
