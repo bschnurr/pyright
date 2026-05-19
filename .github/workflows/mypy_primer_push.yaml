@@ -79,7 +79,7 @@ jobs:
             --new $GITHUB_SHA \
             --num-shards 8 --shard-index ${{ matrix.shard-index }} \
             --base-dir "$MYPY_PRIMER_BASE_DIR" \
-            --project "$MYPY_PRIMER_PROJECT_SELECTOR" \
+            --project-selector "$MYPY_PRIMER_PROJECT_SELECTOR" \
             --debug \
             --output concise \
             | tee diff_${{ matrix.shard-index }}.txt
