@@ -20,6 +20,7 @@ on:
       - '.github/workflows/mypy_primer_*.yaml'
       - 'packages/pyright/**'
       - 'packages/pyright-internal/src/**'
+      - '!packages/pyright-internal/src/tests/benchmarks/**'
       - 'packages/pyright-internal/typeshed-fallback/**'
 
 concurrency:
