@@ -738,7 +738,7 @@ function normalizePyrightDiagnostic(diagnostic: PyrightJsonDiagnostic): Ecosyste
 }
 
 function formatDiagnosticSignature(diagnostic: EcosystemBenchmarkDiagnostic): string {
-    return [diagnostic.severity, formatDiagnosticLocation(diagnostic), diagnostic.message].join(' | ');
+    return `${formatDiagnosticLocation(diagnostic)} - ${diagnostic.severity}: ${diagnostic.message}`;
 }
 
 function formatDiagnosticLocation(diagnostic: EcosystemBenchmarkDiagnostic): string {
@@ -766,21 +766,23 @@ function renderEcosystemBenchmarkComparisonMarkdown(comparison: EcosystemBenchma
         return `${lines.join('\n')}\n`;
     }
 
+    lines.push('```diff');
+
     for (const diff of comparison.diagnosticDiffs) {
-        lines.push(`### ${diff.projectName}`, '');
-        appendDiagnosticDiffBlock(lines, diff);
+        appendDiagnosticDiffProject(lines, diff);
     }
 
+    lines.push('```');
     return `${lines.join('\n')}\n`;
 }
 
-function appendDiagnosticDiffBlock(lines: string[], diff: EcosystemBenchmarkDiagnosticDiff): void {
+function appendDiagnosticDiffProject(lines: string[], diff: EcosystemBenchmarkDiagnosticDiff): void {
     const diffLines = [
-        ...diff.removed.map((diagnostic) => `- ${diagnostic}`),
-        ...diff.added.map((diagnostic) => `+ ${diagnostic}`),
+        ...diff.removed.flatMap((diagnostic) => formatSignedDiagnosticLines('-', diagnostic)),
+        ...diff.added.flatMap((diagnostic) => formatSignedDiagnosticLines('+', diagnostic)),
     ];
 
-    lines.push('```diff');
+    lines.push(diff.projectName);
 
     for (const diagnosticLine of diffLines.slice(0, maxDiagnosticDiffLinesPerProject)) {
         lines.push(diagnosticLine);
@@ -794,7 +796,11 @@ function appendDiagnosticDiffBlock(lines: string[], diff: EcosystemBenchmarkDiag
         );
     }
 
-    lines.push('```', '');
+    lines.push('');
+}
+
+function formatSignedDiagnosticLines(sign: '+' | '-', diagnostic: string): string[] {
+    return diagnostic.split(/\r?\n/).map((line) => `${sign}   ${line}`);
 }
 
 function createPyrightExecutionError(

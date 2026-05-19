@@ -1035,7 +1035,7 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
             expect(comparison.diagnosticDiffs).toEqual([
                 {
                     projectName: 'black',
-                    added: ['warning | src/b.py:10:2 | new diagnostic'],
+                    added: ['src/b.py:10:2 - warning: new diagnostic'],
                     removed: [],
                 },
             ]);
@@ -1043,7 +1043,7 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
             expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain('## Type Check Result Diff');
             expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain('```diff');
             expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain(
-                '+ warning | src/b.py:10:2 | new diagnostic'
+                '+   src/b.py:10:2 - warning: new diagnostic'
             );
         } finally {
             fs.rmSync(reportsDir, { force: true, recursive: true });
@@ -1081,8 +1081,8 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
         expect(comparison.diagnosticDiffs).toEqual([
             {
                 projectName: 'black',
-                added: ['information | src/b.py:3:4 | new diagnostic'],
-                removed: ['error | src/a.py | old diagnostic'],
+                added: ['src/b.py:3:4 - information: new diagnostic'],
+                removed: ['src/a.py - error: old diagnostic'],
             },
         ]);
     });
@@ -1117,8 +1117,8 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
         );
 
         expect(comparison.diagnosticDiffs[0].added).toEqual([
-            'error | src/repeated.py:1:1 | same diagnostic',
-            'error | src/repeated.py:2:1 | same diagnostic',
+            'src/repeated.py:1:1 - error: same diagnostic',
+            'src/repeated.py:2:1 - error: same diagnostic',
         ]);
     });
 
