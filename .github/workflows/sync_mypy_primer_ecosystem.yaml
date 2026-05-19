@@ -25,6 +25,12 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Snapshot current ecosystem metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp packages/pyright-internal/src/tests/benchmarks/ecosystem-projects.generated.json "$RUNNER_TEMP/ecosystem-projects.generated.before.json"
+
       - name: Fetch upstream mypy_primer projects
         id: upstream
         shell: bash
@@ -44,6 +50,7 @@ jobs:
 
           {
             echo "sha=$upstream_ref"
+            echo "url=$url"
             echo "project_count=$project_count"
           } >> "$GITHUB_OUTPUT"
         env:
@@ -54,14 +61,55 @@ jobs:
           npm ci
           cd packages/pyright-internal
           npm run build
-          npm run bench:ecosystem:sync
+          npm run bench:ecosystem:sync -- \
+            --metadata-output ./src/tests/benchmarks/mypy_primer.snapshot.metadata.json \
+            --upstream-repo "$UPSTREAM_REPO" \
+            --upstream-commit "$UPSTREAM_REF" \
+            --upstream-url "$UPSTREAM_URL"
+        env:
+          UPSTREAM_REPO: hauntsaninja/mypy_primer
+          UPSTREAM_REF: ${{ steps.upstream.outputs.sha }}
+          UPSTREAM_URL: ${{ steps.upstream.outputs.url }}
+
+      - name: Detect smoke baseline impact
+        id: baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - "$RUNNER_TEMP/ecosystem-projects.generated.before.json" \
+            "packages/pyright-internal/src/tests/benchmarks/ecosystem-projects.generated.json" \
+            "packages/pyright-internal/src/tests/benchmarks/ecosystem-projects.overrides.json" <<'NODE'
+          const fs = require('fs');
+          const [beforePath, afterPath, overridesPath] = process.argv.slice(2);
+          const before = JSON.parse(fs.readFileSync(beforePath, 'utf8'));
+          const after = JSON.parse(fs.readFileSync(afterPath, 'utf8'));
+          const overrides = JSON.parse(fs.readFileSync(overridesPath, 'utf8'));
+          const beforeByName = new Map(before.map((project) => [project.name, project]));
+          const afterByName = new Map(after.map((project) => [project.name, project]));
+          const smokeProjectNames = Object.entries(overrides)
+            .filter(([, override]) => override.includeInSmoke)
+            .map(([name]) => name)
+            .sort();
+          const changedSmokeProjects = smokeProjectNames.filter((name) => {
+            return JSON.stringify(beforeByName.get(name) ?? null) !== JSON.stringify(afterByName.get(name) ?? null);
+          });
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            [
+              `refresh_required=${changedSmokeProjects.length > 0}`,
+              'changed_projects<<EOF',
+              changedSmokeProjects.join(', '),
+              'EOF',
+            ].join('\n') + '\n'
+          );
+          NODE
 
       - name: Check for changes
         id: changes
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- packages/pyright-internal/src/tests/benchmarks/mypy_primer.smoke_projects.snapshot.py packages/pyright-internal/src/tests/benchmarks/ecosystem-projects.generated.json; then
+          if git diff --quiet -- packages/pyright-internal/src/tests/benchmarks/mypy_primer.smoke_projects.snapshot.py packages/pyright-internal/src/tests/benchmarks/ecosystem-projects.generated.json packages/pyright-internal/src/tests/benchmarks/mypy_primer.snapshot.metadata.json; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -76,7 +124,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -C "$branch"
-          git add packages/pyright-internal/src/tests/benchmarks/mypy_primer.smoke_projects.snapshot.py packages/pyright-internal/src/tests/benchmarks/ecosystem-projects.generated.json
+          git add packages/pyright-internal/src/tests/benchmarks/mypy_primer.smoke_projects.snapshot.py packages/pyright-internal/src/tests/benchmarks/ecosystem-projects.generated.json packages/pyright-internal/src/tests/benchmarks/mypy_primer.snapshot.metadata.json
           git commit -m "Sync ecosystem mypy_primer metadata"
           git push --force-with-lease origin "$branch"
 
@@ -86,6 +134,8 @@ jobs:
             "" \
             "Upstream: https://github.com/hauntsaninja/mypy_primer/commit/${{ steps.upstream.outputs.sha }}" \
             "Project definitions fetched: ${{ steps.upstream.outputs.project_count }}" \
+            "Smoke baseline refresh required: ${{ steps.baseline.outputs.refresh_required }}" \
+            "Changed smoke projects: ${{ steps.baseline.outputs.changed_projects || 'none' }}" \
             "" \
             "After merge, run the ecosystem benchmark \`refresh-baseline\` workflow on main if the smoke project set changed." \
             "" \

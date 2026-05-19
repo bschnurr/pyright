@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "upstreamRepository": "hauntsaninja/mypy_primer",
+  "upstreamCommit": "unknown",
+  "upstreamProjectsUrl": "mypy_primer.smoke_projects.snapshot.py",
+  "syncedAt": "unknown",
+  "projectCount": 10,
+  "sourceInputFile": "mypy_primer.smoke_projects.snapshot.py"
+}

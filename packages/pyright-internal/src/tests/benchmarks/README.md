@@ -142,5 +142,8 @@ comments.
 
 The checked-in mypy_primer snapshot can be refreshed with the `Sync mypy_primer ecosystem metadata` workflow. It runs on
 a weekly schedule and can also be dispatched manually. When upstream project metadata changes, the workflow updates
-`mypy_primer.smoke_projects.snapshot.py` and `ecosystem-projects.generated.json` on an automation branch and opens or
-updates a PR. If the smoke project set changes, refresh the main ecosystem baseline after merging the sync PR.
+`mypy_primer.smoke_projects.snapshot.py`, `ecosystem-projects.generated.json`, and
+`mypy_primer.snapshot.metadata.json` on an automation branch and opens or updates a PR. The sync PR states whether any
+smoke project metadata changed, which indicates whether the main ecosystem baseline should be refreshed after merging.
+Ecosystem benchmark PR comments include the checked-in upstream mypy_primer commit from the metadata file so reviewers
+can see which project snapshot produced the comparison.

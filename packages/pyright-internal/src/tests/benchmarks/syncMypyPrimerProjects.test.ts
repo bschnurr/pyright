@@ -15,6 +15,7 @@ import {
     parseMypyPrimerProjectSource,
     syncMypyPrimerProjects,
     writeGeneratedEcosystemProjects,
+    writeMypyPrimerSnapshotMetadata,
 } from './syncMypyPrimerProjects';
 
 const RUN_BENCHMARKS_ENV = 'PYRIGHT_RUN_BENCHMARKS';
@@ -149,10 +150,40 @@ benchmarkSuite('Sync Mypy Primer Projects', () => {
         }
     });
 
+    test('writes mypy_primer snapshot metadata', () => {
+        const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pyright-mypy-primer-metadata-'));
+        const outputPath = path.join(outputDir, 'mypy_primer.snapshot.metadata.json');
+
+        try {
+            writeMypyPrimerSnapshotMetadata(outputPath, {
+                schemaVersion: 1,
+                upstreamRepository: 'hauntsaninja/mypy_primer',
+                upstreamCommit: 'abc123',
+                upstreamProjectsUrl: 'https://example.com/projects.py',
+                syncedAt: '2026-05-19T00:00:00.000Z',
+                projectCount: 2,
+                sourceInputFile: 'mypy_primer.smoke_projects.snapshot.py',
+            });
+
+            expect(JSON.parse(fs.readFileSync(outputPath, 'utf-8'))).toEqual({
+                schemaVersion: 1,
+                upstreamRepository: 'hauntsaninja/mypy_primer',
+                upstreamCommit: 'abc123',
+                upstreamProjectsUrl: 'https://example.com/projects.py',
+                syncedAt: '2026-05-19T00:00:00.000Z',
+                projectCount: 2,
+                sourceInputFile: 'mypy_primer.smoke_projects.snapshot.py',
+            });
+        } finally {
+            fs.rmSync(outputDir, { force: true, recursive: true });
+        }
+    });
+
     test('syncs project definitions from an input file', () => {
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pyright-mypy-primer-cli-'));
         const inputPath = path.join(tempDir, 'projects.py');
         const outputPath = path.join(tempDir, 'ecosystem-projects.generated.json');
+        const metadataOutputPath = path.join(tempDir, 'mypy_primer.snapshot.metadata.json');
 
         try {
             fs.writeFileSync(
@@ -167,11 +198,30 @@ benchmarkSuite('Sync Mypy Primer Projects', () => {
                 'utf-8'
             );
 
-            const writtenPath = syncMypyPrimerProjects(['--input', inputPath, '--output', outputPath]);
+            const writtenPath = syncMypyPrimerProjects([
+                '--input',
+                inputPath,
+                '--output',
+                outputPath,
+                '--metadata-output',
+                metadataOutputPath,
+                '--upstream-repo',
+                'hauntsaninja/mypy_primer',
+                '--upstream-commit',
+                'abc123',
+                '--upstream-url',
+                'https://example.com/projects.py',
+            ]);
 
             expect(writtenPath).toBe(outputPath);
             expect(JSON.parse(fs.readFileSync(outputPath, 'utf-8'))[0].name).toBe('black');
             expect(path.isAbsolute(JSON.parse(fs.readFileSync(outputPath, 'utf-8'))[0].source.inputFile)).toBe(false);
+            expect(JSON.parse(fs.readFileSync(metadataOutputPath, 'utf-8'))).toMatchObject({
+                upstreamRepository: 'hauntsaninja/mypy_primer',
+                upstreamCommit: 'abc123',
+                upstreamProjectsUrl: 'https://example.com/projects.py',
+                projectCount: 1,
+            });
         } finally {
             fs.rmSync(tempDir, { force: true, recursive: true });
         }

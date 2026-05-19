@@ -195,6 +195,7 @@ jobs:
           path: |
             packages/pyright-internal/src/tests/benchmarks/.generated/benchmark-results/
             packages/pyright-internal/src/tests/benchmarks/baselines/ecosystem-smoke-main.json
+            packages/pyright-internal/src/tests/benchmarks/mypy_primer.snapshot.metadata.json
           if-no-files-found: warn
 
       - name: Post ecosystem benchmark PR comment
@@ -217,6 +218,7 @@ jobs:
 
             const marker = '<!-- pyright-ecosystem-benchmark-comment -->';
             const comparisonPath = process.env.COMPARISON_MARKDOWN;
+            const metadataPath = 'packages/pyright-internal/src/tests/benchmarks/mypy_primer.snapshot.metadata.json';
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const maxCharacters = 60000;
             let body;
@@ -227,9 +229,17 @@ jobs:
                 comparison = `${comparison.slice(0, maxCharacters)}\n\n... benchmark report truncated; see workflow artifacts for the full comparison.`;
               }
 
-              body = [marker, '## Pyright ecosystem benchmark stats', '', comparison, '', `[Workflow run](${runUrl})`].join(
-                '\n'
-              );
+              const metadataSummary = readMypyPrimerMetadataSummary(metadataPath);
+              body = [
+                marker,
+                '## Pyright ecosystem benchmark stats',
+                '',
+                metadataSummary,
+                '',
+                comparison,
+                '',
+                `[Workflow run](${runUrl})`,
+              ].join('\n');
             } else if (process.env.BASELINE_READY !== 'true') {
               const reason = process.env.BASELINE_REASON || 'The checked-in ecosystem smoke baseline is not ready.';
               body = [
@@ -270,4 +280,20 @@ jobs:
                 issue_number: prNumber,
                 body,
               });
+            }
+
+            function readMypyPrimerMetadataSummary(metadataPath) {
+              if (!fs.existsSync(metadataPath)) {
+                return '_mypy_primer metadata snapshot: unavailable_';
+              }
+
+              const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+              const commit = metadata.upstreamCommit || 'unknown';
+              const commitText =
+                commit === 'unknown'
+                  ? '`unknown`'
+                  : `[\`${commit.slice(0, 12)}\`](https://github.com/${metadata.upstreamRepository}/commit/${commit})`;
+              return `_mypy_primer metadata snapshot: ${commitText}; projects: ${
+                metadata.projectCount ?? 'unknown'
+              }; synced: ${metadata.syncedAt || 'unknown'}_`;
             }
