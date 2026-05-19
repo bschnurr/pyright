@@ -725,7 +725,9 @@ function compareEcosystemDiagnosticResults(
 }
 
 function getDiagnosticSignatureSet(result: EcosystemBenchmarkResult): Set<string> {
-    return new Set((result.diagnostics ?? []).map(formatDiagnosticSignature));
+    return new Set(
+        (result.diagnostics ?? []).map((diagnostic) => formatDiagnosticSignature(result.projectName, diagnostic))
+    );
 }
 
 function normalizePyrightDiagnostic(diagnostic: PyrightJsonDiagnostic): EcosystemBenchmarkDiagnostic {
@@ -737,18 +739,33 @@ function normalizePyrightDiagnostic(diagnostic: PyrightJsonDiagnostic): Ecosyste
     };
 }
 
-function formatDiagnosticSignature(diagnostic: EcosystemBenchmarkDiagnostic): string {
-    return `${formatDiagnosticLocation(diagnostic)} - ${diagnostic.severity}: ${diagnostic.message}`;
+function formatDiagnosticSignature(projectName: string, diagnostic: EcosystemBenchmarkDiagnostic): string {
+    return `${formatDiagnosticLocation(projectName, diagnostic)} - ${diagnostic.severity}: ${diagnostic.message}`;
 }
 
-function formatDiagnosticLocation(diagnostic: EcosystemBenchmarkDiagnostic): string {
-    const location = diagnostic.file ?? '<unknown>';
+function formatDiagnosticLocation(projectName: string, diagnostic: EcosystemBenchmarkDiagnostic): string {
+    const location = formatProjectRelativeDiagnosticPath(projectName, diagnostic.file);
     const start = diagnostic.range?.start;
     if (!start) {
         return location;
     }
 
     return `${location}:${start.line + 1}:${start.character + 1}`;
+}
+
+function formatProjectRelativeDiagnosticPath(projectName: string, filePath: string | undefined): string {
+    if (!filePath) {
+        return '<unknown>';
+    }
+
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const projectSegment = `/${projectName}/`;
+    const projectSegmentIndex = normalizedPath.lastIndexOf(projectSegment);
+    if (projectSegmentIndex < 0) {
+        return normalizedPath;
+    }
+
+    return `.../${normalizedPath.slice(projectSegmentIndex + 1)}`;
 }
 
 function renderEcosystemBenchmarkComparisonMarkdown(comparison: EcosystemBenchmarkReportComparison): string {

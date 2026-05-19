@@ -1122,6 +1122,31 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
         ]);
     });
 
+    test('compacts absolute diagnostic paths under the project checkout', () => {
+        const comparison = compareEcosystemBenchmarkReportData(
+            createEcosystemBenchmarkReport('2026-05-07T00:00:00.000Z', [
+                {
+                    projectName: 'attrs',
+                    diagnostics: [],
+                },
+            ]),
+            createEcosystemBenchmarkReport('2026-05-07T01:00:00.000Z', [
+                {
+                    projectName: 'attrs',
+                    diagnostics: [
+                        {
+                            file: '/home/runner/work/pyright/pyright/.ecosystem-projects/attrs/src/attr/__init__.py',
+                            severity: 'error',
+                            message: 'new diagnostic',
+                        },
+                    ],
+                },
+            ])
+        );
+
+        expect(comparison.diagnosticDiffs[0].added).toEqual(['.../attrs/src/attr/__init__.py - error: new diagnostic']);
+    });
+
     test('runs comparison mode end to end', () => {
         const reportsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pyright-ecosystem-report-main-'));
         const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pyright-ecosystem-compare-main-'));
