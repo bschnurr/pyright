@@ -929,7 +929,7 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
                 baselinePath,
                 JSON.stringify(
                     createEcosystemBenchmarkReport('2026-05-07T00:00:00.000Z', [
-                        { projectName: 'black', totalTimeMs: 100, maxMemoryMB: 250 },
+                        { projectName: 'black', totalTimeMs: 1000, maxMemoryMB: 250 },
                     ]),
                     undefined,
                     2
@@ -940,7 +940,7 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
                 candidatePath,
                 JSON.stringify(
                     createEcosystemBenchmarkReport('2026-05-07T01:00:00.000Z', [
-                        { projectName: 'black', totalTimeMs: 120, maxMemoryMB: 260 },
+                        { projectName: 'black', totalTimeMs: 1600, maxMemoryMB: 260 },
                     ]),
                     undefined,
                     2
@@ -952,8 +952,55 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
 
             expect(JSON.parse(fs.readFileSync(artifactPaths.jsonPath, 'utf-8')).compared[0].key).toBe('black');
             expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain('Largest Regressions');
+            expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain(
+                '## Actionable Regression Thresholds'
+            );
+            expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain(
+                '| failure | black | totalTimeMs | 1000.00 | 1600.00 | 600.00 | 60.00% |'
+            );
             expect(JSON.parse(fs.readFileSync(artifactPaths.oldJsonPath, 'utf-8')).results[0].projectName).toBe(
                 'black'
+            );
+        } finally {
+            fs.rmSync(reportsDir, { force: true, recursive: true });
+            fs.rmSync(outputDir, { force: true, recursive: true });
+        }
+    });
+
+    test('ignores small ecosystem timing regressions below thresholds', () => {
+        const reportsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pyright-ecosystem-small-regression-'));
+        const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pyright-ecosystem-small-regression-compare-'));
+
+        try {
+            const baselinePath = path.join(reportsDir, 'old.json');
+            const candidatePath = path.join(reportsDir, 'new.json');
+
+            fs.writeFileSync(
+                baselinePath,
+                JSON.stringify(
+                    createEcosystemBenchmarkReport('2026-05-07T00:00:00.000Z', [
+                        { projectName: 'black', totalTimeMs: 1000 },
+                    ]),
+                    undefined,
+                    2
+                ),
+                'utf-8'
+            );
+            fs.writeFileSync(
+                candidatePath,
+                JSON.stringify(
+                    createEcosystemBenchmarkReport('2026-05-07T01:00:00.000Z', [
+                        { projectName: 'black', totalTimeMs: 1040 },
+                    ]),
+                    undefined,
+                    2
+                ),
+                'utf-8'
+            );
+
+            const artifactPaths = compareEcosystemBenchmarkReports(baselinePath, candidatePath, outputDir);
+            expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain(
+                'No warning or failure thresholds exceeded.'
             );
         } finally {
             fs.rmSync(reportsDir, { force: true, recursive: true });

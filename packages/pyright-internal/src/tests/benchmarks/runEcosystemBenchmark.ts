@@ -7,8 +7,11 @@ import { ensureTomlModuleLoaded, parse } from '../../common/tomlUtils';
 
 import {
     BenchmarkMetricDefinition,
+    BenchmarkRegressionThresholdResult,
+    BenchmarkRegressionThresholds,
     BenchmarkReportComparison,
     BenchmarkReportComparisonArtifactPaths,
+    classifyBenchmarkRegression,
     compareBenchmarkReports,
     loadBenchmarkReport,
     renderBenchmarkComparisonMarkdown,
@@ -192,6 +195,15 @@ const ecosystemBenchmarkComparisonMetrics: readonly BenchmarkMetricDefinition<Ec
     { name: 'warningCount', getValue: (result) => result.warningCount },
     { name: 'informationCount', getValue: (result) => result.informationCount },
 ];
+
+const ecosystemBenchmarkRegressionThresholds = new Map<string, BenchmarkRegressionThresholds>([
+    ['totalTimeMs', { warnRegressionPct: 10, failRegressionPct: 25, minAbsoluteRegression: 500 }],
+    ['maxMemoryMB', { warnRegressionPct: 15, failRegressionPct: 35, minAbsoluteRegression: 100 }],
+    ['diagnosticCount', { warnRegressionAbsolute: 1, failRegressionAbsolute: 5, minAbsoluteRegression: 1 }],
+    ['errorCount', { warnRegressionAbsolute: 1, failRegressionAbsolute: 3, minAbsoluteRegression: 1 }],
+    ['warningCount', { warnRegressionAbsolute: 1, failRegressionAbsolute: 5, minAbsoluteRegression: 1 }],
+    ['informationCount', { warnRegressionAbsolute: 1, failRegressionAbsolute: 5, minAbsoluteRegression: 1 }],
+]);
 
 const maxSyncProcessBufferBytes = 16 * 1024 * 1024;
 const maxDiagnosticDiffLinesPerProject = 200;
@@ -772,6 +784,8 @@ function renderEcosystemBenchmarkComparisonMarkdown(comparison: EcosystemBenchma
     const lines = [
         renderBenchmarkComparisonMarkdown(comparison).trimEnd(),
         '',
+        renderEcosystemBenchmarkThresholdMarkdown(comparison).trimEnd(),
+        '',
         '## Type Check Result Diff',
         '',
         'Diff from the custom ecosystem runner, showing the effect of this PR on Pyright diagnostics:',
@@ -791,6 +805,86 @@ function renderEcosystemBenchmarkComparisonMarkdown(comparison: EcosystemBenchma
 
     lines.push('```');
     return `${lines.join('\n')}\n`;
+}
+
+function renderEcosystemBenchmarkThresholdMarkdown(comparison: EcosystemBenchmarkReportComparison): string {
+    const thresholdResults = getEcosystemBenchmarkThresholdResults(comparison);
+    const lines = ['## Actionable Regression Thresholds', ''];
+
+    if (thresholdResults.length === 0) {
+        lines.push('No warning or failure thresholds exceeded.');
+        return `${lines.join('\n')}\n`;
+    }
+
+    lines.push(
+        '| Severity | Case | Metric | Baseline | Candidate | Delta | Delta % |',
+        '|---|---|---:|---:|---:|---:|---:|'
+    );
+
+    for (const result of thresholdResults) {
+        lines.push(
+            `| ${result.severity} | ${result.key} | ${result.metric} | ${formatThresholdMetric(
+                result.baselineValue
+            )} | ${formatThresholdMetric(result.candidateValue)} | ${formatThresholdMetric(
+                result.absoluteDelta
+            )} | ${formatThresholdPercent(result.percentDelta)} |`
+        );
+    }
+
+    return `${lines.join('\n')}\n`;
+}
+
+function getEcosystemBenchmarkThresholdResults(
+    comparison: EcosystemBenchmarkReportComparison
+): BenchmarkRegressionThresholdResult[] {
+    return comparison.compared
+        .flatMap((result) =>
+            result.metrics.flatMap((metric) => {
+                const thresholds = ecosystemBenchmarkRegressionThresholds.get(metric.metric);
+                if (!thresholds) {
+                    return [];
+                }
+
+                const severity = classifyBenchmarkRegression(metric, thresholds);
+                return severity === 'none' ? [] : [{ key: result.key, ...metric, severity }];
+            })
+        )
+        .sort(compareEcosystemThresholdResults);
+}
+
+function compareEcosystemThresholdResults(
+    left: BenchmarkRegressionThresholdResult,
+    right: BenchmarkRegressionThresholdResult
+): number {
+    const severityDelta = getThresholdSeverityRank(right.severity) - getThresholdSeverityRank(left.severity);
+    if (severityDelta !== 0) {
+        return severityDelta;
+    }
+
+    return getThresholdMagnitude(right) - getThresholdMagnitude(left);
+}
+
+function getThresholdSeverityRank(severity: BenchmarkRegressionThresholdResult['severity']): number {
+    switch (severity) {
+        case 'failure':
+            return 2;
+        case 'warning':
+            return 1;
+        case 'none':
+            return 0;
+    }
+}
+
+function getThresholdMagnitude(result: BenchmarkRegressionThresholdResult): number {
+    return Math.abs(result.percentDelta ?? result.absoluteDelta);
+}
+
+function formatThresholdMetric(value: number): string {
+    return value.toFixed(2);
+}
+
+function formatThresholdPercent(value: number | undefined): string {
+    return value === undefined ? 'n/a' : `${value.toFixed(2)}%`;
 }
 
 function appendDiagnosticDiffProject(lines: string[], diff: EcosystemBenchmarkDiagnosticDiff): void {
