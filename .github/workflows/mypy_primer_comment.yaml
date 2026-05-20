@@ -59,53 +59,90 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const MAX_CHARACTERS = 30000
-            const MAX_CHARACTERS_PER_PROJECT = MAX_CHARACTERS / 3
+            const MAX_DIFF_CHARACTERS_PER_COMMENT = 50000
 
             const fs = require('fs')
-            let data = fs.readFileSync('fulldiff.txt', { encoding: 'utf8' })
+            const data = fs.readFileSync('fulldiff.txt', { encoding: 'utf8' })
 
-            function truncateIfNeeded(original, maxLength) {
+            function splitText(original, maxLength) {
               if (original.length <= maxLength) {
-                return original
+                return [original]
               }
-              let truncated = original.substring(0, maxLength)
-              // further, remove last line that might be truncated
-              truncated = truncated.substring(0, truncated.lastIndexOf('\n'))
-              let lines_truncated = original.split('\n').length - truncated.split('\n').length
-              return `${truncated}\n\n... (truncated ${lines_truncated} lines) ...`
-            }
 
-            const projects = data.split('\n\n')
-            // don't let one project dominate
-            data = projects.map(project => truncateIfNeeded(project, MAX_CHARACTERS_PER_PROJECT)).join('\n\n')
-            // posting comment fails if too long, so truncate
-            data = truncateIfNeeded(data, MAX_CHARACTERS)
+              const chunks = []
+              let remaining = original
+              while (remaining.length > maxLength) {
+                let splitAt = remaining.lastIndexOf('\n', maxLength)
+                if (splitAt < 0) {
+                  splitAt = maxLength - 1
+                }
+
+                chunks.push(remaining.slice(0, splitAt + 1))
+                remaining = remaining.slice(splitAt + 1)
+              }
+
+              if (remaining.length > 0) {
+                chunks.push(remaining)
+              }
+
+              return chunks
+            }
 
             console.log("Diff from mypy_primer:")
             console.log(data)
 
             const marker = '<!-- pyright-mypy-primer-benchmark-comment -->'
+            const continuationMarker = '<!-- pyright-mypy-primer-benchmark-comment-continuation -->'
+            const partMarkerPrefix = '<!-- pyright-mypy-primer-benchmark-comment-part:'
             const heading = '## Pyright mypy_primer benchmark results'
-            let body
-            if (data.trim()) {
-              body = [
-                marker,
-                heading,
+
+            function renderFencedDiff(diff) {
+              return `\`\`\`\`diff\n${diff}${diff.endsWith('\n') ? '' : '\n'}\`\`\`\``
+            }
+
+            function renderDiffComment(diff, partNumber, totalParts) {
+              const isFirstPart = partNumber === 1
+              const partLabel = totalParts > 1 ? ` (part ${partNumber} of ${totalParts})` : ''
+              const splitNote = totalParts > 1
+                ? ` The diff is split across ${totalParts} comments to stay under GitHub's comment size limit.`
+                : ''
+              const intro = isFirstPart
+                ? `Diff from [mypy_primer](https://github.com/hauntsaninja/mypy_primer), showing the effect of this PR on open source code. Open the section and scroll to inspect the full output.${splitNote}`
+                : `Continued mypy_primer diff for this PR.${splitNote}`
+
+              return [
+                isFirstPart ? marker : continuationMarker,
+                `${partMarkerPrefix}${partNumber} -->`,
+                `${heading}${partLabel}`,
                 '',
-                'Diff from [mypy_primer](https://github.com/hauntsaninja/mypy_primer), showing the effect of this PR on open source code:',
-                '```diff',
-                data,
-                '```',
+                intro,
+                '',
+                '<details>',
+                `<summary>Full diff${partLabel}</summary>`,
+                '',
+                renderFencedDiff(diff),
+                '</details>',
               ].join('\n')
-            } else {
-              body = [
+            }
+
+            function renderNoChangesComment() {
+              return [
                 marker,
+                `${partMarkerPrefix}1 -->`,
                 heading,
                 '',
                 "According to [mypy_primer](https://github.com/hauntsaninja/mypy_primer), this change doesn't affect type check results on a corpus of open source code. ✅",
               ].join('\n')
             }
+
+            let bodies
+            if (data.trim()) {
+              const diffChunks = splitText(data, MAX_DIFF_CHARACTERS_PER_COMMENT)
+              bodies = diffChunks.map((diff, index) => renderDiffComment(diff, index + 1, diffChunks.length))
+            } else {
+              bodies = [renderNoChangesComment()]
+            }
+
             const prNumber = parseInt(fs.readFileSync("pr_number.txt", { encoding: "utf8" }))
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
@@ -113,21 +150,55 @@ jobs:
               issue_number: prNumber,
               per_page: 100,
             })
-            const existingComment = comments.find(comment => comment.body?.includes(marker))
+            const existingPrimaryComment = comments.find(comment => comment.body?.includes(marker))
+            const existingContinuationComments = comments.filter(comment => comment.body?.includes(continuationMarker))
+            const continuationCommentsByPart = new Map()
+            for (const comment of existingContinuationComments) {
+              const partMatch = comment.body?.match(/<!-- pyright-mypy-primer-benchmark-comment-part:(\d+) -->/)
+              if (partMatch) {
+                continuationCommentsByPart.set(parseInt(partMatch[1]), comment)
+              }
+            }
 
-            if (existingComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existingComment.id,
-                body,
-              })
-            } else {
-              await github.rest.issues.createComment({
+            const desiredCommentIds = new Set()
+            async function upsertComment(existingComment, body) {
+              if (existingComment) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existingComment.id,
+                  body,
+                })
+                desiredCommentIds.add(existingComment.id)
+                return
+              }
+
+              const createdComment = await github.rest.issues.createComment({
                 issue_number: prNumber,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body
+                body,
               })
+              desiredCommentIds.add(createdComment.data.id)
             }
+
+            await upsertComment(existingPrimaryComment, bodies[0])
+            for (let index = 1; index < bodies.length; index++) {
+              const partNumber = index + 1
+              await upsertComment(continuationCommentsByPart.get(partNumber), bodies[index])
+            }
+
+            const existingBenchmarkComments = comments.filter(comment =>
+              comment.body?.includes(marker) || comment.body?.includes(continuationMarker)
+            )
+            for (const comment of existingBenchmarkComments) {
+              if (!desiredCommentIds.has(comment.id)) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: comment.id,
+                })
+              }
+            }
+
             return prNumber
