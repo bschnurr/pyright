@@ -140,6 +140,19 @@ placeholder, the workflow posts a status comment explaining that benchmark stats
 committed. The comment is updated in place using a hidden marker so repeated runs do not leave multiple benchmark
 comments.
 
+To run the custom ecosystem benchmark on a PR that did not trigger it automatically, dispatch the workflow against the
+PR branch and pass the PR number for the updatable comment:
+
+```bash
+gh workflow run pyright_ecosystem_benchmark.yaml --repo bschnurr/pyright --ref <pr-branch> \
+    -f mode=compare \
+    -f project_date=2026-01-01 \
+    -f pr_number=<pr-number>
+```
+
+Use `-f project=<regex>` to narrow the smoke projects during investigation, or `-f install_dependencies=true` when a
+project needs its declared dependency setup.
+
 The checked-in mypy_primer snapshot can be refreshed with the `Sync mypy_primer ecosystem metadata` workflow. It runs on
 a weekly schedule and can also be dispatched manually. When upstream project metadata changes, the workflow updates
 `mypy_primer.smoke_projects.snapshot.py`, `ecosystem-projects.generated.json`, and
