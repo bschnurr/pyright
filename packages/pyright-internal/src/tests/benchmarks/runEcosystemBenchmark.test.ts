@@ -398,7 +398,7 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
                     '  throw new Error(`unexpected include paths: ${JSON.stringify(config.include)}`);',
                     '}',
                     'const result = {',
-                    '  generalDiagnostics: [{ severity: "error" }, { severity: "warning" }],',
+                    '  generalDiagnostics: [{ severity: "error", rule: "reportSyntheticError" }, { severity: "warning" }],',
                     '  summary: {',
                     '    filesAnalyzed: 3,',
                     '    errorCount: 1,',
@@ -429,10 +429,17 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
             expect(result.warningCount).toBe(1);
             expect(result.informationCount).toBe(0);
             expect(result.diagnostics).toEqual([
-                { file: undefined, range: undefined, severity: 'error', message: '' },
-                { file: undefined, range: undefined, severity: 'warning', message: '' },
+                {
+                    file: undefined,
+                    range: undefined,
+                    severity: 'error',
+                    message: '',
+                    rule: 'reportSyntheticError',
+                },
+                { file: undefined, range: undefined, severity: 'warning', message: '', rule: undefined },
             ]);
             expect(result.totalTimeMs).toBeGreaterThanOrEqual(0);
+            expect(result.analysisTimeMs).toBe(250);
         } finally {
             fs.rmSync(tempDir, { force: true, recursive: true });
         }
@@ -1061,6 +1068,7 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
                                     range: { start: { line: 9, character: 1 } },
                                     severity: 'warning',
                                     message: 'new diagnostic',
+                                    rule: 'reportSyntheticWarning',
                                 },
                             ],
                         },
@@ -1082,7 +1090,7 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
             expect(comparison.diagnosticDiffs).toEqual([
                 {
                     projectName: 'black',
-                    added: ['src/b.py:10:2 - warning: new diagnostic'],
+                    added: ['src/b.py:10:2 - warning: new diagnostic (reportSyntheticWarning)'],
                     removed: [],
                 },
             ]);
@@ -1090,7 +1098,7 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
             expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain('## Type Check Result Diff');
             expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain('```diff');
             expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain(
-                '+   src/b.py:10:2 - warning: new diagnostic'
+                '+   src/b.py:10:2 - warning: new diagnostic (reportSyntheticWarning)'
             );
         } finally {
             fs.rmSync(reportsDir, { force: true, recursive: true });
