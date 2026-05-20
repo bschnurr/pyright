@@ -6,6 +6,7 @@ import * as path from 'path';
 import { ensureTomlModuleLoaded, parse } from '../../common/tomlUtils';
 
 import {
+    BenchmarkComparisonSummary,
     BenchmarkMetricDefinition,
     BenchmarkRegressionThresholdResult,
     BenchmarkRegressionThresholds,
@@ -15,6 +16,7 @@ import {
     compareBenchmarkReports,
     loadBenchmarkReport,
     renderBenchmarkComparisonMarkdown,
+    summarizeBenchmarkComparison,
     writeBenchmarkReportComparisonArtifacts,
 } from './benchmarkComparison';
 import { BenchmarkReport, createBenchmarkReport } from './benchmarkUtils';
@@ -791,8 +793,12 @@ function formatProjectRelativeDiagnosticPath(projectName: string, filePath: stri
 }
 
 function renderEcosystemBenchmarkComparisonMarkdown(comparison: EcosystemBenchmarkReportComparison): string {
+    const thresholdResults = getEcosystemBenchmarkThresholdResults(comparison);
     const lines = [
-        renderBenchmarkComparisonMarkdown(comparison).trimEnd(),
+        renderBenchmarkComparisonMarkdown(comparison, {
+            summary: summarizeEcosystemBenchmarkComparison(comparison, thresholdResults),
+            status: formatEcosystemBenchmarkSummaryStatus(comparison, thresholdResults),
+        }).trimEnd(),
         '',
         renderEcosystemBenchmarkThresholdMarkdown(comparison).trimEnd(),
         '',
@@ -815,6 +821,45 @@ function renderEcosystemBenchmarkComparisonMarkdown(comparison: EcosystemBenchma
 
     lines.push('```');
     return `${lines.join('\n')}\n`;
+}
+
+function summarizeEcosystemBenchmarkComparison(
+    comparison: EcosystemBenchmarkReportComparison,
+    thresholdResults: BenchmarkRegressionThresholdResult[]
+): BenchmarkComparisonSummary {
+    const rawSummary = summarizeBenchmarkComparison(comparison);
+    const thresholdRegressionCount = thresholdResults.length;
+
+    return {
+        ...rawSummary,
+        regressionCount: thresholdRegressionCount,
+        unchangedCount: rawSummary.metricCount - thresholdRegressionCount - rawSummary.improvementCount,
+        largestRegressions: thresholdResults.slice(0, rawSummary.largestRegressions.length),
+    };
+}
+
+function formatEcosystemBenchmarkSummaryStatus(
+    comparison: EcosystemBenchmarkReportComparison,
+    thresholdResults: BenchmarkRegressionThresholdResult[]
+): string {
+    if (thresholdResults.some((result) => result.severity === 'failure')) {
+        return formatSummaryStatusText('Actionable regressions detected', 'red');
+    }
+
+    if (thresholdResults.some((result) => result.severity === 'warning')) {
+        return formatSummaryStatusText('Regression warnings detected', 'red');
+    }
+
+    const rawSummary = summarizeBenchmarkComparison(comparison);
+    if (rawSummary.improvementCount > 0) {
+        return formatSummaryStatusText('No actionable regressions; improvements detected', 'green');
+    }
+
+    if (rawSummary.regressionCount > 0) {
+        return formatSummaryStatusText('No actionable regressions; raw metric changes below thresholds', 'gray');
+    }
+
+    return formatSummaryStatusText('No benchmark changes', 'gray');
 }
 
 function renderEcosystemBenchmarkThresholdMarkdown(comparison: EcosystemBenchmarkReportComparison): string {
@@ -895,6 +940,14 @@ function formatThresholdMetric(value: number): string {
 
 function formatThresholdPercent(value: number | undefined): string {
     return value === undefined ? 'n/a' : `${value.toFixed(2)}%`;
+}
+
+function formatSummaryStatusText(text: string, color: 'green' | 'gray' | 'red'): string {
+    return `$\\textcolor{${color}}{${escapeSummaryStatusText(text)}}$`;
+}
+
+function escapeSummaryStatusText(text: string): string {
+    return text.replace(/\\/g, '\\backslash{}').replace(/ /g, '\\ ').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
 function appendDiagnosticDiffProject(lines: string[], diff: EcosystemBenchmarkDiagnosticDiff): void {

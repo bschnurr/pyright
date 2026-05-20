@@ -47,6 +47,11 @@ export interface BenchmarkComparisonSummary {
     largestImprovements: BenchmarkMetricComparisonSummaryEntry[];
 }
 
+export interface BenchmarkComparisonMarkdownOptions {
+    summary?: BenchmarkComparisonSummary;
+    status?: string;
+}
+
 export interface BenchmarkRegressionThresholds {
     warnRegressionPct?: number;
     failRegressionPct?: number;
@@ -209,12 +214,15 @@ export function getBenchmarkRegressionThresholdResults(
         .sort(compareThresholdResults);
 }
 
-export function renderBenchmarkComparisonMarkdown(comparison: BenchmarkResultSetComparison): string {
-    const summary = summarizeBenchmarkComparison(comparison);
+export function renderBenchmarkComparisonMarkdown(
+    comparison: BenchmarkResultSetComparison,
+    options?: BenchmarkComparisonMarkdownOptions
+): string {
+    const summary = options?.summary ?? summarizeBenchmarkComparison(comparison);
     const lines = [
         '## Summary',
         '',
-        `Status: ${formatSummaryStatus(summary)}`,
+        `Status: ${options?.status ?? formatSummaryStatus(summary)}`,
         `Compared cases: ${summary.comparedResultCount}`,
         `Compared metrics: ${summary.metricCount}`,
         `Regressions: ${formatCountWithColor(summary.regressionCount, 'regression')}`,

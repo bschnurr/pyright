@@ -1006,8 +1006,15 @@ benchmarkSuite('Ecosystem Benchmark Runner', () => {
             );
 
             const artifactPaths = compareEcosystemBenchmarkReports(baselinePath, candidatePath, outputDir);
-            expect(fs.readFileSync(artifactPaths.markdownPath, 'utf-8')).toContain(
-                'No warning or failure thresholds exceeded.'
+            const markdown = fs.readFileSync(artifactPaths.markdownPath, 'utf-8');
+            expect(markdown).toContain(
+                'Status: $\\textcolor{gray}{No\\ actionable\\ regressions;\\ raw\\ metric\\ changes\\ below\\ thresholds}$'
+            );
+            expect(markdown).toContain('Regressions: 0');
+            expect(markdown).toContain('## Largest Regressions\n\nNone.');
+            expect(markdown).toContain('No warning or failure thresholds exceeded.');
+            expect(markdown).toContain(
+                '| black | totalTimeMs | 1000.00 | 1040.00 | $\\textcolor{red}{40.00}$ | $\\textcolor{red}{4.00\\%}$ |'
             );
         } finally {
             fs.rmSync(reportsDir, { force: true, recursive: true });
