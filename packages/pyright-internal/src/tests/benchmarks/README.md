@@ -62,8 +62,8 @@ interface BenchmarkReport<ResultT> {
 
 Individual suites add case-specific fields such as token count, AST node count, median time, p95 time, and throughput.
 Ecosystem benchmark results additionally preserve per-project fields like `filesAnalyzed`, diagnostic counts, normalized
-diagnostics, and total runtime so report artifacts can distinguish execution-scope changes from pure performance
-regressions.
+diagnostics, total process runtime, and Pyright-reported analysis time. The analysis time comes from Pyright's JSON
+summary, so it is less sensitive to process startup, checkout, and runner noise than wall-clock process time.
 
 Generated per-project configs always own the benchmark `include` and `exclude` scope so local runs stay focused on source
 roots rather than tests. If a project has `pyrightconfig.json`, the generated config extends it. If a project only has

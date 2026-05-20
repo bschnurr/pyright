@@ -67,6 +67,7 @@ export interface EcosystemBenchmarkExecutionConfig {
 export interface EcosystemBenchmarkResult {
     projectName: string;
     totalTimeMs?: number;
+    analysisTimeMs?: number;
     maxMemoryMB?: number;
     filesAnalyzed?: number;
     diagnosticCount?: number;
@@ -86,6 +87,7 @@ export interface EcosystemBenchmarkDiagnostic {
     };
     severity: string;
     message: string;
+    rule?: string;
 }
 
 export interface EcosystemBenchmarkDiagnosticDiff {
@@ -130,6 +132,7 @@ interface PyrightJsonDiagnostic {
         };
     };
     severity: string;
+    rule?: string;
 }
 
 interface PyrightJsonResults {
@@ -188,6 +191,7 @@ const pyrightPathStringConfigKeys = new Set(['stubPath', 'typeshedPath', 'venvPa
 
 const ecosystemBenchmarkComparisonMetrics: readonly BenchmarkMetricDefinition<EcosystemBenchmarkResult>[] = [
     { name: 'totalTimeMs', getValue: (result) => result.totalTimeMs },
+    { name: 'analysisTimeMs', getValue: (result) => result.analysisTimeMs },
     { name: 'maxMemoryMB', getValue: (result) => result.maxMemoryMB },
     { name: 'filesAnalyzed', lowerIsBetter: false, getValue: (result) => result.filesAnalyzed },
     { name: 'diagnosticCount', getValue: (result) => result.diagnosticCount },
@@ -198,6 +202,7 @@ const ecosystemBenchmarkComparisonMetrics: readonly BenchmarkMetricDefinition<Ec
 
 const ecosystemBenchmarkRegressionThresholds = new Map<string, BenchmarkRegressionThresholds>([
     ['totalTimeMs', { warnRegressionPct: 10, failRegressionPct: 25, minAbsoluteRegression: 500 }],
+    ['analysisTimeMs', { warnRegressionPct: 10, failRegressionPct: 25, minAbsoluteRegression: 250 }],
     ['maxMemoryMB', { warnRegressionPct: 15, failRegressionPct: 35, minAbsoluteRegression: 100 }],
     ['diagnosticCount', { warnRegressionAbsolute: 1, failRegressionAbsolute: 5, minAbsoluteRegression: 1 }],
     ['errorCount', { warnRegressionAbsolute: 1, failRegressionAbsolute: 3, minAbsoluteRegression: 1 }],
@@ -656,6 +661,7 @@ export function executePyrightProjectCommand(
     return {
         projectName,
         totalTimeMs: Math.round(elapsedMs * 100) / 100,
+        analysisTimeMs: Math.round(jsonResults.summary.timeInSec * 100_000) / 100,
         filesAnalyzed: jsonResults.summary.filesAnalyzed,
         diagnosticCount,
         errorCount: jsonResults.summary.errorCount,
@@ -748,11 +754,15 @@ function normalizePyrightDiagnostic(diagnostic: PyrightJsonDiagnostic): Ecosyste
         range: diagnostic.range,
         severity: diagnostic.severity,
         message: diagnostic.message ?? '',
+        rule: diagnostic.rule,
     };
 }
 
 function formatDiagnosticSignature(projectName: string, diagnostic: EcosystemBenchmarkDiagnostic): string {
-    return `${formatDiagnosticLocation(projectName, diagnostic)} - ${diagnostic.severity}: ${diagnostic.message}`;
+    const ruleText = diagnostic.rule ? ` (${diagnostic.rule})` : '';
+    return `${formatDiagnosticLocation(projectName, diagnostic)} - ${diagnostic.severity}: ${
+        diagnostic.message
+    }${ruleText}`;
 }
 
 function formatDiagnosticLocation(projectName: string, diagnostic: EcosystemBenchmarkDiagnostic): string {
