@@ -10,6 +10,7 @@
 # mypy_primer are started in parallel. Each instance runs 1/n of the projects.
 # We use eight shards here so project checkout and type-checking work is
 # distributed across runners.
+# Disposable PRs can touch this comment to show benchmark comments.
 
 name: Run mypy_primer on PR
 
