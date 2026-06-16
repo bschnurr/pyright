@@ -6,6 +6,7 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { performance } from 'perf_hooks';
 
@@ -18,6 +19,8 @@ import { ParseOptions, Parser } from '../../parser/parser';
 const WARMUP_ITERATIONS = 3;
 const BENCHMARK_ITERATIONS = 10;
 
+const BENCHMARK_OUTPUT_DIR = path.join(__dirname, '.generated', 'benchmark-results', 'parse-tree-walker');
+
 interface WalkerStats {
     nodesVisited: number;
     childArraysAllocated: number;
@@ -27,10 +30,33 @@ interface WalkerBenchmarkResult {
     corpus: string;
     walker: string;
     fileSizeBytes: number;
+    iterations: number;
     timesMs: number[];
     medianMs: number;
+    p95Ms: number;
+    minMs: number;
+    maxMs: number;
+    avgMs: number;
     nodesVisited: number;
+    nodesPerSec: number;
     childArraysAllocated: number;
+}
+
+interface WalkerBenchmarkReport {
+    timestamp: string;
+    system: {
+        platform: string;
+        arch: string;
+        cpus: string;
+        cpuCount: number;
+        totalMemoryMB: number;
+        nodeVersion: string;
+    };
+    config: {
+        warmupIterations: number;
+        benchmarkIterations: number;
+    };
+    results: WalkerBenchmarkResult[];
 }
 
 const corpora: { name: string; file: string }[] = [
@@ -99,10 +125,70 @@ function parseText(code: string): ParseNode {
     return parser.parseSourceFile(code, parseOptions, diagSink).parserOutput.parseTree;
 }
 
-function calculateMedian(times: number[]): number {
+function calculateStats(times: ReadonlyArray<number>): {
+    median: number;
+    p95: number;
+    min: number;
+    max: number;
+    avg: number;
+} {
     const sorted = [...times].sort((a, b) => a - b);
-    const midpoint = Math.floor(sorted.length / 2);
-    return sorted.length % 2 === 0 ? (sorted[midpoint - 1] + sorted[midpoint]) / 2 : sorted[midpoint];
+    const len = sorted.length;
+
+    const median = len % 2 === 0 ? (sorted[len / 2 - 1] + sorted[len / 2]) / 2 : sorted[Math.floor(len / 2)];
+    const p95Index = Math.ceil(len * 0.95) - 1;
+    const p95 = sorted[Math.min(p95Index, len - 1)];
+    const min = sorted[0];
+    const max = sorted[len - 1];
+    const avg = times.reduce((a, b) => a + b, 0) / len;
+
+    return { median, p95, min, max, avg };
+}
+
+function getSystemInfo(): WalkerBenchmarkReport['system'] {
+    const cpus = os.cpus();
+    return {
+        platform: os.platform(),
+        arch: os.arch(),
+        cpus: cpus[0]?.model ?? 'unknown',
+        cpuCount: cpus.length,
+        totalMemoryMB: Math.round(os.totalmem() / (1024 * 1024)),
+        nodeVersion: process.version,
+    };
+}
+
+function writeReport(report: WalkerBenchmarkReport): void {
+    fs.mkdirSync(BENCHMARK_OUTPUT_DIR, { recursive: true });
+    const filename = `parse-tree-walker-benchmark-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    const outputPath = path.join(BENCHMARK_OUTPUT_DIR, filename);
+    fs.writeFileSync(outputPath, JSON.stringify(report, undefined, 2), 'utf-8');
+    console.log(`\nBenchmark results written to: ${outputPath}`);
+}
+
+function printResultTable(results: ReadonlyArray<WalkerBenchmarkResult>): void {
+    console.log('\n=== Parse Tree Walker Benchmark Results ===\n');
+    console.log(
+        `${'Corpus'.padEnd(25)} ${'Walker'.padEnd(16)} ${'Size'.padStart(8)} ${'Nodes'.padStart(8)} ${'Arrays'.padStart(
+            8
+        )} ${'Median'.padStart(10)} ${'P95'.padStart(10)} ${'Min'.padStart(10)} ${'Max'.padStart(10)} ${'Avg'.padStart(
+            10
+        )} ${'Nodes/s'.padStart(12)}`
+    );
+    console.log('-'.repeat(135));
+
+    for (const r of results) {
+        const sizeKB = `${(r.fileSizeBytes / 1024).toFixed(1)}KB`;
+        console.log(
+            `${r.corpus.padEnd(25)} ${r.walker.padEnd(16)} ${sizeKB.padStart(8)} ${String(r.nodesVisited).padStart(
+                8
+            )} ${String(r.childArraysAllocated).padStart(8)} ${r.medianMs.toFixed(2).padStart(10)} ${r.p95Ms
+                .toFixed(2)
+                .padStart(10)} ${r.minMs.toFixed(2).padStart(10)} ${r.maxMs.toFixed(2).padStart(10)} ${r.avgMs
+                .toFixed(2)
+                .padStart(10)} ${Math.round(r.nodesPerSec).toLocaleString().padStart(12)}`
+        );
+    }
+    console.log('');
 }
 
 function benchmarkWalker(
@@ -130,23 +216,34 @@ function benchmarkWalker(
         stats = walker.getStats();
     }
 
+    const timingStats = calculateStats(timesMs);
+
     return {
         corpus,
         walker: walkerName,
         fileSizeBytes: Buffer.byteLength(code, 'utf-8'),
+        iterations: BENCHMARK_ITERATIONS,
         timesMs,
-        medianMs: calculateMedian(timesMs),
+        medianMs: timingStats.median,
+        p95Ms: timingStats.p95,
+        minMs: timingStats.min,
+        maxMs: timingStats.max,
+        avgMs: timingStats.avg,
         nodesVisited: stats.nodesVisited,
+        nodesPerSec: stats.nodesVisited / (timingStats.median / 1000),
         childArraysAllocated: stats.childArraysAllocated,
     };
 }
 
 describe('Parse Tree Walker Benchmark', () => {
+    const allResults: WalkerBenchmarkResult[] = [];
+
     for (const { name, file } of corpora) {
         test(`walk ${name}`, () => {
             const code = loadCorpus(file);
             const arrayWalker = benchmarkWalker(name, code, () => new ArrayChildWalker(), 'array-child');
             const generatedWalker = benchmarkWalker(name, code, () => new GeneratedChildWalker(), 'generated-child');
+            allResults.push(arrayWalker, generatedWalker);
 
             console.log(
                 `  ${name}: array=${arrayWalker.medianMs.toFixed(2)}ms, generated=${generatedWalker.medianMs.toFixed(
@@ -159,4 +256,24 @@ describe('Parse Tree Walker Benchmark', () => {
             expect(arrayWalker.childArraysAllocated).toBeGreaterThan(0);
         });
     }
+
+    afterAll(() => {
+        if (allResults.length === 0) {
+            return;
+        }
+
+        printResultTable(allResults);
+
+        const report: WalkerBenchmarkReport = {
+            timestamp: new Date().toISOString(),
+            system: getSystemInfo(),
+            config: {
+                warmupIterations: WARMUP_ITERATIONS,
+                benchmarkIterations: BENCHMARK_ITERATIONS,
+            },
+            results: allResults,
+        };
+
+        writeReport(report);
+    });
 });
