@@ -18,7 +18,7 @@ import {
     synthesizeAliasDeclaration,
 } from '../analyzer/declarationUtils';
 import { getEvaluationScopeNode, getModuleNode, getStringNodeValueRange } from '../analyzer/parseTreeUtils';
-import { ParseTreeWalker } from '../analyzer/parseTreeWalker';
+import { DirectParseTreeWalker } from '../analyzer/parseTreeWalker';
 import { ScopeType } from '../analyzer/scope';
 import * as ScopeUtils from '../analyzer/scopeUtils';
 import { IPythonMode } from '../analyzer/sourceFile';
@@ -91,7 +91,7 @@ export class AliasResolver {
 
 // This walker looks for symbols that are semantically equivalent
 // to the requested symbol.
-export class DocumentSymbolCollector extends ParseTreeWalker {
+export class DocumentSymbolCollector extends DirectParseTreeWalker {
     private readonly _results: CollectionResult[] = [];
     private readonly _dunderAllNameNodes = new Set<StringNode>();
     private readonly _symbolNames: Set<string> = new Set<string>();

@@ -19,7 +19,7 @@ import {
 import { Declaration, DeclarationType } from '../analyzer/declaration';
 import * as DeclarationUtils from '../analyzer/declarationUtils';
 import * as ParseTreeUtils from '../analyzer/parseTreeUtils';
-import { ParseTreeWalker } from '../analyzer/parseTreeWalker';
+import { DirectParseTreeWalker } from '../analyzer/parseTreeWalker';
 import { isUserCode } from '../analyzer/sourceFileInfoUtils';
 import { TypeEvaluator } from '../analyzer/typeEvaluatorTypes';
 import { MemberAccessFlags, doForEachSubtype, lookUpClassMember, lookUpObjectMember } from '../analyzer/typeUtils';
@@ -285,7 +285,7 @@ export class CallHierarchyProvider {
     }
 }
 
-class FindOutgoingCallTreeWalker extends ParseTreeWalker {
+class FindOutgoingCallTreeWalker extends DirectParseTreeWalker {
     private _outgoingCalls: CallHierarchyOutgoingCall[] = [];
 
     constructor(
@@ -418,7 +418,7 @@ class FindOutgoingCallTreeWalker extends ParseTreeWalker {
     }
 }
 
-class FindIncomingCallTreeWalker extends ParseTreeWalker {
+class FindIncomingCallTreeWalker extends DirectParseTreeWalker {
     private readonly _incomingCalls: CallHierarchyIncomingCall[] = [];
     private readonly _declarations: Declaration[] = [];
 
