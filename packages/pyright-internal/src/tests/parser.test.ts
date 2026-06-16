@@ -9,16 +9,58 @@
  */
 
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as path from 'path';
 
 import { findNodeByOffset, getFirstAncestorOrSelfOfKind } from '../analyzer/parseTreeUtils';
+import { getChildNodes, ParseTreeWalker } from '../analyzer/parseTreeWalker';
 import { ExecutionEnvironment, getStandardDiagnosticRuleSet } from '../common/configOptions';
 import { DiagnosticSink } from '../common/diagnosticSink';
 import { pythonVersion3_13, pythonVersion3_14 } from '../common/pythonVersion';
 import { TextRange } from '../common/textRange';
 import { UriEx } from '../common/uri/uriUtils';
-import { ParseNodeType, StatementListNode } from '../parser/parseNodes';
+import { childFields } from '../parser/childFields';
+import { forEachChild, walkChildren } from '../parser/generated/walkChildren';
+import { ParseNode, ParseNodeType, StatementListNode } from '../parser/parseNodes';
 import { getNodeAtMarker, parseAndGetTestState } from './harness/fourslash/testState';
 import * as TestUtils from './testUtils';
+
+class WalkChildrenCollector extends ParseTreeWalker {
+    readonly children: ParseNode[] = [];
+
+    override walk(node: ParseNode): void {
+        this.children.push(node);
+    }
+}
+
+function collectParseNodes(node: ParseNode): ParseNode[] {
+    const nodes = [node];
+    forEachChild(node, (child) => {
+        if (child) {
+            nodes.push(...collectParseNodes(child));
+        }
+    });
+
+    return nodes;
+}
+
+function getParseNodeTypeNames(): string[] {
+    const parseNodesPath = path.resolve(__dirname, '..', 'parser', 'parseNodes.ts');
+    const parseNodesText = fs.readFileSync(parseNodesPath, 'utf8');
+    const enumMatch = /export const enum ParseNodeType\s*{([\s\S]*?)\n}/.exec(parseNodesText);
+
+    assert.ok(enumMatch);
+
+    return enumMatch[1]
+        .split('\n')
+        .map((line) => line.split('//')[0].trim())
+        .filter((line) => line.length > 0)
+        .map((line) => line.replace(/,$/, '').trim());
+}
+
+function getParseNodeTypeName(nodeType: ParseNodeType): string {
+    return getParseNodeTypeNames()[nodeType] ?? `<unknown ${nodeType}>`;
+}
 
 test('Empty', () => {
     const diagSink = new DiagnosticSink();
@@ -81,6 +123,73 @@ test('ExpressionWrappedInParens', () => {
     // length of node should include parens
     assert.equal(statementList.d.statements[0].nodeType, ParseNodeType.Name);
     assert.equal(statementList.d.statements[0].length, 5);
+});
+
+test('Generated child fields cover parse node types', () => {
+    const childFieldNodeTypes = [...childFields.map((spec) => spec.nodeType)].sort();
+    const parseNodeTypes = [...getParseNodeTypeNames()].sort();
+
+    assert.deepStrictEqual(childFieldNodeTypes, parseNodeTypes);
+});
+
+test('Generated walkChildren preserves present-child order', () => {
+    const code = `
+from __future__ import annotations
+from pkg import a as b, c
+import os, sys as system
+
+@decorator(1)
+class C[T](Base[int]):
+    x: int = 1
+    """class doc"""
+
+    async def method(self, value: list[int] = [1, 2]) -> str:
+        global g
+        nonlocal n
+        assert value, "missing"
+        del value[0]
+        with manager() as target:
+            await target.run()
+        try:
+            for item in value:
+                if item > 0:
+                    yield item
+                else:
+                    yield from other()
+        except ValueError as ex:
+            raise RuntimeError() from ex
+        finally:
+            pass
+        return f"{value!r:{width}}"
+
+type Alias[T] = list[T] | tuple[T, ...]
+
+result = (lambda x=1: x + 1)(*[1], **{"y": 2})
+items = {k: v for k, v in pairs if k in allowed}
+sequence = [x async for x in agen() if x]
+mapping = {"a": 1, **extra}
+match result:
+    case {"x": value, **rest} if value:
+        pass
+    case [first, *others] | C(first):
+        pass
+`;
+
+    const diagSink = new DiagnosticSink();
+    const parseResults = TestUtils.parseText(code, diagSink);
+    const nodes = collectParseNodes(parseResults.parserOutput.parseTree);
+
+    for (const node of nodes) {
+        const expectedChildren = getChildNodes(node).filter((child): child is ParseNode => child !== undefined);
+        const collector = new WalkChildrenCollector();
+        walkChildren(collector, node);
+
+        assert.deepStrictEqual(
+            collector.children,
+            expectedChildren,
+            `Child order mismatch for ${getParseNodeTypeName(node.nodeType)}`
+        );
+    }
 });
 
 test('MaxParseDepth1', () => {
