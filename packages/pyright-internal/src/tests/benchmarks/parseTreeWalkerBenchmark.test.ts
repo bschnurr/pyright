@@ -23,6 +23,8 @@ const BENCHMARK_OUTPUT_DIR = path.join(__dirname, '.generated', 'benchmark-resul
 
 interface WalkerStats {
     nodesVisited: number;
+    childEdgesVisited: number;
+    visitorDispatches: number;
     childArraysAllocated: number;
 }
 
@@ -38,6 +40,8 @@ interface WalkerBenchmarkResult {
     maxMs: number;
     avgMs: number;
     nodesVisited: number;
+    childEdgesVisited: number;
+    visitorDispatches: number;
     nodesPerSec: number;
     childArraysAllocated: number;
 }
@@ -70,10 +74,13 @@ const corpora: { name: string; file: string }[] = [
 
 class ArrayChildWalker extends ParseTreeWalker {
     private _nodesVisited = 0;
+    private _childEdgesVisited = 0;
+    private _visitorDispatches = 0;
     private _childArraysAllocated = 0;
 
     override walk(node: ParseNode): void {
         this._nodesVisited++;
+        this._visitorDispatches++;
 
         const childrenToWalk = this.visitNode(node);
         this._childArraysAllocated++;
@@ -81,6 +88,7 @@ class ArrayChildWalker extends ParseTreeWalker {
         for (let i = 0; i < childrenToWalk.length; i++) {
             const child = childrenToWalk[i];
             if (child) {
+                this._childEdgesVisited++;
                 this.walk(child);
             }
         }
@@ -89,6 +97,8 @@ class ArrayChildWalker extends ParseTreeWalker {
     getStats(): WalkerStats {
         return {
             nodesVisited: this._nodesVisited,
+            childEdgesVisited: this._childEdgesVisited,
+            visitorDispatches: this._visitorDispatches,
             childArraysAllocated: this._childArraysAllocated,
         };
     }
@@ -96,9 +106,11 @@ class ArrayChildWalker extends ParseTreeWalker {
 
 class GeneratedChildWalker extends ParseTreeWalker {
     private _nodesVisited = 0;
+    private _visitorDispatches = 0;
 
     override walk(node: ParseNode): void {
         this._nodesVisited++;
+        this._visitorDispatches++;
 
         if (this.visit(node)) {
             walkChildren(this, node);
@@ -108,6 +120,8 @@ class GeneratedChildWalker extends ParseTreeWalker {
     getStats(): WalkerStats {
         return {
             nodesVisited: this._nodesVisited,
+            childEdgesVisited: Math.max(0, this._nodesVisited - 1),
+            visitorDispatches: this._visitorDispatches,
             childArraysAllocated: 0,
         };
     }
@@ -168,24 +182,28 @@ function writeReport(report: WalkerBenchmarkReport): void {
 function printResultTable(results: ReadonlyArray<WalkerBenchmarkResult>): void {
     console.log('\n=== Parse Tree Walker Benchmark Results ===\n');
     console.log(
-        `${'Corpus'.padEnd(25)} ${'Walker'.padEnd(16)} ${'Size'.padStart(8)} ${'Nodes'.padStart(8)} ${'Arrays'.padStart(
+        `${'Corpus'.padEnd(25)} ${'Walker'.padEnd(16)} ${'Size'.padStart(8)} ${'Nodes'.padStart(8)} ${'Edges'.padStart(
             8
-        )} ${'Median'.padStart(10)} ${'P95'.padStart(10)} ${'Min'.padStart(10)} ${'Max'.padStart(10)} ${'Avg'.padStart(
+        )} ${'Visits'.padStart(8)} ${'Arrays'.padStart(8)} ${'Median'.padStart(10)} ${'P95'.padStart(
             10
-        )} ${'Nodes/s'.padStart(12)}`
+        )} ${'Min'.padStart(10)} ${'Max'.padStart(10)} ${'Avg'.padStart(10)} ${'Nodes/s'.padStart(12)}`
     );
-    console.log('-'.repeat(135));
+    console.log('-'.repeat(153));
 
     for (const r of results) {
         const sizeKB = `${(r.fileSizeBytes / 1024).toFixed(1)}KB`;
         console.log(
             `${r.corpus.padEnd(25)} ${r.walker.padEnd(16)} ${sizeKB.padStart(8)} ${String(r.nodesVisited).padStart(
                 8
-            )} ${String(r.childArraysAllocated).padStart(8)} ${r.medianMs.toFixed(2).padStart(10)} ${r.p95Ms
+            )} ${String(r.childEdgesVisited).padStart(8)} ${String(r.visitorDispatches).padStart(8)} ${String(
+                r.childArraysAllocated
+            ).padStart(8)} ${r.medianMs.toFixed(2).padStart(10)} ${r.p95Ms.toFixed(2).padStart(10)} ${r.minMs
                 .toFixed(2)
-                .padStart(10)} ${r.minMs.toFixed(2).padStart(10)} ${r.maxMs.toFixed(2).padStart(10)} ${r.avgMs
-                .toFixed(2)
-                .padStart(10)} ${Math.round(r.nodesPerSec).toLocaleString().padStart(12)}`
+                .padStart(10)} ${r.maxMs.toFixed(2).padStart(10)} ${r.avgMs.toFixed(2).padStart(10)} ${Math.round(
+                r.nodesPerSec
+            )
+                .toLocaleString()
+                .padStart(12)}`
         );
     }
     console.log('');
@@ -201,6 +219,8 @@ function benchmarkWalker(
     const timesMs: number[] = [];
     let stats: WalkerStats = {
         nodesVisited: 0,
+        childEdgesVisited: 0,
+        visitorDispatches: 0,
         childArraysAllocated: 0,
     };
 
@@ -230,6 +250,8 @@ function benchmarkWalker(
         maxMs: timingStats.max,
         avgMs: timingStats.avg,
         nodesVisited: stats.nodesVisited,
+        childEdgesVisited: stats.childEdgesVisited,
+        visitorDispatches: stats.visitorDispatches,
         nodesPerSec: stats.nodesVisited / (timingStats.median / 1000),
         childArraysAllocated: stats.childArraysAllocated,
     };
