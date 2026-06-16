@@ -48,6 +48,7 @@ import { OperatorTypeNameMap, ParseNodeTypeNameMap } from '../parser/parseNodeUt
 import { ParseFileResults } from '../parser/parser';
 import { Tokenizer, TokenizerOutput } from '../parser/tokenizer';
 import { KeywordType, OperatorType, StringToken, StringTokenFlags, Token, TokenType } from '../parser/tokenizerTypes';
+import { forEachChild } from '../parser/generated/walkChildren';
 import { getScope } from './analyzerNodeInfo';
 import { ParseTreeWalker, getChildNodes } from './parseTreeWalker';
 import { TypeVarScopeId } from './types';
@@ -2067,15 +2068,16 @@ export function isWriteAccess(node: NameNode) {
 
 export function getMatchingDescendants(node: ParseNode, match: (n: ParseNode) => boolean): ParseNode[] {
     const matches: ParseNode[] = [];
-    const children = getChildNodes(node);
-    for (const child of children) {
+
+    forEachChild(node, (child) => {
         if (child && match(child)) {
             matches.push(child);
         }
         if (child) {
             matches.push(...getMatchingDescendants(child, match));
         }
-    }
+    });
+
     return matches;
 }
 
