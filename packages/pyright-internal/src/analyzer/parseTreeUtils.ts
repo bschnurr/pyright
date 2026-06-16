@@ -50,7 +50,7 @@ import { Tokenizer, TokenizerOutput } from '../parser/tokenizer';
 import { KeywordType, OperatorType, StringToken, StringTokenFlags, Token, TokenType } from '../parser/tokenizerTypes';
 import { forEachChild } from '../parser/generated/walkChildren';
 import { getScope } from './analyzerNodeInfo';
-import { ParseTreeWalker, getChildNodes } from './parseTreeWalker';
+import { DirectParseTreeWalker, getChildNodes } from './parseTreeWalker';
 import { TypeVarScopeId } from './types';
 
 export const enum PrintExpressionFlags {
@@ -1260,7 +1260,7 @@ export function isSuiteEmpty(node: SuiteNode): boolean {
 export function containsAwaitNode(node: ParseNode): boolean {
     let foundAwait = false;
 
-    class AwaitNodeWalker extends ParseTreeWalker {
+    class AwaitNodeWalker extends DirectParseTreeWalker {
         override visitAwait(node: AwaitNode) {
             foundAwait = true;
             return false;
@@ -1669,7 +1669,7 @@ export function isAssignmentToDefaultsFollowingNamedTuple(callNode: ParseNode): 
 
 // This simple parse tree walker calls a callback function
 // for each NameNode it encounters.
-export class NameNodeWalker extends ParseTreeWalker {
+export class NameNodeWalker extends DirectParseTreeWalker {
     private _subscriptIndex: number | undefined;
     private _baseExpression: ExpressionNode | undefined;
 
@@ -1707,7 +1707,7 @@ export class NameNodeWalker extends ParseTreeWalker {
     }
 }
 
-export class CallNodeWalker extends ParseTreeWalker {
+export class CallNodeWalker extends DirectParseTreeWalker {
     constructor(private _callback: (node: CallNode) => void) {
         super();
     }
