@@ -238,24 +238,34 @@ function benchmarkWalker(
 describe('Parse Tree Walker Benchmark', () => {
     const allResults: WalkerBenchmarkResult[] = [];
 
+    function benchmarkCorpus(name: string, code: string) {
+        const arrayWalker = benchmarkWalker(name, code, () => new ArrayChildWalker(), 'array-child');
+        const generatedWalker = benchmarkWalker(name, code, () => new GeneratedChildWalker(), 'generated-child');
+        allResults.push(arrayWalker, generatedWalker);
+
+        console.log(
+            `  ${name}: array=${arrayWalker.medianMs.toFixed(2)}ms, generated=${generatedWalker.medianMs.toFixed(
+                2
+            )}ms, nodes=${generatedWalker.nodesVisited.toLocaleString()}`
+        );
+
+        expect(generatedWalker.nodesVisited).toBe(arrayWalker.nodesVisited);
+        expect(generatedWalker.childArraysAllocated).toBe(0);
+        expect(arrayWalker.childArraysAllocated).toBeGreaterThan(0);
+    }
+
     for (const { name, file } of corpora) {
         test(`walk ${name}`, () => {
             const code = loadCorpus(file);
-            const arrayWalker = benchmarkWalker(name, code, () => new ArrayChildWalker(), 'array-child');
-            const generatedWalker = benchmarkWalker(name, code, () => new GeneratedChildWalker(), 'generated-child');
-            allResults.push(arrayWalker, generatedWalker);
-
-            console.log(
-                `  ${name}: array=${arrayWalker.medianMs.toFixed(2)}ms, generated=${generatedWalker.medianMs.toFixed(
-                    2
-                )}ms, nodes=${generatedWalker.nodesVisited.toLocaleString()}`
-            );
-
-            expect(generatedWalker.nodesVisited).toBe(arrayWalker.nodesVisited);
-            expect(generatedWalker.childArraysAllocated).toBe(0);
-            expect(arrayWalker.childArraysAllocated).toBeGreaterThan(0);
+            benchmarkCorpus(name, code);
         });
     }
+
+    test('scaled corpus (10x large_stdlib)', () => {
+        const base = loadCorpus('large_stdlib.py');
+        const scaled = Array(10).fill(base).join('\n');
+        benchmarkCorpus('large_stdlib_10x', scaled);
+    });
 
     afterAll(() => {
         if (allResults.length === 0) {

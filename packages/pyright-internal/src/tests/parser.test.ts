@@ -33,6 +33,48 @@ class WalkChildrenCollector extends ParseTreeWalker {
     }
 }
 
+const richParseTreeCode = `
+from __future__ import annotations
+from pkg import a as b, c
+import os, sys as system
+
+@decorator(1)
+class C[T](Base[int]):
+    x: int = 1
+    """class doc"""
+
+    async def method(self, value: list[int] = [1, 2]) -> str:
+        global g
+        nonlocal n
+        assert value, "missing"
+        del value[0]
+        with manager() as target:
+            await target.run()
+        try:
+            for item in value:
+                if item > 0:
+                    yield item
+                else:
+                    yield from other()
+        except ValueError as ex:
+            raise RuntimeError() from ex
+        finally:
+            pass
+        return f"{value!r:{width}}"
+
+type Alias[T] = list[T] | tuple[T, ...]
+
+result = (lambda x=1: x + 1)(*[1], **{"y": 2})
+items = {k: v for k, v in pairs if k in allowed}
+sequence = [x async for x in agen() if x]
+mapping = {"a": 1, **extra}
+match result:
+    case {"x": value, **rest} if value:
+        pass
+    case [first, *others] | C(first):
+        pass
+`;
+
 function collectParseNodes(node: ParseNode): ParseNode[] {
     const nodes = [node];
     forEachChild(node, (child) => {
@@ -40,6 +82,39 @@ function collectParseNodes(node: ParseNode): ParseNode[] {
             nodes.push(...collectParseNodes(child));
         }
     });
+
+    return nodes;
+}
+
+function isParseNode(value: unknown): value is ParseNode {
+    return !!value && typeof value === 'object' && 'nodeType' in value && 'd' in value;
+}
+
+function collectParentedDChildren(node: ParseNode): ParseNode[] {
+    const children: ParseNode[] = [];
+
+    for (const value of Object.values(node.d)) {
+        if (isParseNode(value)) {
+            if (value.parent === node) {
+                children.push(value);
+            }
+        } else if (Array.isArray(value)) {
+            for (const entry of value) {
+                if (isParseNode(entry) && entry.parent === node) {
+                    children.push(entry);
+                }
+            }
+        }
+    }
+
+    return children;
+}
+
+function collectParseNodesFromD(node: ParseNode): ParseNode[] {
+    const nodes = [node];
+    for (const child of collectParentedDChildren(node)) {
+        nodes.push(...collectParseNodesFromD(child));
+    }
 
     return nodes;
 }
@@ -195,51 +270,31 @@ test('Generated child fields reference parse-node d fields', () => {
     }
 });
 
-test('Generated walkChildren preserves present-child order', () => {
-    const code = `
-from __future__ import annotations
-from pkg import a as b, c
-import os, sys as system
-
-@decorator(1)
-class C[T](Base[int]):
-    x: int = 1
-    """class doc"""
-
-    async def method(self, value: list[int] = [1, 2]) -> str:
-        global g
-        nonlocal n
-        assert value, "missing"
-        del value[0]
-        with manager() as target:
-            await target.run()
-        try:
-            for item in value:
-                if item > 0:
-                    yield item
-                else:
-                    yield from other()
-        except ValueError as ex:
-            raise RuntimeError() from ex
-        finally:
-            pass
-        return f"{value!r:{width}}"
-
-type Alias[T] = list[T] | tuple[T, ...]
-
-result = (lambda x=1: x + 1)(*[1], **{"y": 2})
-items = {k: v for k, v in pairs if k in allowed}
-sequence = [x async for x in agen() if x]
-mapping = {"a": 1, **extra}
-match result:
-    case {"x": value, **rest} if value:
-        pass
-    case [first, *others] | C(first):
-        pass
-`;
-
+test('Generated children include reflected parse-node d children', () => {
     const diagSink = new DiagnosticSink();
-    const parseResults = TestUtils.parseText(code, diagSink);
+    const parseResults = TestUtils.parseText(richParseTreeCode, diagSink);
+    const nodes = collectParseNodesFromD(parseResults.parserOutput.parseTree);
+
+    for (const node of nodes) {
+        const reflectedChildren = collectParentedDChildren(node);
+        const generatedChildren: ParseNode[] = [];
+        forEachChild(node, (child) => {
+            if (child) {
+                generatedChildren.push(child);
+            }
+        });
+
+        assert.deepStrictEqual(
+            new Set(generatedChildren),
+            new Set(reflectedChildren),
+            `Generated child set mismatch for ${getParseNodeTypeName(node.nodeType)}`
+        );
+    }
+});
+
+test('Generated walkChildren preserves present-child order', () => {
+    const diagSink = new DiagnosticSink();
+    const parseResults = TestUtils.parseText(richParseTreeCode, diagSink);
     const nodes = collectParseNodes(parseResults.parserOutput.parseTree);
 
     for (const node of nodes) {
