@@ -120,7 +120,7 @@ import {
 import { ImplicitImport, ImportResult, ImportType } from './importResult';
 import { getWildcardImportNames } from './importStatementUtils';
 import * as ParseTreeUtils from './parseTreeUtils';
-import { ParseTreeWalker } from './parseTreeWalker';
+import { DirectParseTreeWalker, ParseTreeWalker } from './parseTreeWalker';
 import { CellChainIndexProvider } from './cellChainIndex';
 import {
     ChainedModuleLevelLookupContext,
@@ -4640,7 +4640,7 @@ export class Binder extends ParseTreeWalker {
     }
 }
 
-export class YieldFinder extends ParseTreeWalker {
+export class YieldFinder extends DirectParseTreeWalker {
     private _containsYield = false;
 
     checkContainsYield(node: ParseNode) {
@@ -4659,7 +4659,7 @@ export class YieldFinder extends ParseTreeWalker {
     }
 }
 
-export class ReturnFinder extends ParseTreeWalker {
+export class ReturnFinder extends DirectParseTreeWalker {
     private _containsReturn = false;
 
     checkContainsReturn(node: ParseNode) {
