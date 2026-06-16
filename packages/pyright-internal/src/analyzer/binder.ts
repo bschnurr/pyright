@@ -4678,7 +4678,7 @@ export class ReturnFinder extends DirectParseTreeWalker {
 // to be unreachable. There are code paths where the type evaluator
 // will still evaluate these types, and it depends on the presence
 // of a scope.
-export class DummyScopeGenerator extends ParseTreeWalker {
+export class DummyScopeGenerator extends DirectParseTreeWalker {
     private _currentScope: Scope | undefined;
 
     constructor(currentScope: Scope | undefined) {

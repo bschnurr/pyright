@@ -49,7 +49,7 @@ import { OperatorType } from '../parser/tokenizerTypes';
 import { ParseFileResults } from '../parser/parser';
 import * as AnalyzerNodeInfo from './analyzerNodeInfo';
 import * as ParseTreeUtils from './parseTreeUtils';
-import { ParseTreeWalker } from './parseTreeWalker';
+import { DirectParseTreeWalker } from './parseTreeWalker';
 import { getScopeForNode } from './scopeUtils';
 import { Symbol } from './symbol';
 import * as SymbolNameUtils from './symbolNameUtils';
@@ -102,7 +102,7 @@ class TrackedImportFrom extends TrackedImport {
     }
 }
 
-class ImportSymbolWalker extends ParseTreeWalker {
+class ImportSymbolWalker extends DirectParseTreeWalker {
     constructor(private _accessedImportedSymbols: Set<string>, private _treatStringsAsSymbols: boolean) {
         super();
     }
@@ -264,7 +264,7 @@ interface TypeStubWriteRequest {
     stubPath?: Uri;
 }
 
-class TypeStubTreeWalker extends ParseTreeWalker {
+class TypeStubTreeWalker extends DirectParseTreeWalker {
     private _indentAmount = 0;
     private _includeAllImports = false;
     private _typeStubText = '';
