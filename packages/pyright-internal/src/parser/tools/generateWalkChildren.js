@@ -155,7 +155,10 @@ ${imports}
     ParseNode,
     ParseNodeType,
 } from '../parseNodes';
-import type { ParseTreeWalker } from '../../analyzer/parseTreeWalker';
+
+export interface ParseTreeChildWalker {
+    walk(node: ParseNode): void;
+}
 
 export function forEachChild(node: ParseNode, callback: (child: ParseNode | undefined) => void): void {
     switch (node.nodeType) {
@@ -163,7 +166,7 @@ ${indent(emitSwitch(childFields, 'callback'))}
     }
 }
 
-export function walkChildren(walker: ParseTreeWalker, node: ParseNode): void {
+export function walkChildren(walker: ParseTreeChildWalker, node: ParseNode): void {
     switch (node.nodeType) {
 ${indent(emitSwitch(childFields, 'walker'))}
     }

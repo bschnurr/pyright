@@ -81,7 +81,10 @@ import {
     ParseNode,
     ParseNodeType,
 } from '../parseNodes';
-import type { ParseTreeWalker } from '../../analyzer/parseTreeWalker';
+
+export interface ParseTreeChildWalker {
+    walk(node: ParseNode): void;
+}
 
 export function forEachChild(node: ParseNode, callback: (child: ParseNode | undefined) => void): void {
     switch (node.nodeType) {
@@ -881,7 +884,7 @@ export function forEachChild(node: ParseNode, callback: (child: ParseNode | unde
     }
 }
 
-export function walkChildren(walker: ParseTreeWalker, node: ParseNode): void {
+export function walkChildren(walker: ParseTreeChildWalker, node: ParseNode): void {
     switch (node.nodeType) {
         case ParseNodeType.Error: {
             const typedNode = node as ErrorNode;

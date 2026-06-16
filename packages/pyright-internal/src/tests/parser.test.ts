@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { findNodeByOffset, getFirstAncestorOrSelfOfKind } from '../analyzer/parseTreeUtils';
-import { getChildNodes, ParseTreeWalker } from '../analyzer/parseTreeWalker';
+import { DirectParseTreeWalker, getChildNodes, ParseTreeWalker } from '../analyzer/parseTreeWalker';
 import { ExecutionEnvironment, getStandardDiagnosticRuleSet } from '../common/configOptions';
 import { DiagnosticSink } from '../common/diagnosticSink';
 import { pythonVersion3_13, pythonVersion3_14 } from '../common/pythonVersion';
@@ -30,6 +30,15 @@ class WalkChildrenCollector extends ParseTreeWalker {
 
     override walk(node: ParseNode): void {
         this.children.push(node);
+    }
+}
+
+class DirectWalkCollector extends DirectParseTreeWalker {
+    readonly nodes: ParseNode[] = [];
+
+    override visitNode(node: ParseNode): boolean {
+        this.nodes.push(node);
+        return super.visitNode(node);
     }
 }
 
@@ -290,6 +299,17 @@ test('Generated children include reflected parse-node d children', () => {
             `Generated child set mismatch for ${getParseNodeTypeName(node.nodeType)}`
         );
     }
+});
+
+test('DirectParseTreeWalker preserves generated preorder traversal', () => {
+    const diagSink = new DiagnosticSink();
+    const parseResults = TestUtils.parseText(richParseTreeCode, diagSink);
+    const expectedNodes = collectParseNodes(parseResults.parserOutput.parseTree);
+    const collector = new DirectWalkCollector();
+
+    collector.walk(parseResults.parserOutput.parseTree);
+
+    assert.deepStrictEqual(collector.nodes, expectedNodes);
 });
 
 test('Generated walkChildren preserves present-child order', () => {
