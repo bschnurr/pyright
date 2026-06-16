@@ -120,7 +120,7 @@ import {
 import { ImplicitImport, ImportResult, ImportType } from './importResult';
 import { getWildcardImportNames } from './importStatementUtils';
 import * as ParseTreeUtils from './parseTreeUtils';
-import { DirectParseTreeWalker, ParseTreeWalker } from './parseTreeWalker';
+import { DirectParseTreeWalker } from './parseTreeWalker';
 import { CellChainIndexProvider } from './cellChainIndex';
 import {
     ChainedModuleLevelLookupContext,
@@ -169,7 +169,7 @@ interface NarrowExprOptions {
 // flow nodes. This number is somewhat arbitrary and is tuned empirically.
 const flowNodeComplexityContribution = 0.025;
 
-export class Binder extends ParseTreeWalker {
+export class Binder extends DirectParseTreeWalker {
     private readonly _fileInfo: AnalyzerFileInfo;
 
     // A queue of deferred analysis operations.
