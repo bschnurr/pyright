@@ -45,8 +45,7 @@ function collectParseNodes(node: ParseNode): ParseNode[] {
 }
 
 function getParseNodeTypeNames(): string[] {
-    const parseNodesPath = path.resolve(__dirname, '..', 'parser', 'parseNodes.ts');
-    const parseNodesText = fs.readFileSync(parseNodesPath, 'utf8');
+    const parseNodesText = getParseNodesText();
     const enumMatch = /export const enum ParseNodeType\s*{([\s\S]*?)\n}/.exec(parseNodesText);
 
     assert.ok(enumMatch);
@@ -60,6 +59,58 @@ function getParseNodeTypeNames(): string[] {
 
 function getParseNodeTypeName(nodeType: ParseNodeType): string {
     return getParseNodeTypeNames()[nodeType] ?? `<unknown ${nodeType}>`;
+}
+
+function getParseNodesText(): string {
+    const parseNodesPath = path.resolve(__dirname, '..', 'parser', 'parseNodes.ts');
+    return fs.readFileSync(parseNodesPath, 'utf8');
+}
+
+function getBlockAt(text: string, openBraceIndex: number): string {
+    let depth = 0;
+
+    for (let i = openBraceIndex; i < text.length; i++) {
+        const char = text[i];
+        if (char === '{') {
+            depth++;
+        } else if (char === '}') {
+            depth--;
+            if (depth === 0) {
+                return text.slice(openBraceIndex + 1, i);
+            }
+        }
+    }
+
+    assert.fail(`Unterminated block at offset ${openBraceIndex}`);
+}
+
+function getNodeInterfaceFields(nodeInterface: string): Set<string> {
+    const parseNodesText = getParseNodesText();
+    const interfaceMatch = new RegExp(`export interface ${nodeInterface}\\b`).exec(parseNodesText);
+
+    assert.ok(interfaceMatch, `Missing node interface ${nodeInterface}`);
+
+    const interfaceOpenBrace = parseNodesText.indexOf('{', interfaceMatch.index);
+    assert.notStrictEqual(interfaceOpenBrace, -1, `Missing body for ${nodeInterface}`);
+
+    const interfaceBody = getBlockAt(parseNodesText, interfaceOpenBrace);
+    const dMatch = /\bd\s*:\s*{/.exec(interfaceBody);
+
+    if (!dMatch) {
+        return new Set<string>();
+    }
+
+    const dOpenBrace = interfaceBody.indexOf('{', dMatch.index);
+    const dBody = getBlockAt(interfaceBody, dOpenBrace);
+    const fields = new Set<string>();
+    const fieldRegExp = /^\s*(?:readonly\s+)?([A-Za-z_][A-Za-z0-9_]*)\??\s*:/gm;
+    let fieldMatch: RegExpExecArray | null;
+
+    while ((fieldMatch = fieldRegExp.exec(dBody))) {
+        fields.add(fieldMatch[1]);
+    }
+
+    return fields;
 }
 
 test('Empty', () => {
@@ -130,6 +181,18 @@ test('Generated child fields cover parse node types', () => {
     const parseNodeTypes = [...getParseNodeTypeNames()].sort();
 
     assert.deepStrictEqual(childFieldNodeTypes, parseNodeTypes);
+});
+
+test('Generated child fields reference parse-node d fields', () => {
+    for (const spec of childFields) {
+        const nodeFields = getNodeInterfaceFields(spec.nodeInterface);
+        for (const field of spec.fields) {
+            assert.ok(
+                nodeFields.has(field.name),
+                `${spec.nodeInterface}.${field.name} is listed in childFields but not declared in parseNodes.ts`
+            );
+        }
+    }
 });
 
 test('Generated walkChildren preserves present-child order', () => {

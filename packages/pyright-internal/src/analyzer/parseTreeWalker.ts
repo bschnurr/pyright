@@ -677,11 +677,12 @@ export class ParseTreeWalker extends ParseTreeVisitor<boolean> {
     }
 
     walkMultiple(nodes: ParseNodeArray) {
-        nodes.forEach((node) => {
+        for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
             if (node) {
                 this.walk(node);
             }
-        });
+        }
     }
 
     // If this.visit(node) returns true, all child nodes for the node are returned.
