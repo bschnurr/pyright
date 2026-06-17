@@ -1128,6 +1128,52 @@ The decision rule for future work should be:
 3. If Check/Bind internals dominate, move optimization effort into the specific checker, binder, type evaluator, or import-resolution functions shown in the profile.
 4. Do not start sparse visitors, fused module scans, or flat AST sidecars unless profiles show repeated syntax walking remains material.
 
+## Captured Profiling Results
+
+Profile artifacts were captured under:
+
+```txt
+C:\Users\bschnurr\.copilot\session-state\13a85e3b-5f4f-48be-8256-d0a3003cfdfc\files\pytorch-pyright-profiles
+```
+
+Key artifacts:
+
+| Artifact | Size | Notes |
+| --- | ---: | --- |
+| `upstream.cpuprofile` | 746MB | V8 CPU profile for upstream PyTorch run |
+| `worktree.cpuprofile` | 702MB | V8 CPU profile for worktree PyTorch run |
+| `upstream.heapprofile` | 229KB | V8 sampled heap profile for upstream |
+| `worktree.heapprofile` | 97KB | V8 sampled heap profile for worktree |
+| `upstream-trace-gc-run.txt` | 23.5MB | Upstream `--trace-gc` output and Pyright stats |
+| `worktree-trace-gc-run.txt` | 23.4MB | Worktree `--trace-gc` output and Pyright stats |
+
+CPU-profiled comparison:
+
+| CLI | Wall time | Pyright completed time | Bind | Check | GC samples |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| upstream CPU-profiled | 736.5s | 709.3s | 87.13s | 527.70s | 114,646 / 435,973 (26.30%) |
+| worktree CPU-profiled | 718.3s | 692.5s | 86.36s | 524.40s | 110,416 / 422,653 (26.12%) |
+
+The top non-GC CPU samples were filesystem calls (`lstat`, `readFileUtf8`, `readdir`, `existsSync`) and type comparison hot paths like `isTypeSame` / `_addTypeIfUnique`. This suggests the next optimization target should be chosen from CPU profiles rather than assuming parse-tree walking remains the dominant cost.
+
+Heap-profiled comparison:
+
+| CLI | Wall time | Pyright completed time | Bind | Check | Sampled heap bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| upstream heap-profiled | 714.9s | 713.9s | 92.88s | 534.31s | 29.9MB |
+| worktree heap-profiled | 691.3s | 690.2s | 84.89s | 525.09s | 26.0MB |
+
+The heap profiles are sampled and relatively small, so they should be treated as directional rather than exhaustive. In both runs, sampled allocations were dominated by `readFileSync` and broad checker/type-evaluator paths, not obvious parse-tree child-array frames.
+
+GC trace comparison:
+
+| CLI | Pyright completed time | GC events | GC pause total | Scavenge pause | Mark-Compact pause | Max heap before GC |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| upstream trace-gc | 687.6s | 16,326 | 114.85s | 106.93s | 7.92s | 3,768.8MB |
+| worktree trace-gc | 626.5s | 16,092 | 112.56s | 101.48s | 11.08s | 3,756.1MB |
+
+The worktree trace had fewer GC events and about 2.3s less total GC pause, but GC remains a large share of runtime. The larger win in this trace was reduced Check time (525.89s to 473.42s). Future investigation should inspect CPU profiles for the checker/type-evaluator hot paths and use heap/GC data to verify whether any proposed change reduces allocation churn.
+
 ---
 
 # 12. Best First Prototype
