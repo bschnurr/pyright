@@ -3343,6 +3343,8 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
     }
     recursionCount++;
 
+    const typeArgOptions = options.ignoreTypeFlags ? { ...options, ignoreTypeFlags: false } : options;
+
     if (options.honorTypeForm) {
         const typeForm1 = type1.props?.typeForm;
         const typeForm2 = type2.props?.typeForm;
@@ -3387,7 +3389,7 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
                             !isTypeSame(
                                 type1TupleTypeArgs[i].type,
                                 type2TupleTypeArgs[i].type,
-                                { ...options, ignoreTypeFlags: false },
+                                typeArgOptions,
                                 recursionCount
                             )
                         ) {
@@ -3408,7 +3410,7 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
                         const typeArg1 = i < type1TypeArgs.length ? type1TypeArgs[i] : UnknownType.create();
                         const typeArg2 = i < type2TypeArgs.length ? type2TypeArgs[i] : UnknownType.create();
 
-                        if (!isTypeSame(typeArg1, typeArg2, { ...options, ignoreTypeFlags: false }, recursionCount)) {
+                        if (!isTypeSame(typeArg1, typeArg2, typeArgOptions, recursionCount)) {
                             return false;
                         }
                     }
@@ -3486,7 +3488,7 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
 
                 const param1Type = FunctionType.getParamType(type1, i);
                 const param2Type = FunctionType.getParamType(functionType2, i);
-                if (!isTypeSame(param1Type, param2Type, { ...options, ignoreTypeFlags: false }, recursionCount)) {
+                if (!isTypeSame(param1Type, param2Type, typeArgOptions, recursionCount)) {
                     return false;
                 }
             }
@@ -3512,7 +3514,7 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
                 if (
                     !return1Type ||
                     !return2Type ||
-                    !isTypeSame(return1Type, return2Type, { ...options, ignoreTypeFlags: false }, recursionCount)
+                    !isTypeSame(return1Type, return2Type, typeArgOptions, recursionCount)
                 ) {
                     return false;
                 }
@@ -3582,7 +3584,7 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
                     const typeArg1 = i < type1TypeArgs.length ? type1TypeArgs[i] : AnyType.create();
                     const typeArg2 = i < type2TypeArgs.length ? type2TypeArgs[i] : AnyType.create();
 
-                    if (!isTypeSame(typeArg1, typeArg2, { ...options, ignoreTypeFlags: false }, recursionCount)) {
+                    if (!isTypeSame(typeArg1, typeArg2, typeArgOptions, recursionCount)) {
                         return false;
                     }
                 }
@@ -3618,10 +3620,7 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
             const boundType1 = type1.shared.boundType;
             const boundType2 = type2TypeVar.shared.boundType;
             if (boundType1) {
-                if (
-                    !boundType2 ||
-                    !isTypeSame(boundType1, boundType2, { ...options, ignoreTypeFlags: false }, recursionCount)
-                ) {
+                if (!boundType2 || !isTypeSame(boundType1, boundType2, typeArgOptions, recursionCount)) {
                     return false;
                 }
             } else {
@@ -3637,14 +3636,7 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
             }
 
             for (let i = 0; i < constraints1.length; i++) {
-                if (
-                    !isTypeSame(
-                        constraints1[i],
-                        constraints2[i],
-                        { ...options, ignoreTypeFlags: false },
-                        recursionCount
-                    )
-                ) {
+                if (!isTypeSame(constraints1[i], constraints2[i], typeArgOptions, recursionCount)) {
                     return false;
                 }
             }
