@@ -7,7 +7,7 @@
  * Walks a parse tree to validate internal consistency and completeness.
  */
 
-import { DirectParseTreeWalker, ParseTreeWalker } from '../analyzer/parseTreeWalker';
+import { DirectParseTreeWalker, getChildNodes, ParseTreeWalker } from '../analyzer/parseTreeWalker';
 import { assertNever, fail } from '../common/debug';
 import { TextRange } from '../common/textRange';
 import { NameNode, ParseNode, ParseNodeArray, ParseNodeType } from '../parser/parseNodes';
@@ -20,11 +20,11 @@ export class TestWalker extends ParseTreeWalker {
     }
 
     override visitNode(node: ParseNode) {
-        const children = super.visitNode(node);
+        const children = getChildNodes(node);
         this._verifyParentChildLinks(node, children);
         this._verifyChildRanges(node, children);
 
-        return children;
+        return super.visitNode(node);
     }
 
     // Make sure that all of the children point to their parent.

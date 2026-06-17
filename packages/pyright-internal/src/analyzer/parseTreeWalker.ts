@@ -670,37 +670,6 @@ export class ParseTreeWalker extends ParseTreeVisitor<boolean> {
     }
 
     walk(node: ParseNode): void {
-        const childrenToWalk = this.visitNode(node);
-        if (childrenToWalk.length > 0) {
-            this.walkMultiple(childrenToWalk);
-        }
-    }
-
-    walkMultiple(nodes: ParseNodeArray) {
-        for (let i = 0; i < nodes.length; i++) {
-            const node = nodes[i];
-            if (node) {
-                this.walk(node);
-            }
-        }
-    }
-
-    // If this.visit(node) returns true, all child nodes for the node are returned.
-    // If the method returns false, we assume that the handler has already handled the
-    // child nodes, so an empty list is returned.
-    visitNode(node: ParseNode): ParseNodeArray {
-        return this.visit(node) ? getChildNodes(node) : [];
-    }
-}
-
-// Opt-in walker that avoids materializing child arrays during traversal. Subclasses
-// should override visitNode only for side effects or to suppress child traversal.
-export class DirectParseTreeWalker extends ParseTreeVisitor<boolean> {
-    constructor() {
-        super(/* default */ true);
-    }
-
-    walk(node: ParseNode): void {
         if (this.visitNode(node)) {
             walkChildren(this, node);
         }
@@ -721,3 +690,7 @@ export class DirectParseTreeWalker extends ParseTreeVisitor<boolean> {
         return this.visit(node);
     }
 }
+
+// Compatibility name for callers that were migrated incrementally before the
+// base ParseTreeWalker switched to generated direct child traversal.
+export class DirectParseTreeWalker extends ParseTreeWalker {}

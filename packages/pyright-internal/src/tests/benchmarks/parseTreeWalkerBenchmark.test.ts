@@ -11,7 +11,7 @@ import * as path from 'path';
 import { performance } from 'perf_hooks';
 
 import { DiagnosticSink } from '../../common/diagnosticSink';
-import { ParseTreeWalker } from '../../analyzer/parseTreeWalker';
+import { getChildNodes, ParseTreeWalker } from '../../analyzer/parseTreeWalker';
 import { walkChildren } from '../../parser/generated/walkChildren';
 import { ParseNode } from '../../parser/parseNodes';
 import { ParseOptions, Parser } from '../../parser/parser';
@@ -82,7 +82,7 @@ class ArrayChildWalker extends ParseTreeWalker {
         this._nodesVisited++;
         this._visitorDispatches++;
 
-        const childrenToWalk = this.visitNode(node);
+        const childrenToWalk = this.visit(node) ? getChildNodes(node) : [];
         this._childArraysAllocated++;
 
         for (let i = 0; i < childrenToWalk.length; i++) {
