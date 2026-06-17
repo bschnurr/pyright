@@ -103,7 +103,7 @@ import { ImportResult, ImportType } from './importResult';
 import { getRelativeModuleName, getTopLevelImports } from './importStatementUtils';
 import { getParamListDetails } from './parameterUtils';
 import * as ParseTreeUtils from './parseTreeUtils';
-import { ParseTreeWalker } from './parseTreeWalker';
+import { DirectParseTreeWalker } from './parseTreeWalker';
 import { validateClassPattern } from './patternMatching';
 import { isMethodOnlyProtocol, isProtocolUnsafeOverlap } from './protocols';
 import { Scope, ScopeType } from './scope';
@@ -214,7 +214,7 @@ interface TypeVarUsageInfo {
 // functions to be emitted.
 const isPrintCodeComplexityEnabled = false;
 
-export class Checker extends ParseTreeWalker {
+export class Checker extends DirectParseTreeWalker {
     private readonly _moduleNode: ModuleNode;
     private readonly _fileInfo: AnalyzerFileInfo;
     private _isUnboundCheckSuppressed = false;
