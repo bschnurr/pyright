@@ -1848,13 +1848,18 @@ export class Tokenizer {
     }
 
     private _getStringPrefixLength(): number {
-        if (this._cs.currentChar === Char.SingleQuote || this._cs.currentChar === Char.DoubleQuote) {
+        const currentChar = this._cs.currentChar;
+        const nextChar = this._cs.nextChar;
+        const quoteChar1 = Char.SingleQuote;
+        const quoteChar2 = Char.DoubleQuote;
+
+        if (currentChar === quoteChar1 || currentChar === quoteChar2) {
             // Simple string, no prefix
             return 0;
         }
 
-        if (this._cs.nextChar === Char.SingleQuote || this._cs.nextChar === Char.DoubleQuote) {
-            switch (this._cs.currentChar) {
+        if (nextChar === quoteChar1 || nextChar === quoteChar2) {
+            switch (currentChar) {
                 case Char.f:
                 case Char.F:
                 case Char.r:
@@ -1872,20 +1877,30 @@ export class Tokenizer {
             }
         }
 
-        if (this._cs.lookAhead(2) === Char.SingleQuote || this._cs.lookAhead(2) === Char.DoubleQuote) {
-            const prefix = this._cs
-                .getText()
-                .slice(this._cs.position, this._cs.position + 2)
-                .toLowerCase();
-            switch (prefix) {
-                case 'rf':
-                case 'fr':
-                case 'rt':
-                case 'tr':
-                case 'br':
-                case 'rb':
-                    return 2;
-                default:
+        const quoteChar3 = this._cs.lookAhead(2);
+        if (quoteChar3 === quoteChar1 || quoteChar3 === quoteChar2) {
+            switch (currentChar) {
+                case Char.r:
+                case Char.R:
+                    switch (nextChar) {
+                        case Char.f:
+                        case Char.F:
+                        case Char.t:
+                        case Char.T:
+                        case Char.b:
+                        case Char.B:
+                            return 2;
+                    }
+                    break;
+                case Char.f:
+                case Char.F:
+                case Char.t:
+                case Char.T:
+                case Char.b:
+                case Char.B:
+                    if (nextChar === Char.r || nextChar === Char.R) {
+                        return 2;
+                    }
                     break;
             }
         }
@@ -1895,26 +1910,30 @@ export class Tokenizer {
     private _getQuoteTypeFlags(prefix: string): StringTokenFlags {
         let flags = StringTokenFlags.None;
 
-        prefix = prefix.toLowerCase();
         for (let i = 0; i < prefix.length; i++) {
-            switch (prefix[i]) {
-                case 'u':
+            switch (prefix.charCodeAt(i)) {
+                case Char.u:
+                case Char.U:
                     flags |= StringTokenFlags.Unicode;
                     break;
 
-                case 'b':
+                case Char.b:
+                case Char.B:
                     flags |= StringTokenFlags.Bytes;
                     break;
 
-                case 'r':
+                case Char.r:
+                case Char.R:
                     flags |= StringTokenFlags.Raw;
                     break;
 
-                case 'f':
+                case Char.f:
+                case Char.F:
                     flags |= StringTokenFlags.Format;
                     break;
 
-                case 't':
+                case Char.t:
+                case Char.T:
                     flags |= StringTokenFlags.Template;
                     break;
             }

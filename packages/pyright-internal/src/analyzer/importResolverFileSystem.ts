@@ -60,7 +60,7 @@ class ImportResolverFileSystemImpl implements ImportResolverFileSystem {
 
         if (entry?.isSymbolicLink()) {
             const realPath = tryRealpath(this._fileSystem, uri);
-            if (realPath && this._fileSystem.existsSync(realPath) && isFile(this._fileSystem, realPath)) {
+            if (realPath && isFile(this._fileSystem, realPath)) {
                 return true;
             }
         }
@@ -90,7 +90,7 @@ class ImportResolverFileSystemImpl implements ImportResolverFileSystem {
 
         if (entry?.isSymbolicLink()) {
             const realPath = tryRealpath(this._fileSystem, uri);
-            if (realPath && this._fileSystem.existsSync(realPath) && isDirectory(this._fileSystem, realPath)) {
+            if (realPath && isDirectory(this._fileSystem, realPath)) {
                 return true;
             }
         }

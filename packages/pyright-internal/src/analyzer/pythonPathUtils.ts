@@ -148,7 +148,7 @@ function findSitePackagesPath(
     const candidateDirs = entries.directories.filter((dirName) => {
         if (dirName.fileName.startsWith('python3.')) {
             const dirPath = dirName.combinePaths(pathConsts.sitePackages);
-            return fs.existsSync(dirPath);
+            return isDirectory(fs, dirPath);
         }
         return false;
     });
@@ -188,7 +188,7 @@ export function readPthSearchPaths(pthFile: Uri, fs: FileSystem): Uri[] {
             const trimmedLine = line.trim();
             if (trimmedLine.length > 0 && !trimmedLine.startsWith('#') && !trimmedLine.match(/^import\s/)) {
                 const pthPath = pthFile.getDirectory().combinePaths(trimmedLine);
-                if (fs.existsSync(pthPath) && isDirectory(fs, pthPath)) {
+                if (isDirectory(fs, pthPath)) {
                     searchPaths.push(fs.realCasePath(pthPath));
                 }
             }

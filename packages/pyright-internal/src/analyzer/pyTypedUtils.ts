@@ -20,12 +20,12 @@ export interface PyTypedInfo {
 // Retrieves information about a py.typed file, if it exists, under the given path.
 //
 export function getPyTypedInfo(fileSystem: FileSystem, dirPath: Uri): PyTypedInfo | undefined {
-    if (!fileSystem.existsSync(dirPath) || !isDirectory(fileSystem, dirPath)) {
+    if (!isDirectory(fileSystem, dirPath)) {
         return undefined;
     }
 
     const pyTypedPath = dirPath.pytypedUri;
-    if (!fileSystem.existsSync(pyTypedPath) || !isFile(fileSystem, pyTypedPath)) {
+    if (!isFile(fileSystem, pyTypedPath)) {
         return undefined;
     }
 
