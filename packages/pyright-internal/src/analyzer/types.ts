@@ -131,6 +131,14 @@ export interface TypeSameOptions {
     treatAnySameAsUnknown?: boolean;
 }
 
+const typeSameIgnorePseudoGenericOptions: TypeSameOptions = { ignorePseudoGeneric: true };
+const typeSameIgnoreConditionsOptions: TypeSameOptions = { ignoreConditions: true };
+const typeSameHonorTypeFormOptions: TypeSameOptions = { honorTypeForm: true };
+const typeSameIgnorePseudoGenericHonorTypeFormOptions: TypeSameOptions = {
+    ignorePseudoGeneric: true,
+    honorTypeForm: true,
+};
+
 export interface TypeAliasSharedInfo {
     name: string;
     fullName: string;
@@ -1386,7 +1394,7 @@ export namespace ClassType {
                 !isTypeSame(
                     class1Details.baseClasses[i],
                     class2Details.baseClasses[i],
-                    { ignorePseudoGeneric: true },
+                    typeSameIgnorePseudoGenericOptions,
                     recursionCount
                 )
             ) {
@@ -1401,7 +1409,7 @@ export namespace ClassType {
                 !isTypeSame(
                     class1Details.declaredMetaclass,
                     class2Details.declaredMetaclass,
-                    { ignorePseudoGeneric: true },
+                    typeSameIgnorePseudoGenericOptions,
                     recursionCount
                 )
             ) {
@@ -1414,7 +1422,7 @@ export namespace ClassType {
                 !isTypeSame(
                     class1Details.typeParams[i],
                     class2Details.typeParams[i],
-                    { ignorePseudoGeneric: true },
+                    typeSameIgnorePseudoGenericOptions,
                     recursionCount
                 )
             ) {
@@ -3823,7 +3831,8 @@ export function combineTypes(subtypes: Type[], options?: CombineTypesOptions): T
 
     let hitMaxSubtypeCount = false;
 
-    expandedTypes.forEach((subtype, index) => {
+    for (let index = 0; index < expandedTypes.length; index++) {
+        const subtype = expandedTypes[index];
         if (index === 0) {
             UnionType.addType(newUnionType, subtype as UnionableType);
         } else {
@@ -3833,7 +3842,7 @@ export function combineTypes(subtypes: Type[], options?: CombineTypesOptions): T
                 hitMaxSubtypeCount = true;
             }
         }
-    });
+    }
 
     if (hitMaxSubtypeCount) {
         return AnyType.create();
@@ -3865,7 +3874,7 @@ export function isSameWithoutLiteralValue(destType: Type, srcType: Type): boolea
     if (isClassInstance(srcType) && srcType.priv.literalValue !== undefined) {
         // Strip the literal.
         srcType = ClassType.cloneWithLiteral(srcType, /* value */ undefined);
-        return isTypeSame(destType, srcType, { ignoreConditions: true });
+        return isTypeSame(destType, srcType, typeSameIgnoreConditionsOptions);
     }
 
     return false;
@@ -3917,7 +3926,7 @@ function _addTypeIfUnique(unionType: UnionType, typeToAdd: UnionableType, elideR
         const type = unionType.priv.subtypes[i];
 
         // Does this type already exist in the types array?
-        if (isTypeSame(type, typeToAdd, { honorTypeForm: true })) {
+        if (isTypeSame(type, typeToAdd, typeSameHonorTypeFormOptions)) {
             return;
         }
 
@@ -3928,7 +3937,7 @@ function _addTypeIfUnique(unionType: UnionType, typeToAdd: UnionableType, elideR
         // we can hit recursive cases (where a pseudo-generic class is
         // parameterized with its own class) ad infinitum.
         if (isPseudoGeneric) {
-            if (isTypeSame(type, typeToAdd, { ignorePseudoGeneric: true, honorTypeForm: true })) {
+            if (isTypeSame(type, typeToAdd, typeSameIgnorePseudoGenericHonorTypeFormOptions)) {
                 unionType.priv.subtypes[i] = ClassType.specialize(
                     typeToAdd,
                     typeToAdd.shared.typeParams.map(() => UnknownType.create())
