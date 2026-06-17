@@ -3558,6 +3558,18 @@ export function isTypeSame(type1: Type, type2: Type, options: TypeSameOptions = 
                 return false;
             }
 
+            let allSubtypesAreSameInOrder = true;
+            for (let i = 0; i < subtypes1.length; i++) {
+                if (subtypes1[i] !== subtypes2[i]) {
+                    allSubtypesAreSameInOrder = false;
+                    break;
+                }
+            }
+
+            if (allSubtypesAreSameInOrder) {
+                return true;
+            }
+
             // The types do not have a particular order, so we need to
             // do the comparison in an order-independent manner.
             const exclusionSet = new Set<number>();
