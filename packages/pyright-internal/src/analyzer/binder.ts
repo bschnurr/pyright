@@ -120,7 +120,7 @@ import {
 import { ImplicitImport, ImportResult, ImportType } from './importResult';
 import { getWildcardImportNames } from './importStatementUtils';
 import * as ParseTreeUtils from './parseTreeUtils';
-import { DirectParseTreeWalker } from './parseTreeWalker';
+import { ParseTreeWalker } from './parseTreeWalker';
 import { CellChainIndexProvider } from './cellChainIndex';
 import {
     ChainedModuleLevelLookupContext,
@@ -169,7 +169,7 @@ interface NarrowExprOptions {
 // flow nodes. This number is somewhat arbitrary and is tuned empirically.
 const flowNodeComplexityContribution = 0.025;
 
-export class Binder extends DirectParseTreeWalker {
+export class Binder extends ParseTreeWalker {
     private readonly _fileInfo: AnalyzerFileInfo;
 
     // A queue of deferred analysis operations.
@@ -4640,7 +4640,7 @@ export class Binder extends DirectParseTreeWalker {
     }
 }
 
-export class YieldFinder extends DirectParseTreeWalker {
+export class YieldFinder extends ParseTreeWalker {
     private _containsYield = false;
 
     checkContainsYield(node: ParseNode) {
@@ -4659,7 +4659,7 @@ export class YieldFinder extends DirectParseTreeWalker {
     }
 }
 
-export class ReturnFinder extends DirectParseTreeWalker {
+export class ReturnFinder extends ParseTreeWalker {
     private _containsReturn = false;
 
     checkContainsReturn(node: ParseNode) {
@@ -4678,7 +4678,7 @@ export class ReturnFinder extends DirectParseTreeWalker {
 // to be unreachable. There are code paths where the type evaluator
 // will still evaluate these types, and it depends on the presence
 // of a scope.
-export class DummyScopeGenerator extends DirectParseTreeWalker {
+export class DummyScopeGenerator extends ParseTreeWalker {
     private _currentScope: Scope | undefined;
 
     constructor(currentScope: Scope | undefined) {

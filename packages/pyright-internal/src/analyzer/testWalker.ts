@@ -7,7 +7,7 @@
  * Walks a parse tree to validate internal consistency and completeness.
  */
 
-import { DirectParseTreeWalker, getChildNodes, ParseTreeWalker } from '../analyzer/parseTreeWalker';
+import { getChildNodes, ParseTreeWalker } from '../analyzer/parseTreeWalker';
 import { assertNever, fail } from '../common/debug';
 import { TextRange } from '../common/textRange';
 import { NameNode, ParseNode, ParseNodeArray, ParseNodeType } from '../parser/parseNodes';
@@ -106,7 +106,7 @@ export class TestWalker extends ParseTreeWalker {
 
 // Custom parse node walker that evaluates the types of all
 // NameNodes. This helps find bugs in evaluation ordering.
-export class NameTypeWalker extends DirectParseTreeWalker {
+export class NameTypeWalker extends ParseTreeWalker {
     constructor(private _evaluator: TypeEvaluator) {
         super();
     }

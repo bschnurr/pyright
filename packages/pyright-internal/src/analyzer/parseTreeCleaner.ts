@@ -13,9 +13,9 @@
 
 import { ModuleNode, ParseNode } from '../parser/parseNodes';
 import * as AnalyzerNodeInfo from './analyzerNodeInfo';
-import { DirectParseTreeWalker } from './parseTreeWalker';
+import { ParseTreeWalker } from './parseTreeWalker';
 
-export class ParseTreeCleanerWalker extends DirectParseTreeWalker {
+export class ParseTreeCleanerWalker extends ParseTreeWalker {
     private _parseTree: ModuleNode;
 
     constructor(parseTree: ModuleNode) {

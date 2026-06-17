@@ -99,6 +99,17 @@ export function walkChildren(walker: ParseTreeWalker, node: ParseNode): void {
 
 This preserves traversal order while avoiding temporary arrays.
 
+## Implemented Prototype Update
+
+The prototype has now moved beyond the initial compatibility phase:
+
+* `getChildNodes` delegates to generated `forEachChild`.
+* `ParseTreeWalker.walk` uses generated `walkChildren` directly.
+* `ParseTreeWalker.visitNode` returns a boolean that controls whether children are walked.
+* Binder, Checker, and lower-risk utility/language-service walkers have been validated on the generated traversal path.
+* Code that genuinely needs child arrays, such as `TestWalker`, `TreeDumper`, `findNodeByOffset`, and the benchmark array baseline, now calls `getChildNodes` explicitly.
+* The temporary `DirectParseTreeWalker` compatibility alias has been removed; migrated walkers now extend `ParseTreeWalker` directly.
+
 ---
 
 # 2. Goals
@@ -931,35 +942,35 @@ Prototype only after generated direct traversal is benchmarked.
 
 ## Step 1
 
-Land generated `forEachChild` behind tests.
+Landed generated `forEachChild` behind tests.
 
 No behavior change.
 
 ## Step 2
 
-Update `getChildNodes` to use generated `forEachChild`.
+Updated `getChildNodes` to use generated `forEachChild`.
 
 Still no behavior change.
 
 ## Step 3
 
-Add new direct walker implementation behind a feature flag.
+Added an opt-in direct walker path and migrated low-risk internal passes.
 
-Run full test suite both ways.
+Full test suite and focused traversal tests passed.
 
 ## Step 4
 
-Enable direct walker for selected internal passes.
+Enabled generated traversal for Binder and Checker after lower-risk passes were validated.
 
-Avoid binder/checker initially unless confidence is high.
+Full test suite, benchmark smoke, and real-world PyTorch diagnostics parity passed.
 
 ## Step 5
 
-Convert more passes after benchmarks show benefit.
+Switched `ParseTreeWalker` itself to generated `walkChildren`.
 
 ## Step 6
 
-Add sparse visitors and fused module scan for auxiliary features.
+Future work: consider sparse visitors and fused module scans only if additional profiling shows repeated syntax scans remain significant.
 
 ---
 
@@ -1001,10 +1012,10 @@ Mitigation:
 
 Mitigation:
 
-* do not change binder/checker first;
+* migrate lower-risk walkers first;
 * preserve traversal order exactly;
-* use feature flag;
-* run full test suite and real-world corpus.
+* run focused analyzer tests, full test suite, benchmark smoke, and real-world PyTorch corpus;
+* verify diagnostics parity against upstream.
 
 ---
 
@@ -1029,7 +1040,97 @@ Realistic expectations:
 
 ---
 
-# 11. Best First Prototype
+# 11. Measured Results
+
+## Parse-Tree Walker Microbenchmark
+
+The final benchmark smoke after switching the base `ParseTreeWalker` to generated traversal showed the clearest signal on the scaled corpus:
+
+| Corpus | Array child traversal | Generated child traversal | Allocation change |
+| --- | ---: | ---: | ---: |
+| `large_stdlib_10x` | 7.17ms | 4.01ms | 83,821 child arrays to 0 |
+
+This is about a 1.8x raw traversal speedup on the scaled corpus. Smaller corpora are noisier, but generated traversal generally remains competitive or faster while eliminating child-list allocations.
+
+## PyTorch End-to-End CLI Benchmark
+
+Benchmark setup:
+
+* Current worktree CLI was rebuilt with `npm run build:cli:dev`.
+* Upstream CLI was built from `upstream/main` in `C:\dev\pyright-upstream-bench`.
+* The upstream benchmark commit was `f744c7803`, which is also the merge-base for the worktree branch.
+* Command shape: `node <pyright-index.js> C:\dev\pytorch --stats`.
+* PyTorch had no root `pyrightconfig.json`, so both runs used the same default CLI behavior.
+* Diagnostics matched across runs: 117,260 errors, 1,870 warnings, 83 informations.
+
+Warmed comparison:
+
+| CLI | Wall time | Pyright completed time | Bind | Check |
+| --- | ---: | ---: | ---: | ---: |
+| upstream warm | 623.9s | 622.7s | 75.35s | 473.73s |
+| worktree | 608.5s | 606.9s | 73.29s | 460.27s |
+
+The worktree was about 15.8s faster end-to-end, or roughly 2.5% on this PyTorch run. Bind improved by about 2.7%, and Check improved by about 2.8%. The first upstream run completed in 731.4s because it included cold filesystem effects, so the warmed upstream run is the fairer comparison.
+
+## How This Reduces Allocations
+
+The old generic walker asked every node for a child list:
+
+```ts
+const childrenToWalk = this.visitNode(node);
+this.walkMultiple(childrenToWalk);
+```
+
+That shape forced the traversal path to allocate a fresh child array for each visited node, even though the array was immediately consumed and discarded. Many child-list cases also used spreads or other temporary array assembly. On large repositories, this creates a stream of short-lived allocations that increases young-generation garbage collection pressure.
+
+The generated traversal turns the child list into direct field visits:
+
+```ts
+if (this.visitNode(node)) {
+    walkChildren(this, node);
+}
+```
+
+`walkChildren` is generated from `childFields`, so each parse-node case directly calls `walker.walk` on known child fields and uses plain `for` loops for child arrays already stored on the parse node. The traversal no longer constructs a separate array just to tell the walker what to visit next.
+
+For an engineering team, the important distinction is:
+
+* We are not changing the parse tree shape.
+* We are not changing analysis order.
+* We are removing an allocation layer between “visit this node” and “walk its known children.”
+* The few APIs that truly need a child array still call `getChildNodes`, so the allocation cost is now paid only by those explicit consumers, not by every default tree walk.
+
+Correctness is protected by generated-output freshness checks, child-field coverage tests, runtime child-oracle tests, full Pyright tests, and real-world PyTorch diagnostics parity.
+
+## Profiling and PGO Guidance
+
+The next optimization pass should be profile-guided engineering rather than speculative traversal work. In a TypeScript/Node CLI, classic native compiler PGO is not directly available in the same way it is for C/C++ binaries. V8 already collects runtime feedback and JITs hot JavaScript dynamically. The practical equivalent for Pyright is to use CPU, heap, and GC profiles to choose the next code changes.
+
+Recommended profiling commands:
+
+```powershell
+node --cpu-prof --cpu-prof-dir C:\temp\pyright-profiles `
+    C:\dev\pyright-ast\packages\pyright\index.js C:\dev\pytorch --stats
+
+node --heap-prof --heap-prof-dir C:\temp\pyright-profiles `
+    C:\dev\pyright-ast\packages\pyright\index.js C:\dev\pytorch --stats
+
+node --trace-gc C:\dev\pyright-ast\packages\pyright\index.js C:\dev\pytorch --stats `
+    *> C:\temp\pyright-profiles\worktree-trace-gc.txt
+```
+
+Use the same commands against `C:\dev\pyright-upstream-bench\packages\pyright\index.js` for upstream comparison. CPU profiles can be loaded into Chrome DevTools or speedscope. Heap profiles and GC logs should answer whether the generated traversal change reduced allocation and GC pressure in a real workload, not just in the microbenchmark.
+
+The decision rule for future work should be:
+
+1. If CPU profiles still show parse-tree traversal or visitor dispatch as hot, pursue sparse visitors or remaining `getChildNodes` reductions.
+2. If allocation profiles still show child-array or traversal-adjacent churn, target those allocation sites first.
+3. If Check/Bind internals dominate, move optimization effort into the specific checker, binder, type evaluator, or import-resolution functions shown in the profile.
+4. Do not start sparse visitors, fused module scans, or flat AST sidecars unless profiles show repeated syntax walking remains material.
+
+---
+
+# 12. Best First Prototype
 
 The best first prototype is intentionally narrow:
 
@@ -1044,7 +1145,7 @@ This avoids risky checker changes and gives measurable data quickly.
 
 ---
 
-# 12. Example Generated Walker
+# 13. Example Generated Walker
 
 Example generated output for `Call` and `Function`:
 
@@ -1096,7 +1197,7 @@ export function walkChildren(walker: ParseTreeWalker, node: ParseNode): void {
 
 ---
 
-# 13. Example Generated `forEachChild`
+# 14. Example Generated `forEachChild`
 
 ```ts
 export function forEachChild(node: ParseNode, callback: (child: ParseNode) => void): void {
@@ -1146,7 +1247,7 @@ export function forEachChild(node: ParseNode, callback: (child: ParseNode) => vo
 
 ---
 
-# 14. Example Generator Input
+# 15. Example Generator Input
 
 ```ts
 export const childFields = {
@@ -1171,7 +1272,7 @@ This preserves explicit traversal order.
 
 ---
 
-# 15. Example Benchmark Output
+# 16. Example Benchmark Output
 
 Target format:
 
@@ -1217,22 +1318,28 @@ Delta:
 
 ---
 
-# 16. Open Questions
+# 17. Open Questions
 
-1. Should generated files be checked in, or generated during build?
-2. Should `childFields` be hand-maintained or derived from parse-node definitions?
-3. Should `ParseTreeWalker` switch to boolean-returning visitors, or keep the existing shape with an adapter?
-4. Which pass should be migrated first?
-5. Should sparse visitor live beside `ParseTreeWalker` or replace parts of it later?
-6. How much existing code depends on `getChildNodes` returning arrays?
-7. Should module scans be cached per source-file version?
-8. Should module scans become part of the existing indexer pipeline?
-9. Should we add a flat AST sidecar only for indexing?
-10. How do we guard against generated walker drift when parse-node definitions change?
+Resolved by the prototype:
+
+1. Generated `walkChildren.ts` is checked in.
+2. `childFields` is hand-maintained from parse-node traversal order.
+3. `ParseTreeWalker.visitNode` now returns a boolean.
+4. Low-risk walkers migrated first, followed by Binder, Checker, and then the base walker.
+5. Existing code that needs child arrays now calls `getChildNodes` explicitly.
+6. Generated walker drift is guarded by `check:walkchildren` as part of root `npm run check`.
+
+Still open for future work:
+
+1. What do CPU, heap, and GC profiles show after the generated traversal change?
+2. Should sparse visitor live beside `ParseTreeWalker` or replace parts of it later?
+3. Should module scans be cached per source-file version?
+4. Should module scans become part of the existing indexer pipeline?
+5. Should we add a flat AST sidecar only for indexing?
 
 ---
 
-# 17. Recommended First PR
+# 18. Completed First PR
 
 Title:
 
@@ -1256,25 +1363,47 @@ This first PR should be behavior-preserving and easy to review.
 
 ---
 
-# 18. Recommended Second PR
+# 19. Completed Follow-Up PRs
 
-Title:
+Titles included:
 
 ```txt
-Use generated walkChildren in ParseTreeWalker behind feature flag
+Use direct walker for parse tree utility scans
+Use direct walker for binder finders
+Use direct walker for language-service scans
+Use direct walker for analyzer utilities
+Use direct walker for binder
+Use direct walker for checker
+Use generated traversal in base parse tree walker
 ```
 
 Scope:
 
-* Update `ParseTreeWalker`.
-* Add feature flag.
-* Run full test suite both ways.
-* Add debug counters.
-* Benchmark selected passes.
+* Migrate low-risk walkers first.
+* Migrate Binder and Checker after confidence was established.
+* Switch the base `ParseTreeWalker` to generated `walkChildren`.
+* Keep `getChildNodes` only for explicit array consumers.
+* Run focused tests, full tests, benchmark smoke, and PyTorch CLI comparison.
 
 ---
 
-# 19. Recommended Third PR
+# 20. Recommended Next PR
+
+Title:
+
+```txt
+Add profile-guided benchmark artifacts
+```
+
+Scope:
+
+* Add or document repeatable upstream-vs-worktree benchmark commands.
+* Capture CPU, heap, and GC profiles for PyTorch upstream and worktree runs.
+* Use profile data to choose the next optimization target.
+
+---
+
+# 21. Recommended Later PR
 
 Title:
 
@@ -1284,14 +1413,14 @@ Introduce sparse parse-tree walker for syntax-only scans
 
 Scope:
 
-* Add `SparseParseTreeWalker`.
+* Add `SparseParseTreeWalker` only if profiles show visitor dispatch remains meaningful.
 * Convert one simple scanner.
 * Add benchmarks.
 * Document migration pattern.
 
 ---
 
-# 20. Recommended Fourth PR
+# 22. Recommended Later PR
 
 Title:
 
@@ -1308,7 +1437,7 @@ Scope:
 
 ---
 
-# 21. Summary
+# 23. Summary
 
 The practical Pyright version of the Reflex AST sprint idea is:
 
@@ -1316,6 +1445,6 @@ The practical Pyright version of the Reflex AST sprint idea is:
 2. Generate direct child walkers from parse-node metadata.
 3. Skip visitor dispatch for uninterested node types.
 4. Fuse repeated syntax scans into one module scan.
-5. Measure before broadly migrating checker-sensitive paths.
+5. Use CPU, heap, and GC profiles to choose the next optimization.
 
 This should provide real wins in Pylance indexing, semantic metadata generation, document symbols, import scanning, and other traversal-heavy features, while keeping the core type checker safe and maintainable.

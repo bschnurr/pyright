@@ -690,7 +690,3 @@ export class ParseTreeWalker extends ParseTreeVisitor<boolean> {
         return this.visit(node);
     }
 }
-
-// Compatibility name for callers that were migrated incrementally before the
-// base ParseTreeWalker switched to generated direct child traversal.
-export class DirectParseTreeWalker extends ParseTreeWalker {}

@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { findNodeByOffset, getFirstAncestorOrSelfOfKind } from '../analyzer/parseTreeUtils';
-import { DirectParseTreeWalker, getChildNodes, ParseTreeWalker } from '../analyzer/parseTreeWalker';
+import { getChildNodes, ParseTreeWalker } from '../analyzer/parseTreeWalker';
 import { ExecutionEnvironment, getStandardDiagnosticRuleSet } from '../common/configOptions';
 import { DiagnosticSink } from '../common/diagnosticSink';
 import { pythonVersion3_13, pythonVersion3_14 } from '../common/pythonVersion';
@@ -33,7 +33,7 @@ class WalkChildrenCollector extends ParseTreeWalker {
     }
 }
 
-class DirectWalkCollector extends DirectParseTreeWalker {
+class DirectWalkCollector extends ParseTreeWalker {
     readonly nodes: ParseNode[] = [];
 
     override visitNode(node: ParseNode): boolean {
@@ -301,7 +301,7 @@ test('Generated children include reflected parse-node d children', () => {
     }
 });
 
-test('DirectParseTreeWalker preserves generated preorder traversal', () => {
+test('ParseTreeWalker preserves generated preorder traversal', () => {
     const diagSink = new DiagnosticSink();
     const parseResults = TestUtils.parseText(richParseTreeCode, diagSink);
     const expectedNodes = collectParseNodes(parseResults.parserOutput.parseTree);
