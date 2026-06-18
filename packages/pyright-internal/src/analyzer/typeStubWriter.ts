@@ -480,7 +480,11 @@ class TypeStubTreeWalker extends ParseTreeWalker {
                 this._emitLine('else:');
                 this._emitSuite(() => {
                     if (elseSuite.nodeType === ParseNodeType.If) {
-                        this.walkMultiple([elseSuite.d.testExpr, elseSuite.d.ifSuite, elseSuite.d.elseSuite]);
+                        this.walk(elseSuite.d.testExpr);
+                        this.walk(elseSuite.d.ifSuite);
+                        if (elseSuite.d.elseSuite) {
+                            this.walk(elseSuite.d.elseSuite);
+                        }
                     } else {
                         this.walkMultiple(elseSuite.d.statements);
                     }

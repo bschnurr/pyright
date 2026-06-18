@@ -745,7 +745,8 @@ export class Checker extends ParseTreeWalker {
         this._evaluator.getType(node);
 
         // Walk the children.
-        this.walkMultiple([...node.d.params, node.d.expr]);
+        this.walkMultiple(node.d.params);
+        this.walk(node.d.expr);
 
         node.d.params.forEach((param) => {
             if (param.d.name) {

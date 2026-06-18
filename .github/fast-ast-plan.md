@@ -1072,6 +1072,29 @@ Warmed comparison:
 
 The worktree was about 15.8s faster end-to-end, or roughly 2.5% on this PyTorch run. Bind improved by about 2.7%, and Check improved by about 2.8%. The first upstream run completed in 731.4s because it included cold filesystem effects, so the warmed upstream run is the fairer comparison.
 
+## AST Walking Allocation Follow-up
+
+The main focus remains removing allocations from AST walking paths. A follow-up audit found:
+
+* Most `walkMultiple` calls now pass existing AST arrays and do not allocate new child arrays.
+* Two production walkers still created temporary arrays only to walk children:
+  * `Checker.visitLambda`: `walkMultiple([...params, expr])`
+  * `TypeStubTreeWalker.visitIf`: `walkMultiple([testExpr, ifSuite, elseSuite])`
+* `findNodeByOffset` remains the largest explicit production `getChildNodes` consumer. It allocates child arrays along a selected offset path and has a second allocation on the binary-search branch. It is deferred because preserving current ordered/binary-search semantics likely requires a new generated breakable/indexed child API and more targeted cursor-service profiling.
+* `TreeDumper` and `TestWalker` still use child arrays in debug/test-mode paths; they are lower priority than production walkers and compatibility tests/benchmarks should keep their explicit `getChildNodes` baselines.
+
+Implemented follow-up:
+
+* `Checker.visitLambda` now walks the existing parameter array, then walks the lambda expression directly.
+* `TypeStubTreeWalker.visitIf` now walks nested `elif` components directly instead of constructing a temporary child array.
+
+Validation:
+
+* Focused `checker.test`.
+* `packages\pyright-internal` build.
+* Root `npm run check`.
+* Full `npm test --silent`.
+
 ## How This Reduces Allocations
 
 The old generic walker asked every node for a child list:
