@@ -107,7 +107,8 @@ The prototype has now moved beyond the initial compatibility phase:
 * `ParseTreeWalker.walk` uses generated `walkChildren` directly.
 * `ParseTreeWalker.visitNode` returns a boolean that controls whether children are walked.
 * Binder, Checker, and lower-risk utility/language-service walkers have been validated on the generated traversal path.
-* Code that genuinely needs child arrays, such as `TestWalker`, `TreeDumper`, `findNodeByOffset`, and the benchmark array baseline, now calls `getChildNodes` explicitly.
+* Code that genuinely needs child arrays, such as compatibility tests and the benchmark array baseline, now calls `getChildNodes` explicitly.
+* Offset lookup uses generated indexed child helpers, preserving ordered child-slot semantics without materializing child arrays.
 * The temporary `DirectParseTreeWalker` compatibility alias has been removed; migrated walkers now extend `ParseTreeWalker` directly.
 
 ---
@@ -149,12 +150,16 @@ Exports:
 
 ```ts
 export function walkChildren(walker: ParseTreeWalker, node: ParseNode): void;
-export function forEachChild(node: ParseNode, callback: (child: ParseNode) => void): void;
+export function forEachChild(node: ParseNode, callback: (child: ParseNode | undefined) => void): void;
+export function getChildCount(node: ParseNode): number;
+export function getChildAt(node: ParseNode, index: number): ParseNode | undefined;
 ```
 
 `walkChildren` is used by the high-performance walker.
 
 `forEachChild` is used by compatibility APIs like `getChildNodes`.
+
+`getChildCount` and `getChildAt` are used by indexed consumers like offset lookup that need ordered child slots without materializing a child array.
 
 ## 3.2 Child Field Specification
 
@@ -207,14 +212,14 @@ The existing visitor methods remain unchanged.
 Keep:
 
 ```ts
-export function getChildNodes(node: ParseNode): ParseNode[];
+export function getChildNodes(node: ParseNode): (ParseNode | undefined)[];
 ```
 
 But implement it using `forEachChild`:
 
 ```ts
-export function getChildNodes(node: ParseNode): ParseNode[] {
-    const children: ParseNode[] = [];
+export function getChildNodes(node: ParseNode): (ParseNode | undefined)[] {
+    const children: (ParseNode | undefined)[] = [];
     forEachChild(node, (child) => {
         children.push(child);
     });
@@ -1044,13 +1049,14 @@ Realistic expectations:
 
 ## Parse-Tree Walker Microbenchmark
 
-The final benchmark smoke after switching the base `ParseTreeWalker` to generated traversal showed the clearest signal on the scaled corpus:
+The final benchmark smoke after switching the base `ParseTreeWalker` to generated traversal showed the clearest signal on the scaled corpus. A later smoke after the indexed-child cleanup kept the same allocation result and improved the local scaled-corpus median:
 
-| Corpus | Array child traversal | Generated child traversal | Allocation change |
-| --- | ---: | ---: | ---: |
-| `large_stdlib_10x` | 7.17ms | 4.01ms | 83,821 child arrays to 0 |
+| Run | Corpus | Array child traversal | Generated child traversal | Allocation change |
+| --- | --- | ---: | ---: | ---: |
+| Base walker switch | `large_stdlib_10x` | 7.17ms | 4.01ms | 83,821 child arrays to 0 |
+| After indexed child access | `large_stdlib_10x` | 6.79ms | 3.51ms | 83,821 child arrays to 0 |
 
-This is about a 1.8x raw traversal speedup on the scaled corpus. Smaller corpora are noisier, but generated traversal generally remains competitive or faster while eliminating child-list allocations.
+This is roughly a 1.8x to 1.9x raw traversal speedup on the scaled corpus. Smaller corpora are noisier, but generated traversal generally remains competitive or faster while eliminating child-list allocations.
 
 ## PyTorch End-to-End CLI Benchmark
 
@@ -1080,8 +1086,8 @@ The main focus remains removing allocations from AST walking paths. A follow-up 
 * Two production walkers still created temporary arrays only to walk children:
   * `Checker.visitLambda`: `walkMultiple([...params, expr])`
   * `TypeStubTreeWalker.visitIf`: `walkMultiple([testExpr, ifSuite, elseSuite])`
-* `findNodeByOffset` remains the largest explicit production `getChildNodes` consumer. It allocates child arrays along a selected offset path and has a second allocation on the binary-search branch. It is deferred because preserving current ordered/binary-search semantics likely requires a new generated breakable/indexed child API and more targeted cursor-service profiling.
-* `TreeDumper` and `TestWalker` still use child arrays in debug/test-mode paths; they are lower priority than production walkers and compatibility tests/benchmarks should keep their explicit `getChildNodes` baselines.
+* `findNodeByOffset` was the largest explicit production `getChildNodes` consumer. It allocated child arrays along a selected offset path and had a second allocation on the binary-search branch.
+* `TreeDumper` and `TestWalker` still used child arrays in debug/test-mode paths; they were lower priority than production walkers but easy to convert once generated traversal was central.
 
 Implemented follow-up:
 
@@ -1111,6 +1117,7 @@ Validation:
 * `packages\pyright-internal` build.
 * Root `npm run check`.
 * Full `npm test --silent`.
+* Latest parse-tree walker benchmark: `large_stdlib_10x` array-child 6.79ms vs generated-child 3.51ms, with generated child arrays still 0.
 
 ## How This Reduces Allocations
 
