@@ -48,7 +48,7 @@ import { OperatorTypeNameMap, ParseNodeTypeNameMap } from '../parser/parseNodeUt
 import { ParseFileResults } from '../parser/parser';
 import { Tokenizer, TokenizerOutput } from '../parser/tokenizer';
 import { KeywordType, OperatorType, StringToken, StringTokenFlags, Token, TokenType } from '../parser/tokenizerTypes';
-import { forEachChild, getChildAt, getChildCount } from '../parser/generated/walkChildren';
+import { getChildAt, getChildCount, walkChildren } from '../parser/generated/walkChildren';
 import { getScope } from './analyzerNodeInfo';
 import { ParseTreeWalker } from './parseTreeWalker';
 import { TypeVarScopeId } from './types';
@@ -2140,20 +2140,31 @@ export function isWriteAccess(node: NameNode) {
 }
 
 export function getMatchingDescendants(node: ParseNode, match: (n: ParseNode) => boolean): ParseNode[] {
-    const matches: ParseNode[] = [];
-    _appendMatchingDescendants(node, match, matches);
-    return matches;
+    const walker = new MatchingDescendantWalker(match);
+    walkChildren(walker, node);
+    return walker.getMatches();
 }
 
-function _appendMatchingDescendants(node: ParseNode, match: (n: ParseNode) => boolean, matches: ParseNode[]) {
-    forEachChild(node, (child) => {
-        if (child && match(child)) {
-            matches.push(child);
+class MatchingDescendantWalker extends ParseTreeWalker {
+    private readonly _match: (n: ParseNode) => boolean;
+    private readonly _matches: ParseNode[] = [];
+
+    constructor(match: (n: ParseNode) => boolean) {
+        super();
+        this._match = match;
+    }
+
+    getMatches(): ParseNode[] {
+        return this._matches;
+    }
+
+    override visitNode(node: ParseNode): boolean {
+        if (this._match(node)) {
+            this._matches.push(node);
         }
-        if (child) {
-            _appendMatchingDescendants(child, match, matches);
-        }
-    });
+
+        return true;
+    }
 }
 
 export function getModuleNode(node: ParseNode) {

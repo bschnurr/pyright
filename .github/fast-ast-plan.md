@@ -1111,8 +1111,8 @@ Indexed child access follow-up:
 
 Additional recursive utility cleanup:
 
-* `getMatchingDescendants` now uses an accumulator helper instead of recursively allocating a result array for each child and spreading it into the parent result.
-* This does not change traversal order or the public return shape; it only removes intermediate arrays from the recursive AST walk.
+* `getMatchingDescendants` now uses a small `ParseTreeWalker` subclass and generated `walkChildren` instead of recursive `forEachChild` callbacks.
+* This does not change traversal order or the public return shape; it allocates one walker and one result array instead of creating recursive callback frames, intermediate result arrays, and spread operations.
 
 Validation:
 
@@ -1153,7 +1153,7 @@ For an engineering team, the important distinction is:
 * We are not changing analysis order.
 * We are removing an allocation layer between “visit this node” and “walk its known children.”
 * The few APIs that truly need a child array still call `getChildNodes`, so the allocation cost is now paid only by those explicit consumers, not by every default tree walk.
-* Follow-up utility changes also remove smaller traversal-adjacent allocations: recursive descendant collection no longer creates one temporary result array per child, and offset lookup no longer creates tiny index/item wrapper objects during binary search.
+* Follow-up utility changes also remove smaller traversal-adjacent allocations: recursive descendant collection now uses a direct generated walker with one result array, and offset lookup no longer creates tiny index/item wrapper objects during binary search.
 
 Correctness is protected by generated-output freshness checks, child-field coverage tests, runtime child-oracle tests, full Pyright tests, and real-world PyTorch diagnostics parity.
 
