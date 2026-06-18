@@ -884,6 +884,1738 @@ export function forEachChild(node: ParseNode, callback: (child: ParseNode | unde
     }
 }
 
+export function getChildCount(node: ParseNode): number {
+    switch (node.nodeType) {
+        case ParseNodeType.Error: {
+            const typedNode = node as ErrorNode;
+            let count = 0;
+
+            count++;
+
+            if (typedNode.d.decorators) {
+                count += typedNode.d.decorators.length;
+            }
+
+            return count;
+        }
+
+        case ParseNodeType.Argument: {
+            return 2;
+        }
+
+        case ParseNodeType.Assert: {
+            return 2;
+        }
+
+        case ParseNodeType.AssignmentExpression: {
+            return 2;
+        }
+
+        case ParseNodeType.Assignment: {
+            return 3;
+        }
+
+        case ParseNodeType.AugmentedAssignment: {
+            return 2;
+        }
+
+        case ParseNodeType.Await: {
+            return 1;
+        }
+
+        case ParseNodeType.BinaryOperation: {
+            return 2;
+        }
+
+        case ParseNodeType.Break: {
+            return 0;
+        }
+
+        case ParseNodeType.Call: {
+            const typedNode = node as CallNode;
+            let count = 0;
+
+            count++;
+
+            count += typedNode.d.args.length;
+
+            return count;
+        }
+
+        case ParseNodeType.Case: {
+            return 3;
+        }
+
+        case ParseNodeType.Class: {
+            const typedNode = node as ClassNode;
+            let count = 0;
+
+            count += typedNode.d.decorators.length;
+
+            count++;
+
+            count++;
+
+            count += typedNode.d.arguments.length;
+
+            count++;
+
+            return count;
+        }
+
+        case ParseNodeType.Comprehension: {
+            const typedNode = node as ComprehensionNode;
+            let count = 0;
+
+            count++;
+
+            count += typedNode.d.forIfNodes.length;
+
+            return count;
+        }
+
+        case ParseNodeType.ComprehensionFor: {
+            return 2;
+        }
+
+        case ParseNodeType.ComprehensionIf: {
+            return 1;
+        }
+
+        case ParseNodeType.Constant: {
+            return 0;
+        }
+
+        case ParseNodeType.Continue: {
+            return 0;
+        }
+
+        case ParseNodeType.Decorator: {
+            return 1;
+        }
+
+        case ParseNodeType.Del: {
+            const typedNode = node as DelNode;
+            let count = 0;
+
+            count += typedNode.d.targets.length;
+
+            return count;
+        }
+
+        case ParseNodeType.Dictionary: {
+            const typedNode = node as DictionaryNode;
+            let count = 0;
+
+            count += typedNode.d.items.length;
+
+            return count;
+        }
+
+        case ParseNodeType.DictionaryExpandEntry: {
+            return 1;
+        }
+
+        case ParseNodeType.DictionaryKeyEntry: {
+            return 2;
+        }
+
+        case ParseNodeType.Ellipsis: {
+            return 0;
+        }
+
+        case ParseNodeType.If: {
+            return 3;
+        }
+
+        case ParseNodeType.Import: {
+            const typedNode = node as ImportNode;
+            let count = 0;
+
+            count += typedNode.d.list.length;
+
+            return count;
+        }
+
+        case ParseNodeType.ImportAs: {
+            return 2;
+        }
+
+        case ParseNodeType.ImportFrom: {
+            const typedNode = node as ImportFromNode;
+            let count = 0;
+
+            count++;
+
+            count += typedNode.d.imports.length;
+
+            return count;
+        }
+
+        case ParseNodeType.ImportFromAs: {
+            return 2;
+        }
+
+        case ParseNodeType.Index: {
+            const typedNode = node as IndexNode;
+            let count = 0;
+
+            count++;
+
+            count += typedNode.d.items.length;
+
+            return count;
+        }
+
+        case ParseNodeType.Except: {
+            return 3;
+        }
+
+        case ParseNodeType.For: {
+            return 4;
+        }
+
+        case ParseNodeType.FormatString: {
+            const typedNode = node as FormatStringNode;
+            let count = 0;
+
+            count += typedNode.d.fieldExprs.length;
+
+            if (typedNode.d.formatExprs) {
+                count += typedNode.d.formatExprs.length;
+            }
+
+            return count;
+        }
+
+        case ParseNodeType.Function: {
+            const typedNode = node as FunctionNode;
+            let count = 0;
+
+            count += typedNode.d.decorators.length;
+
+            count++;
+
+            count++;
+
+            count += typedNode.d.params.length;
+
+            count++;
+
+            count++;
+
+            count++;
+
+            return count;
+        }
+
+        case ParseNodeType.FunctionAnnotation: {
+            const typedNode = node as FunctionAnnotationNode;
+            let count = 0;
+
+            count += typedNode.d.paramAnnotations.length;
+
+            count++;
+
+            return count;
+        }
+
+        case ParseNodeType.Global: {
+            const typedNode = node as GlobalNode;
+            let count = 0;
+
+            count += typedNode.d.targets.length;
+
+            return count;
+        }
+
+        case ParseNodeType.Lambda: {
+            const typedNode = node as LambdaNode;
+            let count = 0;
+
+            count += typedNode.d.params.length;
+
+            count++;
+
+            return count;
+        }
+
+        case ParseNodeType.List: {
+            const typedNode = node as ListNode;
+            let count = 0;
+
+            count += typedNode.d.items.length;
+
+            return count;
+        }
+
+        case ParseNodeType.Match: {
+            const typedNode = node as MatchNode;
+            let count = 0;
+
+            count++;
+
+            count += typedNode.d.cases.length;
+
+            return count;
+        }
+
+        case ParseNodeType.MemberAccess: {
+            return 2;
+        }
+
+        case ParseNodeType.ModuleName: {
+            const typedNode = node as ModuleNameNode;
+            let count = 0;
+
+            count += typedNode.d.nameParts.length;
+
+            return count;
+        }
+
+        case ParseNodeType.Module: {
+            const typedNode = node as ModuleNode;
+            let count = 0;
+
+            count += typedNode.d.statements.length;
+
+            return count;
+        }
+
+        case ParseNodeType.Name: {
+            return 0;
+        }
+
+        case ParseNodeType.Nonlocal: {
+            const typedNode = node as NonlocalNode;
+            let count = 0;
+
+            count += typedNode.d.targets.length;
+
+            return count;
+        }
+
+        case ParseNodeType.Number: {
+            return 0;
+        }
+
+        case ParseNodeType.Parameter: {
+            return 4;
+        }
+
+        case ParseNodeType.Pass: {
+            return 0;
+        }
+
+        case ParseNodeType.PatternAs: {
+            const typedNode = node as PatternAsNode;
+            let count = 0;
+
+            count += typedNode.d.orPatterns.length;
+
+            count++;
+
+            return count;
+        }
+
+        case ParseNodeType.PatternClass: {
+            const typedNode = node as PatternClassNode;
+            let count = 0;
+
+            count++;
+
+            count += typedNode.d.args.length;
+
+            return count;
+        }
+
+        case ParseNodeType.PatternClassArgument: {
+            return 2;
+        }
+
+        case ParseNodeType.PatternCapture: {
+            return 1;
+        }
+
+        case ParseNodeType.PatternLiteral: {
+            return 1;
+        }
+
+        case ParseNodeType.PatternMappingExpandEntry: {
+            return 1;
+        }
+
+        case ParseNodeType.PatternMappingKeyEntry: {
+            return 2;
+        }
+
+        case ParseNodeType.PatternMapping: {
+            const typedNode = node as PatternMappingNode;
+            let count = 0;
+
+            count += typedNode.d.entries.length;
+
+            return count;
+        }
+
+        case ParseNodeType.PatternSequence: {
+            const typedNode = node as PatternSequenceNode;
+            let count = 0;
+
+            count += typedNode.d.entries.length;
+
+            return count;
+        }
+
+        case ParseNodeType.PatternValue: {
+            return 1;
+        }
+
+        case ParseNodeType.Raise: {
+            return 2;
+        }
+
+        case ParseNodeType.Return: {
+            return 1;
+        }
+
+        case ParseNodeType.Set: {
+            const typedNode = node as SetNode;
+            let count = 0;
+
+            count += typedNode.d.items.length;
+
+            return count;
+        }
+
+        case ParseNodeType.Slice: {
+            return 3;
+        }
+
+        case ParseNodeType.StatementList: {
+            const typedNode = node as StatementListNode;
+            let count = 0;
+
+            count += typedNode.d.statements.length;
+
+            return count;
+        }
+
+        case ParseNodeType.StringList: {
+            const typedNode = node as StringListNode;
+            let count = 0;
+
+            count++;
+
+            count += typedNode.d.strings.length;
+
+            return count;
+        }
+
+        case ParseNodeType.String: {
+            return 0;
+        }
+
+        case ParseNodeType.Suite: {
+            const typedNode = node as SuiteNode;
+            let count = 0;
+
+            count += typedNode.d.statements.length;
+
+            return count;
+        }
+
+        case ParseNodeType.Ternary: {
+            return 3;
+        }
+
+        case ParseNodeType.Tuple: {
+            const typedNode = node as TupleNode;
+            let count = 0;
+
+            count += typedNode.d.items.length;
+
+            return count;
+        }
+
+        case ParseNodeType.Try: {
+            const typedNode = node as TryNode;
+            let count = 0;
+
+            count++;
+
+            count += typedNode.d.exceptClauses.length;
+
+            count++;
+
+            count++;
+
+            return count;
+        }
+
+        case ParseNodeType.TypeAlias: {
+            return 3;
+        }
+
+        case ParseNodeType.TypeAnnotation: {
+            return 2;
+        }
+
+        case ParseNodeType.TypeParameter: {
+            return 3;
+        }
+
+        case ParseNodeType.TypeParameterList: {
+            const typedNode = node as TypeParameterListNode;
+            let count = 0;
+
+            count += typedNode.d.params.length;
+
+            return count;
+        }
+
+        case ParseNodeType.UnaryOperation: {
+            return 1;
+        }
+
+        case ParseNodeType.Unpack: {
+            return 1;
+        }
+
+        case ParseNodeType.While: {
+            return 3;
+        }
+
+        case ParseNodeType.With: {
+            const typedNode = node as WithNode;
+            let count = 0;
+
+            count += typedNode.d.withItems.length;
+
+            count++;
+
+            return count;
+        }
+
+        case ParseNodeType.WithItem: {
+            return 2;
+        }
+
+        case ParseNodeType.Yield: {
+            return 1;
+        }
+
+        case ParseNodeType.YieldFrom: {
+            return 1;
+        }
+    }
+}
+
+export function getChildAt(node: ParseNode, index: number): ParseNode | undefined {
+    switch (node.nodeType) {
+        case ParseNodeType.Error: {
+            const typedNode = node as ErrorNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.child;
+            }
+            childIndex++;
+
+            if (typedNode.d.decorators) {
+                if (index < childIndex + typedNode.d.decorators.length) {
+                    return typedNode.d.decorators[index - childIndex];
+                }
+                childIndex += typedNode.d.decorators.length;
+            }
+
+            return undefined;
+        }
+
+        case ParseNodeType.Argument: {
+            const typedNode = node as ArgumentNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.name;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.valueExpr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Assert: {
+            const typedNode = node as AssertNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.testExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.exceptionExpr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.AssignmentExpression: {
+            const typedNode = node as AssignmentExpressionNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.name;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.rightExpr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Assignment: {
+            const typedNode = node as AssignmentNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.leftExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.rightExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.annotationComment;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.AugmentedAssignment: {
+            const typedNode = node as AugmentedAssignmentNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.leftExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.rightExpr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Await: {
+            const typedNode = node as AwaitNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.BinaryOperation: {
+            const typedNode = node as BinaryOperationNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.leftExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.rightExpr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Break: {
+            return undefined;
+        }
+
+        case ParseNodeType.Call: {
+            const typedNode = node as CallNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.leftExpr;
+            }
+            childIndex++;
+
+            if (index < childIndex + typedNode.d.args.length) {
+                return typedNode.d.args[index - childIndex];
+            }
+            childIndex += typedNode.d.args.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Case: {
+            const typedNode = node as CaseNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.pattern;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.guardExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.suite;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Class: {
+            const typedNode = node as ClassNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.decorators.length) {
+                return typedNode.d.decorators[index - childIndex];
+            }
+            childIndex += typedNode.d.decorators.length;
+
+            if (index === childIndex) {
+                return typedNode.d.name;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.typeParams;
+            }
+            childIndex++;
+
+            if (index < childIndex + typedNode.d.arguments.length) {
+                return typedNode.d.arguments[index - childIndex];
+            }
+            childIndex += typedNode.d.arguments.length;
+
+            if (index === childIndex) {
+                return typedNode.d.suite;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Comprehension: {
+            const typedNode = node as ComprehensionNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            if (index < childIndex + typedNode.d.forIfNodes.length) {
+                return typedNode.d.forIfNodes[index - childIndex];
+            }
+            childIndex += typedNode.d.forIfNodes.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.ComprehensionFor: {
+            const typedNode = node as ComprehensionForNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.targetExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.iterableExpr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.ComprehensionIf: {
+            const typedNode = node as ComprehensionIfNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.testExpr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Constant: {
+            return undefined;
+        }
+
+        case ParseNodeType.Continue: {
+            return undefined;
+        }
+
+        case ParseNodeType.Decorator: {
+            const typedNode = node as DecoratorNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Del: {
+            const typedNode = node as DelNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.targets.length) {
+                return typedNode.d.targets[index - childIndex];
+            }
+            childIndex += typedNode.d.targets.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Dictionary: {
+            const typedNode = node as DictionaryNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.items.length) {
+                return typedNode.d.items[index - childIndex];
+            }
+            childIndex += typedNode.d.items.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.DictionaryExpandEntry: {
+            const typedNode = node as DictionaryExpandEntryNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.DictionaryKeyEntry: {
+            const typedNode = node as DictionaryKeyEntryNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.keyExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.valueExpr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Ellipsis: {
+            return undefined;
+        }
+
+        case ParseNodeType.If: {
+            const typedNode = node as IfNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.testExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.ifSuite;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.elseSuite;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Import: {
+            const typedNode = node as ImportNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.list.length) {
+                return typedNode.d.list[index - childIndex];
+            }
+            childIndex += typedNode.d.list.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.ImportAs: {
+            const typedNode = node as ImportAsNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.module;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.alias;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.ImportFrom: {
+            const typedNode = node as ImportFromNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.module;
+            }
+            childIndex++;
+
+            if (index < childIndex + typedNode.d.imports.length) {
+                return typedNode.d.imports[index - childIndex];
+            }
+            childIndex += typedNode.d.imports.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.ImportFromAs: {
+            const typedNode = node as ImportFromAsNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.name;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.alias;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Index: {
+            const typedNode = node as IndexNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.leftExpr;
+            }
+            childIndex++;
+
+            if (index < childIndex + typedNode.d.items.length) {
+                return typedNode.d.items[index - childIndex];
+            }
+            childIndex += typedNode.d.items.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Except: {
+            const typedNode = node as ExceptNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.typeExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.name;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.exceptSuite;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.For: {
+            const typedNode = node as ForNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.targetExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.iterableExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.forSuite;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.elseSuite;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.FormatString: {
+            const typedNode = node as FormatStringNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.fieldExprs.length) {
+                return typedNode.d.fieldExprs[index - childIndex];
+            }
+            childIndex += typedNode.d.fieldExprs.length;
+
+            if (typedNode.d.formatExprs) {
+                if (index < childIndex + typedNode.d.formatExprs.length) {
+                    return typedNode.d.formatExprs[index - childIndex];
+                }
+                childIndex += typedNode.d.formatExprs.length;
+            }
+
+            return undefined;
+        }
+
+        case ParseNodeType.Function: {
+            const typedNode = node as FunctionNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.decorators.length) {
+                return typedNode.d.decorators[index - childIndex];
+            }
+            childIndex += typedNode.d.decorators.length;
+
+            if (index === childIndex) {
+                return typedNode.d.name;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.typeParams;
+            }
+            childIndex++;
+
+            if (index < childIndex + typedNode.d.params.length) {
+                return typedNode.d.params[index - childIndex];
+            }
+            childIndex += typedNode.d.params.length;
+
+            if (index === childIndex) {
+                return typedNode.d.returnAnnotation;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.funcAnnotationComment;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.suite;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.FunctionAnnotation: {
+            const typedNode = node as FunctionAnnotationNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.paramAnnotations.length) {
+                return typedNode.d.paramAnnotations[index - childIndex];
+            }
+            childIndex += typedNode.d.paramAnnotations.length;
+
+            if (index === childIndex) {
+                return typedNode.d.returnAnnotation;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Global: {
+            const typedNode = node as GlobalNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.targets.length) {
+                return typedNode.d.targets[index - childIndex];
+            }
+            childIndex += typedNode.d.targets.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Lambda: {
+            const typedNode = node as LambdaNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.params.length) {
+                return typedNode.d.params[index - childIndex];
+            }
+            childIndex += typedNode.d.params.length;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.List: {
+            const typedNode = node as ListNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.items.length) {
+                return typedNode.d.items[index - childIndex];
+            }
+            childIndex += typedNode.d.items.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Match: {
+            const typedNode = node as MatchNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            if (index < childIndex + typedNode.d.cases.length) {
+                return typedNode.d.cases[index - childIndex];
+            }
+            childIndex += typedNode.d.cases.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.MemberAccess: {
+            const typedNode = node as MemberAccessNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.leftExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.member;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.ModuleName: {
+            const typedNode = node as ModuleNameNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.nameParts.length) {
+                return typedNode.d.nameParts[index - childIndex];
+            }
+            childIndex += typedNode.d.nameParts.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Module: {
+            const typedNode = node as ModuleNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.statements.length) {
+                return typedNode.d.statements[index - childIndex];
+            }
+            childIndex += typedNode.d.statements.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Name: {
+            return undefined;
+        }
+
+        case ParseNodeType.Nonlocal: {
+            const typedNode = node as NonlocalNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.targets.length) {
+                return typedNode.d.targets[index - childIndex];
+            }
+            childIndex += typedNode.d.targets.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Number: {
+            return undefined;
+        }
+
+        case ParseNodeType.Parameter: {
+            const typedNode = node as ParameterNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.name;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.annotation;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.annotationComment;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.defaultValue;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Pass: {
+            return undefined;
+        }
+
+        case ParseNodeType.PatternAs: {
+            const typedNode = node as PatternAsNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.orPatterns.length) {
+                return typedNode.d.orPatterns[index - childIndex];
+            }
+            childIndex += typedNode.d.orPatterns.length;
+
+            if (index === childIndex) {
+                return typedNode.d.target;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.PatternClass: {
+            const typedNode = node as PatternClassNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.className;
+            }
+            childIndex++;
+
+            if (index < childIndex + typedNode.d.args.length) {
+                return typedNode.d.args[index - childIndex];
+            }
+            childIndex += typedNode.d.args.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.PatternClassArgument: {
+            const typedNode = node as PatternClassArgumentNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.name;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.pattern;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.PatternCapture: {
+            const typedNode = node as PatternCaptureNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.target;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.PatternLiteral: {
+            const typedNode = node as PatternLiteralNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.PatternMappingExpandEntry: {
+            const typedNode = node as PatternMappingExpandEntryNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.target;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.PatternMappingKeyEntry: {
+            const typedNode = node as PatternMappingKeyEntryNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.keyPattern;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.valuePattern;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.PatternMapping: {
+            const typedNode = node as PatternMappingNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.entries.length) {
+                return typedNode.d.entries[index - childIndex];
+            }
+            childIndex += typedNode.d.entries.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.PatternSequence: {
+            const typedNode = node as PatternSequenceNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.entries.length) {
+                return typedNode.d.entries[index - childIndex];
+            }
+            childIndex += typedNode.d.entries.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.PatternValue: {
+            const typedNode = node as PatternValueNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Raise: {
+            const typedNode = node as RaiseNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.fromExpr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Return: {
+            const typedNode = node as ReturnNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Set: {
+            const typedNode = node as SetNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.items.length) {
+                return typedNode.d.items[index - childIndex];
+            }
+            childIndex += typedNode.d.items.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Slice: {
+            const typedNode = node as SliceNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.startValue;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.endValue;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.stepValue;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.StatementList: {
+            const typedNode = node as StatementListNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.statements.length) {
+                return typedNode.d.statements[index - childIndex];
+            }
+            childIndex += typedNode.d.statements.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.StringList: {
+            const typedNode = node as StringListNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.annotation;
+            }
+            childIndex++;
+
+            if (index < childIndex + typedNode.d.strings.length) {
+                return typedNode.d.strings[index - childIndex];
+            }
+            childIndex += typedNode.d.strings.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.String: {
+            return undefined;
+        }
+
+        case ParseNodeType.Suite: {
+            const typedNode = node as SuiteNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.statements.length) {
+                return typedNode.d.statements[index - childIndex];
+            }
+            childIndex += typedNode.d.statements.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Ternary: {
+            const typedNode = node as TernaryNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.ifExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.testExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.elseExpr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Tuple: {
+            const typedNode = node as TupleNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.items.length) {
+                return typedNode.d.items[index - childIndex];
+            }
+            childIndex += typedNode.d.items.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Try: {
+            const typedNode = node as TryNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.trySuite;
+            }
+            childIndex++;
+
+            if (index < childIndex + typedNode.d.exceptClauses.length) {
+                return typedNode.d.exceptClauses[index - childIndex];
+            }
+            childIndex += typedNode.d.exceptClauses.length;
+
+            if (index === childIndex) {
+                return typedNode.d.elseSuite;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.finallySuite;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.TypeAlias: {
+            const typedNode = node as TypeAliasNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.name;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.typeParams;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.TypeAnnotation: {
+            const typedNode = node as TypeAnnotationNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.valueExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.annotation;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.TypeParameter: {
+            const typedNode = node as TypeParameterNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.name;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.boundExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.defaultExpr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.TypeParameterList: {
+            const typedNode = node as TypeParameterListNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.params.length) {
+                return typedNode.d.params[index - childIndex];
+            }
+            childIndex += typedNode.d.params.length;
+
+            return undefined;
+        }
+
+        case ParseNodeType.UnaryOperation: {
+            const typedNode = node as UnaryOperationNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Unpack: {
+            const typedNode = node as UnpackNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.While: {
+            const typedNode = node as WhileNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.testExpr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.whileSuite;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.elseSuite;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.With: {
+            const typedNode = node as WithNode;
+            let childIndex = 0;
+
+            if (index < childIndex + typedNode.d.withItems.length) {
+                return typedNode.d.withItems[index - childIndex];
+            }
+            childIndex += typedNode.d.withItems.length;
+
+            if (index === childIndex) {
+                return typedNode.d.suite;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.WithItem: {
+            const typedNode = node as WithItemNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            if (index === childIndex) {
+                return typedNode.d.target;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.Yield: {
+            const typedNode = node as YieldNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+
+        case ParseNodeType.YieldFrom: {
+            const typedNode = node as YieldFromNode;
+            let childIndex = 0;
+
+            if (index === childIndex) {
+                return typedNode.d.expr;
+            }
+            childIndex++;
+
+            return undefined;
+        }
+    }
+}
+
 export function walkChildren(walker: ParseTreeChildWalker, node: ParseNode): void {
     switch (node.nodeType) {
         case ParseNodeType.Error: {

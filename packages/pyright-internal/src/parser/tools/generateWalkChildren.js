@@ -109,6 +109,44 @@ function emitField(field, mode) {
 }
 
 /**
+ * @param {ChildField} field
+ */
+function emitCountField(field) {
+    const value = `typedNode.d.${field.name}`;
+
+    switch (field.kind) {
+        case 'single':
+        case 'optional':
+            return 'count++;';
+
+        case 'array':
+            return `count += ${value}.length;`;
+
+        case 'optionalArray':
+            return `if (${value}) {\n    count += ${value}.length;\n}`;
+    }
+}
+
+/**
+ * @param {ChildField} field
+ */
+function emitGetAtField(field) {
+    const value = `typedNode.d.${field.name}`;
+
+    switch (field.kind) {
+        case 'single':
+        case 'optional':
+            return `if (index === childIndex) {\n    return ${value};\n}\nchildIndex++;`;
+
+        case 'array':
+            return `if (index < childIndex + ${value}.length) {\n    return ${value}[index - childIndex];\n}\nchildIndex += ${value}.length;`;
+
+        case 'optionalArray':
+            return `if (${value}) {\n    if (index < childIndex + ${value}.length) {\n        return ${value}[index - childIndex];\n    }\n    childIndex += ${value}.length;\n}`;
+    }
+}
+
+/**
  * @param {ChildFieldSpec} spec
  * @param {'callback' | 'walker'} mode
  */
@@ -125,11 +163,73 @@ function emitCase(spec, mode) {
 }
 
 /**
+ * @param {ChildFieldSpec} spec
+ */
+function emitCountCase(spec) {
+    if (!spec.fields.some((field) => field.kind === 'array' || field.kind === 'optionalArray')) {
+        return [`case ParseNodeType.${spec.nodeType}: {`, `    return ${spec.fields.length};`, '}'].join('\n');
+    }
+
+    const body = spec.fields.map((field) => emitCountField(field)).join('\n\n');
+    const lines = [`case ParseNodeType.${spec.nodeType}: {`];
+
+    lines.push(
+        `    const typedNode = node as ${spec.nodeInterface};`,
+        '    let count = 0;',
+        '',
+        indent(body),
+        '',
+        '    return count;'
+    );
+
+    lines.push('}');
+    return lines.join('\n');
+}
+
+/**
+ * @param {ChildFieldSpec} spec
+ */
+function emitGetAtCase(spec) {
+    const body = spec.fields.map((field) => emitGetAtField(field)).join('\n\n');
+    const lines = [`case ParseNodeType.${spec.nodeType}: {`];
+
+    if (body) {
+        lines.push(
+            `    const typedNode = node as ${spec.nodeInterface};`,
+            '    let childIndex = 0;',
+            '',
+            indent(body),
+            '',
+            '    return undefined;'
+        );
+    } else {
+        lines.push('    return undefined;');
+    }
+
+    lines.push('}');
+    return lines.join('\n');
+}
+
+/**
  * @param {readonly ChildFieldSpec[]} childFields
  * @param {'callback' | 'walker'} mode
  */
 function emitSwitch(childFields, mode) {
     return childFields.map((spec) => emitCase(spec, mode)).join('\n\n');
+}
+
+/**
+ * @param {readonly ChildFieldSpec[]} childFields
+ */
+function emitCountSwitch(childFields) {
+    return childFields.map((spec) => emitCountCase(spec)).join('\n\n');
+}
+
+/**
+ * @param {readonly ChildFieldSpec[]} childFields
+ */
+function emitGetAtSwitch(childFields) {
+    return childFields.map((spec) => emitGetAtCase(spec)).join('\n\n');
 }
 
 /**
@@ -163,6 +263,18 @@ export interface ParseTreeChildWalker {
 export function forEachChild(node: ParseNode, callback: (child: ParseNode | undefined) => void): void {
     switch (node.nodeType) {
 ${indent(emitSwitch(childFields, 'callback'))}
+    }
+}
+
+export function getChildCount(node: ParseNode): number {
+    switch (node.nodeType) {
+${indent(emitCountSwitch(childFields))}
+    }
+}
+
+export function getChildAt(node: ParseNode, index: number): ParseNode | undefined {
+    switch (node.nodeType) {
+${indent(emitGetAtSwitch(childFields))}
     }
 }
 

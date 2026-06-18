@@ -12,7 +12,7 @@ import { containsOnlyWhitespace } from '../common/core';
 import { assert, assertNever, fail } from '../common/debug';
 import { convertPositionToOffset, convertTextRangeToRange } from '../common/positionUtils';
 import { Position, Range, TextRange } from '../common/textRange';
-import { TextRangeCollection, getIndexContaining } from '../common/textRangeCollection';
+import { TextRangeCollection } from '../common/textRangeCollection';
 import {
     ArgCategory,
     ArgumentNode,
@@ -48,9 +48,9 @@ import { OperatorTypeNameMap, ParseNodeTypeNameMap } from '../parser/parseNodeUt
 import { ParseFileResults } from '../parser/parser';
 import { Tokenizer, TokenizerOutput } from '../parser/tokenizer';
 import { KeywordType, OperatorType, StringToken, StringTokenFlags, Token, TokenType } from '../parser/tokenizerTypes';
-import { forEachChild } from '../parser/generated/walkChildren';
+import { forEachChild, getChildAt, getChildCount } from '../parser/generated/walkChildren';
 import { getScope } from './analyzerNodeInfo';
-import { getChildNodes, ParseTreeWalker } from './parseTreeWalker';
+import { ParseTreeWalker } from './parseTreeWalker';
 import { TypeVarScopeId } from './types';
 
 export const enum PrintExpressionFlags {
@@ -106,13 +106,15 @@ export function findNodeByOffset(node: ParseNode, offset: number): ParseNode | u
 
     // The range is found within this node. See if we can localize it
     // further by checking its children.
-    let children = getChildNodes(node);
-    if (isCompliantWithNodeRangeRules(node) && children.length > 20) {
+    const childCount = getChildCount(node);
+    let startIndex = 0;
+    let endIndex = childCount;
+    if (isCompliantWithNodeRangeRules(node) && childCount > 20) {
         // Use binary search to find the child to visit. This should be helpful
         // when there are many siblings, such as statements in a module/suite
         // or expressions in a list, etc. Otherwise, we will have to traverse
         // every sibling before finding the correct one.
-        let index = getIndexContaining(children, offset, TextRange.overlaps);
+        let index = _getChildIndexContaining(node, childCount, offset);
 
         if (index >= 0) {
             // Find first sibling that overlaps with the offset. This ensures that
@@ -120,7 +122,7 @@ export function findNodeByOffset(node: ParseNode, offset: number): ParseNode | u
             // linear search.
             let searchIndex = index - 1;
             while (searchIndex >= 0) {
-                const previousChild = children[searchIndex];
+                const previousChild = getChildAt(node, searchIndex);
                 if (previousChild) {
                     if (TextRange.overlaps(previousChild, offset)) {
                         index = searchIndex;
@@ -132,11 +134,13 @@ export function findNodeByOffset(node: ParseNode, offset: number): ParseNode | u
                 searchIndex--;
             }
 
-            children = [children[index]];
+            startIndex = index;
+            endIndex = index + 1;
         }
     }
 
-    for (const child of children) {
+    for (let i = startIndex; i < endIndex; i++) {
+        const child = getChildAt(node, i);
         if (!child) {
             continue;
         }
@@ -154,6 +158,72 @@ export function findNodeByOffset(node: ParseNode, offset: number): ParseNode | u
     }
 
     return node;
+}
+
+function _getChildIndexContaining(node: ParseNode, childCount: number, offset: number): number {
+    if (childCount === 0) {
+        return -1;
+    }
+
+    let min = 0;
+    let max = childCount - 1;
+    while (min <= max) {
+        const mid = Math.floor(min + (max - min) / 2);
+        const element = _findNonNullChild(node, mid, min, max);
+        if (element === undefined) {
+            return -1;
+        }
+
+        if (TextRange.overlaps(element.item, offset)) {
+            return element.index;
+        }
+
+        const nextElement = _findNonNullChild(node, mid + 1, mid + 1, max);
+        if (nextElement === undefined) {
+            return -1;
+        }
+
+        if (mid < childCount - 1 && TextRange.getEnd(element.item) <= offset && offset < nextElement.item.start) {
+            return -1;
+        }
+
+        if (offset < element.item.start) {
+            max = mid - 1;
+        } else {
+            min = mid + 1;
+        }
+    }
+
+    return -1;
+}
+
+function _findNonNullChild(
+    node: ParseNode,
+    position: number,
+    min: number,
+    max: number
+): { index: number; item: ParseNode } | undefined {
+    const item = getChildAt(node, position);
+    if (item) {
+        return { index: position, item };
+    }
+
+    // Search forward and backward until it finds non-null value.
+    for (let i = position + 1; i <= max; i++) {
+        const item = getChildAt(node, i);
+        if (item) {
+            return { index: i, item };
+        }
+    }
+
+    for (let i = position - 1; i >= min; i--) {
+        const item = getChildAt(node, i);
+        if (item) {
+            return { index: i, item };
+        }
+    }
+
+    return undefined;
 }
 
 export function isCompliantWithNodeRangeRules(node: ParseNode) {

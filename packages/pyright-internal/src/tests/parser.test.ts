@@ -20,7 +20,7 @@ import { pythonVersion3_13, pythonVersion3_14 } from '../common/pythonVersion';
 import { TextRange } from '../common/textRange';
 import { UriEx } from '../common/uri/uriUtils';
 import { childFields } from '../parser/childFields';
-import { forEachChild, walkChildren } from '../parser/generated/walkChildren';
+import { forEachChild, getChildAt, getChildCount, walkChildren } from '../parser/generated/walkChildren';
 import { ParseNode, ParseNodeType, StatementListNode } from '../parser/parseNodes';
 import { getNodeAtMarker, parseAndGetTestState } from './harness/fourslash/testState';
 import * as TestUtils from './testUtils';
@@ -326,6 +326,26 @@ test('Generated walkChildren preserves present-child order', () => {
             collector.children,
             expectedChildren,
             `Child order mismatch for ${getParseNodeTypeName(node.nodeType)}`
+        );
+    }
+});
+
+test('Generated indexed children preserve child slots', () => {
+    const diagSink = new DiagnosticSink();
+    const parseResults = TestUtils.parseText(richParseTreeCode, diagSink);
+    const nodes = collectParseNodes(parseResults.parserOutput.parseTree);
+
+    for (const node of nodes) {
+        const expectedChildren = getChildNodes(node);
+        const indexedChildren: (ParseNode | undefined)[] = [];
+        for (let i = 0; i < getChildCount(node); i++) {
+            indexedChildren.push(getChildAt(node, i));
+        }
+
+        assert.deepStrictEqual(
+            indexedChildren,
+            expectedChildren,
+            `Indexed child mismatch for ${getParseNodeTypeName(node.nodeType)}`
         );
     }
 });

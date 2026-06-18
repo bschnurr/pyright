@@ -1093,16 +1093,21 @@ Additional direct-traversal cleanup:
 * `TreeDumper.walk` now uses generated `walkChildren` instead of `getChildNodes`, preserving output indentation without materializing child arrays.
 * `TestWalker.visitNode` now validates parent links and child ranges with generated `forEachChild`, preserving internal validation while avoiding a child array per visited node.
 
-Remaining explicit `getChildNodes` consumers:
+Indexed child access follow-up:
 
-* `findNodeByOffset` in `parseTreeUtils.ts`, deferred as the remaining production allocation target.
-* `ArrayChildWalker` in `parseTreeWalkerBenchmark.test.ts`, kept as the intentional array-child benchmark baseline.
-* `parser.test.ts` generated traversal order check, kept as the compatibility oracle for `getChildNodes`.
+* The generator now emits `getChildCount` and `getChildAt` alongside `forEachChild` and `walkChildren`.
+* `findNodeByOffset` now uses these indexed generated helpers instead of `getChildNodes`, preserving its binary-search path for nodes with many children without materializing child arrays.
+* The production tree no longer calls `getChildNodes`; remaining explicit consumers are:
+  * `getChildNodes` itself, kept as the compatibility API.
+  * `ArrayChildWalker` in `parseTreeWalkerBenchmark.test.ts`, kept as the intentional array-child benchmark baseline.
+  * `parser.test.ts` generated traversal order check, kept as the compatibility oracle for `getChildNodes`.
 
 Validation:
 
 * Focused `checker.test`.
 * Focused `parser.test`, `sourceFile.test`, and `service.test`.
+* Focused `parseTreeUtils.test` and generated traversal tests.
+* Generated traversal freshness check.
 * `packages\pyright-internal` build.
 * Root `npm run check`.
 * Full `npm test --silent`.
