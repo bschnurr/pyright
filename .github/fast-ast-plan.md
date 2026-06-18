@@ -1088,9 +1088,21 @@ Implemented follow-up:
 * `Checker.visitLambda` now walks the existing parameter array, then walks the lambda expression directly.
 * `TypeStubTreeWalker.visitIf` now walks nested `elif` components directly instead of constructing a temporary child array.
 
+Additional direct-traversal cleanup:
+
+* `TreeDumper.walk` now uses generated `walkChildren` instead of `getChildNodes`, preserving output indentation without materializing child arrays.
+* `TestWalker.visitNode` now validates parent links and child ranges with generated `forEachChild`, preserving internal validation while avoiding a child array per visited node.
+
+Remaining explicit `getChildNodes` consumers:
+
+* `findNodeByOffset` in `parseTreeUtils.ts`, deferred as the remaining production allocation target.
+* `ArrayChildWalker` in `parseTreeWalkerBenchmark.test.ts`, kept as the intentional array-child benchmark baseline.
+* `parser.test.ts` generated traversal order check, kept as the compatibility oracle for `getChildNodes`.
+
 Validation:
 
 * Focused `checker.test`.
+* Focused `parser.test`, `sourceFile.test`, and `service.test`.
 * `packages\pyright-internal` build.
 * Root `npm run check`.
 * Full `npm test --silent`.

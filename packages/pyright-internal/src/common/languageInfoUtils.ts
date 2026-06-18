@@ -7,7 +7,7 @@
  */
 
 import { findNodeByOffset, printParseNodeType } from '../analyzer/parseTreeUtils';
-import { getChildNodes, ParseTreeWalker } from '../analyzer/parseTreeWalker';
+import { ParseTreeWalker } from '../analyzer/parseTreeWalker';
 import { TypeEvaluator } from '../analyzer/typeEvaluatorTypes';
 import {
     ClassType,
@@ -22,6 +22,7 @@ import {
     TypeVarType,
     Variance,
 } from '../analyzer/types';
+import { walkChildren } from '../parser/generated/walkChildren';
 import { isNumber, isString } from './core';
 import { convertOffsetToPosition, convertOffsetsToRange } from './positionUtils';
 import { TextRange } from './textRange';
@@ -492,10 +493,9 @@ export class TreeDumper extends ParseTreeWalker {
         if (!this._isNodeInRange(node)) {
             return;
         }
-        const childrenToWalk = this.visitNode(node) ? getChildNodes(node) : [];
-        if (childrenToWalk.length > 0) {
+        if (this.visitNode(node)) {
             this._indentation += '  ';
-            this.walkMultiple(childrenToWalk);
+            walkChildren(this, node);
             this._indentation = this._indentation.substr(0, this._indentation.length - 2);
         }
     }

@@ -7,10 +7,11 @@
  * Walks a parse tree to validate internal consistency and completeness.
  */
 
-import { getChildNodes, ParseTreeWalker } from '../analyzer/parseTreeWalker';
+import { ParseTreeWalker } from '../analyzer/parseTreeWalker';
 import { assertNever, fail } from '../common/debug';
 import { TextRange } from '../common/textRange';
-import { NameNode, ParseNode, ParseNodeArray, ParseNodeType } from '../parser/parseNodes';
+import { forEachChild } from '../parser/generated/walkChildren';
+import { NameNode, ParseNode, ParseNodeType } from '../parser/parseNodes';
 import { isCompliantWithNodeRangeRules } from './parseTreeUtils';
 import { TypeEvaluator } from './typeEvaluatorTypes';
 
@@ -20,16 +21,15 @@ export class TestWalker extends ParseTreeWalker {
     }
 
     override visitNode(node: ParseNode) {
-        const children = getChildNodes(node);
-        this._verifyParentChildLinks(node, children);
-        this._verifyChildRanges(node, children);
+        this._verifyParentChildLinks(node);
+        this._verifyChildRanges(node);
 
         return super.visitNode(node);
     }
 
     // Make sure that all of the children point to their parent.
-    private _verifyParentChildLinks(node: ParseNode, children: ParseNodeArray) {
-        children.forEach((child) => {
+    private _verifyParentChildLinks(node: ParseNode) {
+        forEachChild(node, (child) => {
             if (child) {
                 if (child.parent !== node) {
                     fail(
@@ -44,11 +44,11 @@ export class TestWalker extends ParseTreeWalker {
     //      Children are all contained within the parent
     //      Children have non-overlapping ranges
     //      Children are listed in increasing order
-    private _verifyChildRanges(node: ParseNode, children: ParseNodeArray) {
+    private _verifyChildRanges(node: ParseNode) {
         let prevNode: ParseNode | undefined;
 
         const compliant = isCompliantWithNodeRangeRules(node);
-        children.forEach((child) => {
+        forEachChild(node, (child) => {
             if (child) {
                 let skipCheck = false;
 
