@@ -169,25 +169,33 @@ function _getChildIndexContaining(node: ParseNode, childCount: number, offset: n
     let max = childCount - 1;
     while (min <= max) {
         const mid = Math.floor(min + (max - min) / 2);
-        const element = _findNonNullChild(node, mid, min, max);
-        if (element === undefined) {
+        const elementIndex = _findNonNullChildIndex(node, mid, min, max);
+        if (elementIndex < 0) {
+            return -1;
+        }
+        const element = getChildAt(node, elementIndex);
+        if (!element) {
             return -1;
         }
 
-        if (TextRange.overlaps(element.item, offset)) {
-            return element.index;
+        if (TextRange.overlaps(element, offset)) {
+            return elementIndex;
         }
 
-        const nextElement = _findNonNullChild(node, mid + 1, mid + 1, max);
-        if (nextElement === undefined) {
+        const nextElementIndex = _findNonNullChildIndex(node, mid + 1, mid + 1, max);
+        if (nextElementIndex < 0) {
+            return -1;
+        }
+        const nextElement = getChildAt(node, nextElementIndex);
+        if (!nextElement) {
             return -1;
         }
 
-        if (mid < childCount - 1 && TextRange.getEnd(element.item) <= offset && offset < nextElement.item.start) {
+        if (mid < childCount - 1 && TextRange.getEnd(element) <= offset && offset < nextElement.start) {
             return -1;
         }
 
-        if (offset < element.item.start) {
+        if (offset < element.start) {
             max = mid - 1;
         } else {
             min = mid + 1;
@@ -197,33 +205,28 @@ function _getChildIndexContaining(node: ParseNode, childCount: number, offset: n
     return -1;
 }
 
-function _findNonNullChild(
-    node: ParseNode,
-    position: number,
-    min: number,
-    max: number
-): { index: number; item: ParseNode } | undefined {
+function _findNonNullChildIndex(node: ParseNode, position: number, min: number, max: number): number {
     const item = getChildAt(node, position);
     if (item) {
-        return { index: position, item };
+        return position;
     }
 
     // Search forward and backward until it finds non-null value.
     for (let i = position + 1; i <= max; i++) {
         const item = getChildAt(node, i);
         if (item) {
-            return { index: i, item };
+            return i;
         }
     }
 
     for (let i = position - 1; i >= min; i--) {
         const item = getChildAt(node, i);
         if (item) {
-            return { index: i, item };
+            return i;
         }
     }
 
-    return undefined;
+    return -1;
 }
 
 export function isCompliantWithNodeRangeRules(node: ParseNode) {
@@ -2138,17 +2141,19 @@ export function isWriteAccess(node: NameNode) {
 
 export function getMatchingDescendants(node: ParseNode, match: (n: ParseNode) => boolean): ParseNode[] {
     const matches: ParseNode[] = [];
+    _appendMatchingDescendants(node, match, matches);
+    return matches;
+}
 
+function _appendMatchingDescendants(node: ParseNode, match: (n: ParseNode) => boolean, matches: ParseNode[]) {
     forEachChild(node, (child) => {
         if (child && match(child)) {
             matches.push(child);
         }
         if (child) {
-            matches.push(...getMatchingDescendants(child, match));
+            _appendMatchingDescendants(child, match, matches);
         }
     });
-
-    return matches;
 }
 
 export function getModuleNode(node: ParseNode) {

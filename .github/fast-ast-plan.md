@@ -1103,10 +1103,16 @@ Indexed child access follow-up:
 
 * The generator now emits `getChildCount` and `getChildAt` alongside `forEachChild` and `walkChildren`.
 * `findNodeByOffset` now uses these indexed generated helpers instead of `getChildNodes`, preserving its binary-search path for nodes with many children without materializing child arrays.
+* The indexed offset helper now returns child indexes instead of allocating `{ index, item }` objects while searching sparse optional child slots.
 * The production tree no longer calls `getChildNodes`; remaining explicit consumers are:
   * `getChildNodes` itself, kept as the compatibility API.
   * `ArrayChildWalker` in `parseTreeWalkerBenchmark.test.ts`, kept as the intentional array-child benchmark baseline.
   * `parser.test.ts` generated traversal order check, kept as the compatibility oracle for `getChildNodes`.
+
+Additional recursive utility cleanup:
+
+* `getMatchingDescendants` now uses an accumulator helper instead of recursively allocating a result array for each child and spreading it into the parent result.
+* This does not change traversal order or the public return shape; it only removes intermediate arrays from the recursive AST walk.
 
 Validation:
 
@@ -1118,6 +1124,7 @@ Validation:
 * Root `npm run check`.
 * Full `npm test --silent`.
 * Latest parse-tree walker benchmark: `large_stdlib_10x` array-child 6.79ms vs generated-child 3.51ms, with generated child arrays still 0.
+* Follow-up utility cleanup validation: focused `parseTreeUtils.test` and `parser.test`, generated traversal freshness check, `packages\pyright-internal` build, and root `npm run check`.
 
 ## How This Reduces Allocations
 
@@ -1146,6 +1153,7 @@ For an engineering team, the important distinction is:
 * We are not changing analysis order.
 * We are removing an allocation layer between “visit this node” and “walk its known children.”
 * The few APIs that truly need a child array still call `getChildNodes`, so the allocation cost is now paid only by those explicit consumers, not by every default tree walk.
+* Follow-up utility changes also remove smaller traversal-adjacent allocations: recursive descendant collection no longer creates one temporary result array per child, and offset lookup no longer creates tiny index/item wrapper objects during binary search.
 
 Correctness is protected by generated-output freshness checks, child-field coverage tests, runtime child-oracle tests, full Pyright tests, and real-world PyTorch diagnostics parity.
 
