@@ -445,6 +445,18 @@ interface MatchedOverloadInfo {
     returnType: Type;
 }
 
+interface OverloadedCallArgTypeCacheEntry {
+    argCategory: ArgCategory;
+    argName: string | undefined;
+    argType: Type;
+}
+
+interface OverloadedCallResultCacheEntry {
+    argTypes: OverloadedCallArgTypeCacheEntry[];
+    skipUnknownArgCheck: boolean;
+    overloadIndex: number;
+}
+
 interface ValidateArgTypeOptions {
     skipUnknownArgCheck?: boolean;
     isArgFirstPass?: boolean;
@@ -660,6 +672,7 @@ export function createTypeEvaluator(
     let typeCache = new Map<number, TypeCacheEntry>();
     let effectiveTypeCache = new Map<number, Map<string, EffectiveTypeResult>>();
     let expectedTypeCache = new Map<number, ExpectedTypeCacheEntry>();
+    let overloadedCallResultCache = new WeakMap<OverloadedType, OverloadedCallResultCacheEntry[]>();
     let asymmetricAccessorAssignmentCache = new Set<number>();
     let deferredClassCompletions: DeferredClassCompletion[] = [];
     let cancellationToken: CancellationToken | undefined;
@@ -716,6 +729,7 @@ export function createTypeEvaluator(
         typeCache = new Map<number, TypeCacheEntry>();
         effectiveTypeCache = new Map<number, Map<string, EffectiveTypeResult>>();
         expectedTypeCache = new Map<number, ExpectedTypeCacheEntry>();
+        overloadedCallResultCache = new WeakMap<OverloadedType, OverloadedCallResultCacheEntry[]>();
         asymmetricAccessorAssignmentCache = new Set<number>();
     }
 
@@ -9808,6 +9822,42 @@ export function createTypeEvaluator(
 
         // Create a helper function that evaluates the overload that best
         // matches the arg/param lists.
+        function evaluateUsingOverloadMatch(
+            matchResults: MatchArgsToParamsResult,
+            skipUnknownArgCheck: boolean,
+            emitNoOverloadFoundError: boolean
+        ) {
+            // If there is more than one filtered match, report that no match
+            // was possible and emit a diagnostic that provides the most likely.
+            if (emitNoOverloadFoundError) {
+                const functionName = matchResults.overload.shared.name || '<anonymous function>';
+                const diagnostic = addDiagnostic(
+                    DiagnosticRule.reportCallIssue,
+                    LocMessage.noOverload().format({ name: functionName }),
+                    errorNode
+                );
+
+                const overrideDecl = matchResults.overload.shared.declaration;
+                if (diagnostic && overrideDecl) {
+                    diagnostic.addRelatedInfo(
+                        LocAddendum.overloadIndex().format({ index: matchResults.overloadIndex + 1 }),
+                        overrideDecl.uri,
+                        overrideDecl.range
+                    );
+                }
+            }
+
+            const effectiveConstraints = constraints ?? new ConstraintTracker();
+
+            return validateArgTypesWithContext(
+                errorNode,
+                matchResults,
+                effectiveConstraints,
+                skipUnknownArgCheck,
+                inferenceContext
+            );
+        }
+
         function evaluateUsingBestMatchingOverload(skipUnknownArgCheck: boolean, emitNoOverloadFoundError: boolean) {
             // Find the match with the smallest argument match score. If there
             // are more than one with the same score, use the one with the
@@ -9819,35 +9869,226 @@ export function createTypeEvaluator(
                 return current.argumentMatchScore < previous.argumentMatchScore ? current : previous;
             });
 
-            // If there is more than one filtered match, report that no match
-            // was possible and emit a diagnostic that provides the most likely.
-            if (emitNoOverloadFoundError) {
-                const functionName = bestMatch.overload.shared.name || '<anonymous function>';
-                const diagnostic = addDiagnostic(
-                    DiagnosticRule.reportCallIssue,
-                    LocMessage.noOverload().format({ name: functionName }),
-                    errorNode
-                );
+            return evaluateUsingOverloadMatch(bestMatch, skipUnknownArgCheck, emitNoOverloadFoundError);
+        }
 
-                const overrideDecl = bestMatch.overload.shared.declaration;
-                if (diagnostic && overrideDecl) {
-                    diagnostic.addRelatedInfo(
-                        LocAddendum.overloadIndex().format({ index: bestMatch.overloadIndex + 1 }),
-                        overrideDecl.uri,
-                        overrideDecl.range
+        function getContextFreeArgTypesForOverloadCache(): OverloadedCallArgTypeCacheEntry[] {
+            return useSpeculativeMode(speculativeNode, () => {
+                return argList.map((arg) => {
+                    return {
+                        argCategory: arg.argCategory,
+                        argName: arg.name?.d.value,
+                        argType: arg.typeResult
+                            ? arg.typeResult.type
+                            : getTypeOfArg(arg, /* inferenceContext */ undefined).type,
+                    };
+                });
+            });
+        }
+
+        function canUseOverloadCache(argTypes: OverloadedCallArgTypeCacheEntry[]) {
+            return argTypes.every((_argType, index) => {
+                const valueExpression = argList[index].valueExpression;
+                if (!valueExpression) {
+                    return true;
+                }
+
+                return valueExpression.nodeType !== ParseNodeType.Lambda;
+            });
+        }
+
+        function getCachedOverloadMatch(
+            argTypes: OverloadedCallArgTypeCacheEntry[]
+        ): MatchArgsToParamsResult | undefined {
+            if (
+                constraints ||
+                inferenceContext?.expectedType ||
+                inferenceContext?.returnTypeOverride ||
+                !canUseOverloadCache(argTypes)
+            ) {
+                return undefined;
+            }
+
+            const cacheEntries = overloadedCallResultCache.get(type);
+            const cacheEntry = cacheEntries?.find((entry) => {
+                return (
+                    entry.skipUnknownArgCheck === !!skipUnknownArgCheck &&
+                    areOverloadCacheArgTypesSame(entry.argTypes, argTypes)
+                );
+            });
+
+            if (!cacheEntry) {
+                return undefined;
+            }
+
+            return filteredMatchResults.find((matchResult) => matchResult.overloadIndex === cacheEntry.overloadIndex);
+        }
+
+        function addCachedOverloadMatch(argTypes: OverloadedCallArgTypeCacheEntry[], overloadIndex: number) {
+            if (
+                constraints ||
+                inferenceContext?.expectedType ||
+                inferenceContext?.returnTypeOverride ||
+                !canUseOverloadCache(argTypes)
+            ) {
+                return;
+            }
+
+            let cacheEntries = overloadedCallResultCache.get(type);
+            if (!cacheEntries) {
+                cacheEntries = [];
+                overloadedCallResultCache.set(type, cacheEntries);
+            }
+
+            if (
+                cacheEntries.some((entry) => {
+                    return (
+                        entry.skipUnknownArgCheck === !!skipUnknownArgCheck &&
+                        areOverloadCacheArgTypesSame(entry.argTypes, argTypes)
                     );
+                })
+            ) {
+                return;
+            }
+
+            cacheEntries.push({ argTypes, skipUnknownArgCheck: !!skipUnknownArgCheck, overloadIndex });
+        }
+
+        function areOverloadCacheArgTypesSame(
+            left: OverloadedCallArgTypeCacheEntry[],
+            right: OverloadedCallArgTypeCacheEntry[]
+        ): boolean {
+            if (left.length !== right.length) {
+                return false;
+            }
+
+            return left.every((leftArg, index) => {
+                const rightArg = right[index];
+                return (
+                    leftArg.argCategory === rightArg.argCategory &&
+                    leftArg.argName === rightArg.argName &&
+                    isTypeSame(leftArg.argType, rightArg.argType, { treatAnySameAsUnknown: true })
+                );
+            });
+        }
+
+        function tryGetCallResultForUnknownOverloadDiscriminator(
+            argTypes: OverloadedCallArgTypeCacheEntry[]
+        ): CallResult | undefined {
+            if (
+                constraints ||
+                inferenceContext?.expectedType ||
+                inferenceContext?.returnTypeOverride ||
+                !canUseOverloadCache(argTypes)
+            ) {
+                return undefined;
+            }
+
+            const anyOrUnknownArg = getUnknownOverloadDiscriminatorArg(argTypes);
+            if (!anyOrUnknownArg) {
+                return undefined;
+            }
+
+            const returnTypeResults = filteredMatchResults.map((matchResult) => {
+                return getEffectiveReturnTypeResult(matchResult.overload);
+            });
+            const isReturnTypeIncomplete = returnTypeResults.some((result) => result.isIncomplete);
+
+            return {
+                returnType: getAmbiguousOverloadReturnType(returnTypeResults, isReturnTypeIncomplete),
+                isTypeIncomplete: isTypeIncomplete || isReturnTypeIncomplete,
+                anyOrUnknownArg,
+                overloadsUsedForCall: filteredMatchResults.map((matchResult) => matchResult.overload),
+            };
+        }
+
+        function getUnknownOverloadDiscriminatorArg(
+            argTypes: OverloadedCallArgTypeCacheEntry[]
+        ): AnyType | UnknownType | undefined {
+            for (let argIndex = 0; argIndex < argTypes.length; argIndex++) {
+                const anyOrUnknown = containsAnyOrUnknown(argTypes[argIndex].argType, /* recurse */ false);
+                if (
+                    anyOrUnknown &&
+                    isUnannotatedParameterArg(argList[argIndex]) &&
+                    isArgMappedToVaryingParamType(argList[argIndex])
+                ) {
+                    return anyOrUnknown;
                 }
             }
 
-            const effectiveConstraints = constraints ?? new ConstraintTracker();
+            return undefined;
+        }
 
-            return validateArgTypesWithContext(
-                errorNode,
-                bestMatch,
-                effectiveConstraints,
-                skipUnknownArgCheck,
-                inferenceContext
-            );
+        function getAmbiguousOverloadReturnType(returnTypeResults: TypeResult[], isIncomplete: boolean): Type {
+            let dedupedResultsIncludeAny = false;
+            let returnTypes = returnTypeResults.reduce<Type[]>((dedupedTypes, result) => {
+                for (let typeIndex = 0; typeIndex < dedupedTypes.length; typeIndex++) {
+                    if (assignType(dedupedTypes[typeIndex], result.type)) {
+                        const anyOrUnknown = containsAnyOrUnknown(dedupedTypes[typeIndex], /* recurse */ false);
+                        if (anyOrUnknown && isAny(anyOrUnknown)) {
+                            dedupedResultsIncludeAny = true;
+                        }
+                        return dedupedTypes;
+                    }
+
+                    if (assignType(result.type, dedupedTypes[typeIndex])) {
+                        const anyOrUnknown = containsAnyOrUnknown(result.type, /* recurse */ false);
+                        if (anyOrUnknown && isAny(anyOrUnknown)) {
+                            dedupedResultsIncludeAny = true;
+                        } else {
+                            dedupedTypes[typeIndex] = NeverType.createNever();
+                        }
+                        break;
+                    }
+                }
+
+                dedupedTypes.push(result.type);
+                return dedupedTypes;
+            }, []);
+
+            returnTypes = returnTypes.filter((returnType) => !isNever(returnType));
+            const combinedReturnType = combineTypes(returnTypes);
+
+            if (returnTypes.length <= 1) {
+                return combinedReturnType;
+            }
+
+            return dedupedResultsIncludeAny
+                ? AnyType.create()
+                : UnknownType.createPossibleType(combinedReturnType, isIncomplete);
+        }
+
+        function isUnannotatedParameterArg(arg: Arg): boolean {
+            if (!arg.valueExpression || arg.valueExpression.nodeType !== ParseNodeType.Name) {
+                return false;
+            }
+
+            return !!getDeclInfoForNameNode(arg.valueExpression)?.decls.some((decl) => {
+                return (
+                    decl.type === DeclarationType.Param &&
+                    !decl.node.d.annotation &&
+                    !decl.node.d.annotationComment &&
+                    !decl.inferredTypeNodes
+                );
+            });
+        }
+
+        function isArgMappedToVaryingParamType(arg: Arg): boolean {
+            let firstParamType: Type | undefined;
+
+            return filteredMatchResults.some((matchResult) => {
+                const argParam = matchResult.argParams.find((entry) => entry.argument === arg);
+                if (!argParam) {
+                    return false;
+                }
+
+                if (!firstParamType) {
+                    firstParamType = argParam.paramType;
+                    return false;
+                }
+
+                return !isTypeSame(firstParamType, argParam.paramType, { treatAnySameAsUnknown: true });
+            });
         }
 
         // If there is only one possible arg/param match among the overloads,
@@ -9856,6 +10097,21 @@ export function createTypeEvaluator(
         if (filteredMatchResults.length === 1) {
             return evaluateUsingBestMatchingOverload(
                 /* skipUnknownArgCheck */ false,
+                /* emitNoOverloadFoundError */ false
+            );
+        }
+
+        const cachedArgTypes = getContextFreeArgTypesForOverloadCache();
+        const unknownDiscriminatorCallResult = tryGetCallResultForUnknownOverloadDiscriminator(cachedArgTypes);
+        if (unknownDiscriminatorCallResult) {
+            return unknownDiscriminatorCallResult;
+        }
+
+        const cachedOverloadMatch = getCachedOverloadMatch(cachedArgTypes);
+        if (cachedOverloadMatch) {
+            return evaluateUsingOverloadMatch(
+                cachedOverloadMatch,
+                skipUnknownArgCheck ?? false,
                 /* emitNoOverloadFoundError */ false
             );
         }
@@ -9877,6 +10133,17 @@ export function createTypeEvaluator(
             }
 
             if (!callResult.argumentErrors) {
+                if (callResult.overloadsUsedForCall?.length === 1) {
+                    const matchedOverload = callResult.overloadsUsedForCall[0];
+                    const matchedOverloadResult = filteredMatchResults.find((matchResult) => {
+                        return matchResult.overload === matchedOverload;
+                    });
+
+                    if (matchedOverloadResult) {
+                        addCachedOverloadMatch(cachedArgTypes, matchedOverloadResult.overloadIndex);
+                    }
+                }
+
                 return callResult;
             }
 
