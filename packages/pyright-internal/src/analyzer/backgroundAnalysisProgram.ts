@@ -126,9 +126,8 @@ export class BackgroundAnalysisProgram {
     }
 
     updateOpenFileContents(uri: Uri, version: number | null, contents: string, options: OpenFileOptions) {
-        this._backgroundAnalysis?.setFileOpened(uri, version, contents, options);
-        this._program.setFileOpened(uri, version, contents, options);
-        this.markFilesDirty([uri], /* evenIfContentsAreSame */ true);
+        this._backgroundAnalysis?.updateOpenFileContents(uri, version, contents, options);
+        this._program.updateOpenFileContents(uri, version, contents, options);
     }
 
     setFileClosed(fileUri: Uri) {

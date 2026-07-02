@@ -19,6 +19,7 @@ import {
 import { InvalidatedReason } from './analyzer/backgroundAnalysisProgram';
 import { ImportResolver } from './analyzer/importResolver';
 import { OpenFileOptions, Program } from './analyzer/program';
+import { IPythonMode } from './analyzer/sourceFile';
 import { TypeStubWriter } from './analyzer/typeStubWriter';
 import {
     BackgroundThreadBase,
@@ -57,6 +58,7 @@ export interface IBackgroundAnalysis extends Disposable {
     setAllowedThirdPartyImports(importNames: string[]): void;
     ensurePartialStubPackages(executionRoot: string | undefined): void;
     setFileOpened(fileUri: Uri, version: number | null, contents: string, options: OpenFileOptions): void;
+    updateOpenFileContents(fileUri: Uri, version: number | null, contents: string, options: OpenFileOptions): void;
     updateChainedUri(fileUri: Uri, chainedUri: Uri | undefined): void;
     setFileClosed(fileUri: Uri): void;
     addInterimFile(fileUri: Uri): void;
@@ -138,6 +140,13 @@ export class BackgroundAnalysisBase implements IBackgroundAnalysis {
     setFileOpened(fileUri: Uri, version: number | null, contents: string, options: OpenFileOptions) {
         this.enqueueRequest({
             requestType: 'setFileOpened',
+            data: serialize({ fileUri, version, contents, options }),
+        });
+    }
+
+    updateOpenFileContents(fileUri: Uri, version: number | null, contents: string, options: OpenFileOptions) {
+        this.enqueueRequest({
+            requestType: 'updateOpenFileContents',
             data: serialize({ fileUri, version, contents, options }),
         });
     }
@@ -525,6 +534,12 @@ export abstract class BackgroundAnalysisRunnerBase extends BackgroundThreadBase 
                 break;
             }
 
+            case 'updateOpenFileContents': {
+                const { fileUri, version, contents, options } = deserialize(msg.data);
+                this.handleUpdateOpenFileContents(fileUri, version, contents, options);
+                break;
+            }
+
             case 'updateChainedFileUri': {
                 const { fileUri, chainedUri } = deserialize(msg.data);
                 this.handleUpdateChainedFileUri(fileUri, chainedUri);
@@ -714,6 +729,28 @@ export abstract class BackgroundAnalysisRunnerBase extends BackgroundThreadBase 
         );
     }
 
+    protected handleUpdateOpenFileContents(
+        fileUri: Uri,
+        version: number | null,
+        contents: string,
+        options: OpenFileOptions | undefined
+    ) {
+        this.program.updateOpenFileContents(
+            fileUri,
+            version,
+            contents,
+            options
+                ? {
+                      ...options,
+                      chainedFileUri: Uri.fromJsonObj(options?.chainedFileUri),
+                  }
+                : {
+                      ipythonMode: IPythonMode.None,
+                      chainedFileUri: undefined,
+                  }
+        );
+    }
+
     protected handleUpdateChainedFileUri(fileUri: Uri, chainedFileUri: Uri | undefined) {
         this.program.updateChainedUri(fileUri, chainedFileUri);
     }
@@ -859,6 +896,7 @@ export type BackgroundRequestKind =
     | 'setAllowedThirdPartyImports'
     | 'ensurePartialStubPackages'
     | 'setFileOpened'
+    | 'updateOpenFileContents'
     | 'updateChainedFileUri'
     | 'setFileClosed'
     | 'markAllFilesDirty'

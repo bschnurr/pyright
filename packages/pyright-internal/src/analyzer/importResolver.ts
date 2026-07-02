@@ -28,10 +28,15 @@ import { getDirectoryLeadingDotsPointsTo } from './importStatementUtils';
 import type { ImportResolverFileSystem, TypeshedInfoProvider } from './importResolverTypes';
 import { ImportPath, ParentDirectoryCache, ParentDirectoryCacheStats } from './parentDirectoryCache';
 import { PyTypedInfo, getPyTypedInfoForPyTypedFile } from './pyTypedUtils';
-import { createDefaultTypeshedInfoProvider } from './typeshedInfoProvider';
+import {
+    ResourceLifetimeEventKind,
+    ResourceLifetimeEventReason,
+    resourceLifetimeTelemetry,
+} from './resourceLifetimeTelemetry';
 import * as PythonPathUtils from './pythonPathUtils';
 import * as SymbolNameUtils from './symbolNameUtils';
 import { isDunderName } from './symbolNameUtils';
+import { createDefaultTypeshedInfoProvider } from './typeshedInfoProvider';
 
 export interface ImportedModuleDescriptor {
     leadingDots: number;
@@ -148,7 +153,7 @@ export class ImportResolver {
         return supportedFileExtensions.some((ext) => fileExtension === ext);
     }
 
-    invalidateCache() {
+    invalidateCache(reason = ResourceLifetimeEventReason.Unknown) {
         // This is used both for configuration/filesystem invalidation and for
         // Program.emptyCache() memory pressure cleanup, so every resolver-owned
         // cache that can retain import results or search-path metadata belongs here.
@@ -161,6 +166,10 @@ export class ImportResolver {
         this._invalidateFileSystemCache();
 
         this.partialStubs?.clearPartialStubs();
+        resourceLifetimeTelemetry.record({
+            kind: ResourceLifetimeEventKind.ImportResolverInvalidateCache,
+            reason,
+        });
     }
 
     getCacheStats(): ImportResolverCacheStats {
@@ -235,7 +244,7 @@ export class ImportResolver {
 
     setConfigOptions(configOptions: ConfigOptions): void {
         this._configOptions = configOptions;
-        this.invalidateCache();
+        this.invalidateCache(ResourceLifetimeEventReason.ConfigOrImportResolverChanged);
     }
 
     // Returns the implementation file(s) for the given stub file.

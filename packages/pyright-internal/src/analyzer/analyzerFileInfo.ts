@@ -53,6 +53,7 @@ export interface AnalyzerFileInfo {
     typingSymbolAliases: Map<string, string>;
     definedConstants: Map<string, boolean | string>;
     fileId: string;
+    parseGeneration: number;
     fileUri: Uri;
     moduleName: string;
     isStubFile: boolean;

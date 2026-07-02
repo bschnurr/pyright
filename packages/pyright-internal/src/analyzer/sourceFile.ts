@@ -44,11 +44,20 @@ import * as AnalyzerNodeInfo from './analyzerNodeInfo';
 import { Binder } from './binder';
 import { CellChainIndexProvider } from './cellChainIndex';
 import { Checker } from './checker';
-import { CircularDependency } from './circularDependency';
 import * as CommentUtils from './commentUtils';
+import { CircularDependency } from './circularDependency';
+import type { ChangedRange } from './editInvalidationClassifier';
+import { getIncrementalSyntaxReuseDecision } from './incrementalSyntaxReuse';
 import { ImportResolver } from './importResolver';
 import { ImportResult } from './importResult';
+import { LibraryStubSummary } from './libraryResourceSummary';
+import { ModuleExportSummary, createModuleExportSummary } from './moduleExportSummary';
 import { ParseTreeCleanerWalker } from './parseTreeCleaner';
+import {
+    ResourceLifetimeEventKind,
+    ResourceLifetimeEventReason,
+    resourceLifetimeTelemetry,
+} from './resourceLifetimeTelemetry';
 import { Scope } from './scope';
 import { SymbolTable } from './symbol';
 import { TestWalker } from './testWalker';
@@ -114,6 +123,8 @@ class WriteableData {
     lineCount: number | undefined;
 
     moduleSymbolTable: SymbolTable | undefined;
+    moduleExportSummary: ModuleExportSummary | undefined;
+    libraryStubSummary: LibraryStubSummary | undefined;
 
     // Reentrancy check for binding and checking.
     isBindingInProgress = false;
@@ -202,6 +213,10 @@ export interface SourceFileEditMode {
     readonly isEditMode: boolean;
 }
 
+interface SetClientVersionOptions {
+    changedRange?: ChangedRange | undefined;
+}
+
 export class SourceFile {
     // Console interface to use for debugging.
     private _console: ConsoleInterface;
@@ -213,6 +228,7 @@ export class SourceFile {
     // A short string that is guaranteed to uniquely
     // identify this file.
     private readonly _fileId: string;
+    private _parseGeneration = 0;
 
     // Getter to lazily compute the module name from the file URI.
     private _moduleNameGetter: (file: Uri) => string;
@@ -405,6 +421,22 @@ export class SourceFile {
         return this._writableData.moduleSymbolTable;
     }
 
+    getModuleExportSummary(): ModuleExportSummary | undefined {
+        return this._writableData.moduleExportSummary;
+    }
+
+    getLibraryStubSummary(): LibraryStubSummary | undefined {
+        return this._writableData.libraryStubSummary;
+    }
+
+    setLibraryStubSummary(summary: LibraryStubSummary | undefined): void {
+        this._writableData.libraryStubSummary = summary;
+    }
+
+    clearLibraryStubSummary(): void {
+        this._writableData.libraryStubSummary = undefined;
+    }
+
     getCheckTime() {
         return this._writableData.checkTime;
     }
@@ -483,7 +515,7 @@ export class SourceFile {
 
     // Use for cache-pressure cleanup when callers need to preserve diagnostic
     // range queries. The file will be re-parsed and rebound when syntax is needed.
-    dropParseAndBindInfo(): void {
+    dropParseAndBindInfo(reason = ResourceLifetimeEventReason.CachePressure): void {
         // If we are actively binding or checking this file, we can't
         // safely drop parse and binding info.
         if (this._writableData.isBindingInProgress || this._writableData.isCheckingInProgress) {
@@ -494,11 +526,16 @@ export class SourceFile {
 
         this._releaseSyntaxCaches(/* preserveLineCount */ true);
         this._writableData.isBindingNeeded = true;
+        resourceLifetimeTelemetry.record({
+            kind: ResourceLifetimeEventKind.SourceFileDropParseAndBindInfo,
+            reason,
+            uri: this._uri.toString(),
+        });
     }
 
     // Use when a closed file is being removed or explicitly compacted. Returns true
     // if this call released any syntax-tier state.
-    releaseClosedFileSyntax(): boolean {
+    releaseClosedFileSyntax(reason = ResourceLifetimeEventReason.Unknown): boolean {
         if (this._writableData.isBindingInProgress || this._writableData.isCheckingInProgress) {
             return false;
         }
@@ -524,10 +561,15 @@ export class SourceFile {
 
         this._releaseSyntaxCaches(/* preserveLineCount */ true);
         this._writableData.isBindingNeeded = true;
+        resourceLifetimeTelemetry.record({
+            kind: ResourceLifetimeEventKind.SourceFileReleaseClosedFileSyntax,
+            reason,
+            uri: this._uri.toString(),
+        });
         return true;
     }
 
-    markDirty(): void {
+    markDirty(reason = ResourceLifetimeEventReason.Unknown): void {
         this._writableData.fileContentsVersion++;
         this._writableData.semanticVersion++;
         this._writableData.noCircularDependencyConfirmed = false;
@@ -535,18 +577,29 @@ export class SourceFile {
         this._writableData.isBindingNeeded = true;
         this._writableData.moduleSymbolTable = undefined;
         this._writableData.lineCount = undefined;
+        this._writableData.libraryStubSummary = undefined;
 
         this._fireFileDirtyEvent();
+        resourceLifetimeTelemetry.record({
+            kind: ResourceLifetimeEventKind.SourceFileMarkDirty,
+            reason,
+            uri: this._uri.toString(),
+        });
     }
 
     // Use when replacing the source contents, where the old parse tree must not be
     // reused and should be released immediately.
-    markDirtyAndDropSyntax(): void {
-        this.markDirty();
+    markDirtyAndDropSyntax(reason = ResourceLifetimeEventReason.Unknown): void {
+        this.markDirty(reason);
         this._releaseSyntaxCaches(/* preserveLineCount */ false);
+        resourceLifetimeTelemetry.record({
+            kind: ResourceLifetimeEventKind.SourceFileMarkDirtyAndDropSyntax,
+            reason,
+            uri: this._uri.toString(),
+        });
     }
 
-    markReanalysisRequired(forceRebinding: boolean): void {
+    markReanalysisRequired(forceRebinding: boolean, reason = ResourceLifetimeEventReason.DependencyDirtied): void {
         // Keep the parse info, but reset the analysis to the beginning.
         this._writableData.semanticVersion++;
         this._writableData.isCheckingNeeded = true;
@@ -568,10 +621,21 @@ export class SourceFile {
                 this._writableData.moduleSymbolTable = undefined;
             }
         }
+
+        resourceLifetimeTelemetry.record({
+            kind: ResourceLifetimeEventKind.SourceFileMarkReanalysisRequired,
+            reason,
+            uri: this._uri.toString(),
+            forceRebinding,
+        });
     }
 
     getFileContentsVersion() {
         return this._writableData.fileContentsVersion;
+    }
+
+    getLastFileContentHash() {
+        return this._writableData.lastFileContentHash;
     }
 
     getClientVersion() {
@@ -580,6 +644,10 @@ export class SourceFile {
 
     getSemanticVersion() {
         return this._writableData.semanticVersion;
+    }
+
+    getParseGeneration() {
+        return this._parseGeneration;
     }
 
     getRange() {
@@ -620,7 +688,7 @@ export class SourceFile {
         }
     }
 
-    setClientVersion(version: number | null, contents: string): boolean {
+    setClientVersion(version: number | null, contents: string, options?: SetClientVersionOptions): boolean {
         // Save pre edit state if in edit mode.
         this._cachePreEditState();
 
@@ -631,26 +699,58 @@ export class SourceFile {
             // Since the file is no longer open, dump the tokenizer output
             // so it doesn't consume memory.
             this._writableData.tokenizerOutput = undefined;
+            resourceLifetimeTelemetry.record({
+                kind: ResourceLifetimeEventKind.SourceFileSetClientVersion,
+                reason: ResourceLifetimeEventReason.ClientClosed,
+                uri: this._uri.toString(),
+            });
             return false;
         } else {
+            const oldContents = this._writableData.clientDocumentContents ?? this._writableData.parsedFileContents;
+            const hadSyntax = this._writableData.parserOutput !== undefined;
+
+            const contentsHash = StringUtils.hashString(contents);
+            const contentsChangedByHash =
+                contents.length !== this._writableData.lastFileContentLength ||
+                contentsHash !== this._writableData.lastFileContentHash;
+            const syntaxReuseDecision = getIncrementalSyntaxReuseDecision({
+                oldText: oldContents,
+                newText: contents,
+                changedRange: options?.changedRange,
+                contentsChangedByHash,
+            });
+            const contentsChanged = !syntaxReuseDecision.preserveSyntax;
+
             this._writableData.clientDocumentVersion = version;
             this._writableData.clientDocumentContents = contents;
 
-            const contentsHash = StringUtils.hashString(contents);
-            let contentsChanged = false;
+            resourceLifetimeTelemetry.record({
+                kind: ResourceLifetimeEventKind.SourceFileIncrementalSyntaxReuse,
+                reason: contentsChanged
+                    ? ResourceLifetimeEventReason.TextChanged
+                    : ResourceLifetimeEventReason.TextUnchanged,
+                uri: this._uri.toString(),
+                editInvalidationKind: syntaxReuseDecision.invalidationKind,
+                syntaxReused: syntaxReuseDecision.preserveSyntax && hadSyntax,
+                changedRangeLength: options?.changedRange?.range.length,
+                changedRangeDelta: options?.changedRange?.delta,
+            });
 
             // Have the contents of the file changed?
-            if (
-                contents.length !== this._writableData.lastFileContentLength ||
-                contentsHash !== this._writableData.lastFileContentHash
-            ) {
-                this.markDirtyAndDropSyntax();
-                contentsChanged = true;
+            if (contentsChanged) {
+                this.markDirtyAndDropSyntax(ResourceLifetimeEventReason.TextChanged);
             }
 
             this._writableData.lastFileContentLength = contents.length;
             this._writableData.lastFileContentHash = contentsHash;
             this._writableData.isFileDeleted = false;
+            resourceLifetimeTelemetry.record({
+                kind: ResourceLifetimeEventKind.SourceFileSetClientVersion,
+                reason: contentsChanged
+                    ? ResourceLifetimeEventReason.TextChanged
+                    : ResourceLifetimeEventReason.TextUnchanged,
+                uri: this._uri.toString(),
+            });
             return contentsChanged;
         }
     }
@@ -805,6 +905,7 @@ export class SourceFile {
 
                 assert(parseFileResults !== undefined && parseFileResults.tokenizerOutput !== undefined);
                 this._writableData.parserOutput = parseFileResults.parserOutput;
+                this._parseGeneration++;
                 this._writableData.tokenizerLines = parseFileResults.tokenizerOutput.lines;
                 this._writableData.parsedFileContents = fileContents;
                 this._writableData.typeIgnoreLines = parseFileResults.tokenizerOutput.typeIgnoreLines;
@@ -928,6 +1029,11 @@ export class SourceFile {
 
             this._recomputeDiagnostics(configOptions);
 
+            resourceLifetimeTelemetry.record({
+                kind: ResourceLifetimeEventKind.SourceFileParse,
+                reason: ResourceLifetimeEventReason.AnalysisRequired,
+                uri: this._uri.toString(),
+            });
             return true;
         });
     }
@@ -968,6 +1074,11 @@ export class SourceFile {
                     const moduleScope = AnalyzerNodeInfo.getScope(this._writableData.parserOutput!.parseTree);
                     assert(moduleScope !== undefined, 'Module scope not returned by binder');
                     this._writableData.moduleSymbolTable = moduleScope!.symbolTable;
+                    this._writableData.moduleExportSummary = createModuleExportSummary(
+                        this._writableData.parserOutput!,
+                        this._writableData.parsedFileContents!,
+                        this._uri.key
+                    );
                 });
             } catch (e: any) {
                 const message: string =
@@ -1002,6 +1113,11 @@ export class SourceFile {
             this._writableData.isBindingNeeded = false;
 
             this._recomputeDiagnostics(configOptions);
+            resourceLifetimeTelemetry.record({
+                kind: ResourceLifetimeEventKind.SourceFileBind,
+                reason: ResourceLifetimeEventReason.AnalysisRequired,
+                uri: this._uri.toString(),
+            });
         });
     }
 
@@ -1075,6 +1191,11 @@ export class SourceFile {
                 this._writableData.circularDependencies = [];
 
                 this._recomputeDiagnostics(configOptions);
+                resourceLifetimeTelemetry.record({
+                    kind: ResourceLifetimeEventKind.SourceFileCheck,
+                    reason: ResourceLifetimeEventReason.AnalysisRequired,
+                    uri: this._uri.toString(),
+                });
             }
         });
     }
@@ -1525,6 +1646,7 @@ export class SourceFile {
             typingSymbolAliases: this._writableData.parserOutput!.typingSymbolAliases,
             definedConstants: configOptions.defineConstant,
             fileId: this._fileId,
+            parseGeneration: this._parseGeneration,
             fileUri: this._uri,
             moduleName: this.getModuleName(),
             isStubFile: this._isStubFile,

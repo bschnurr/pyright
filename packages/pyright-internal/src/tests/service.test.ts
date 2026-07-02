@@ -13,6 +13,7 @@ import { IPythonMode } from '../analyzer/sourceFile';
 import { NullConsole } from '../common/console';
 import { CommandLineOptions } from '../common/commandLineOptions';
 import { combinePaths, getDirectoryPath, normalizeSlashes } from '../common/pathUtils';
+import { TextRange } from '../common/textRange';
 import { Uri } from '../common/uri/uri';
 import { getFileSpec, UriEx } from '../common/uri/uriUtils';
 import { parseTestData } from './harness/fourslash/fourSlashParser';
@@ -554,6 +555,7 @@ test('background analysis dispose shuts down analysis parked by edit mode', () =
         setAllowedThirdPartyImports: () => {},
         ensurePartialStubPackages: () => {},
         setFileOpened: () => {},
+        updateOpenFileContents: () => {},
         updateChainedUri: () => {},
         setFileClosed: () => {},
         addInterimFile: () => {},
@@ -1105,7 +1107,7 @@ test('updateOpenFileContents disposes evaluator caches and stale parse output', 
     assert.notStrictEqual(writableData.parserOutput, oldParserOutput);
 });
 
-test('updateOpenFileContents with unchanged contents preserves diagnostic version', () => {
+test('updateOpenFileContents with unchanged contents preserves evaluator and diagnostic version', () => {
     const code = `
 // @filename: test.py
 //// value: int = 1
@@ -1127,11 +1129,259 @@ test('updateOpenFileContents with unchanged contents preserves diagnostic versio
     assert.strictEqual(sourceFileInfo.isOpenByClient, true);
     const oldEvaluator = program.evaluator;
     const oldDiagnosticsVersion = sourceFileInfo.diagnosticsVersion;
+    const oldParserOutput = sourceFileInfo.sourceFile.getParserOutput();
+    assert(oldParserOutput);
 
     state.workspace.service.updateOpenFileContents(uri, 2, contents);
 
-    assert.notStrictEqual(program.evaluator, oldEvaluator);
+    assert.strictEqual(program.evaluator, oldEvaluator);
     assert.strictEqual(sourceFileInfo.diagnosticsVersion, oldDiagnosticsVersion);
+    assert.strictEqual(sourceFileInfo.sourceFile.getClientVersion(), 2);
+    assert.strictEqual(sourceFileInfo.sourceFile.getParserOutput(), oldParserOutput);
+});
+
+test('updateOpenFileContents with unchanged export surface does not dirty importer', () => {
+    const code = `
+// @filename: lib.py
+//// def public_value() -> int:
+////     return _helper()
+////
+//// def _helper() -> int:
+////     return 1
+// @filename: use.py
+//// from lib import public_value
+////
+//// value: int = public_value()
+    `;
+
+    const state = parseAndGetTestState(code, '/projectRoot').state;
+    const program = state.workspace.service.test_program;
+    const libUri = UriEx.file('/projectRoot/lib.py');
+    const useUri = UriEx.file('/projectRoot/use.py');
+
+    while (program.analyze()) {
+        // Process all queued items.
+    }
+
+    const libInfo = program.getSourceFileInfo(libUri);
+    const useInfo = program.getSourceFileInfo(useUri);
+    assert(libInfo);
+    assert(useInfo);
+    assert.strictEqual(useInfo.sourceFile.isCheckingRequired(), false);
+
+    const oldUseSemanticVersion = useInfo.sourceFile.getSemanticVersion();
+    const oldUseDiagnosticsVersion = useInfo.diagnosticsVersion;
+    const oldContents = state.testFS.readFileSync(libUri, 'utf8');
+
+    state.workspace.service.setFileOpened(libUri, 1, oldContents);
+    state.workspace.service.updateOpenFileContents(libUri, 2, oldContents.replace('return 1', 'return 2'));
+
+    assert.strictEqual(useInfo.sourceFile.isCheckingRequired(), false);
+    program.analyze({ openFilesTimeInMs: Number.MAX_VALUE, noOpenFilesTimeInMs: Number.MAX_VALUE });
+
+    assert.strictEqual(useInfo.sourceFile.isCheckingRequired(), false);
+    assert.strictEqual(useInfo.sourceFile.getSemanticVersion(), oldUseSemanticVersion);
+    assert.strictEqual(useInfo.diagnosticsVersion, oldUseDiagnosticsVersion);
+});
+
+test('updateOpenFileContents with unchanged class declaration shape does not dirty importer', () => {
+    const code = `
+// @filename: lib.py
+//// class C:
+////     value: int = 1
+////
+////     def get_value(self) -> int:
+////         return 1
+// @filename: use.py
+//// from lib import C
+////
+//// value: int = C().get_value()
+    `;
+
+    const state = parseAndGetTestState(code, '/projectRoot').state;
+    const program = state.workspace.service.test_program;
+    const libUri = UriEx.file('/projectRoot/lib.py');
+    const useUri = UriEx.file('/projectRoot/use.py');
+
+    while (program.analyze()) {
+        // Process all queued items.
+    }
+
+    const useInfo = program.getSourceFileInfo(useUri);
+    assert(useInfo);
+    assert.strictEqual(useInfo.sourceFile.isCheckingRequired(), false);
+
+    const oldUseSemanticVersion = useInfo.sourceFile.getSemanticVersion();
+    const oldUseDiagnosticsVersion = useInfo.diagnosticsVersion;
+    const oldContents = state.testFS.readFileSync(libUri, 'utf8');
+
+    state.workspace.service.setFileOpened(libUri, 1, oldContents);
+    state.workspace.service.updateOpenFileContents(libUri, 2, oldContents.replace('return 1', 'return 2'));
+
+    assert.strictEqual(useInfo.sourceFile.isCheckingRequired(), false);
+    program.analyze({ openFilesTimeInMs: Number.MAX_VALUE, noOpenFilesTimeInMs: Number.MAX_VALUE });
+
+    assert.strictEqual(useInfo.sourceFile.isCheckingRequired(), false);
+    assert.strictEqual(useInfo.sourceFile.getSemanticVersion(), oldUseSemanticVersion);
+    assert.strictEqual(useInfo.diagnosticsVersion, oldUseDiagnosticsVersion);
+});
+
+test('updateOpenFileContents with changed export surface dirties importer', () => {
+    const code = `
+// @filename: lib.py
+//// def public_value() -> int:
+////     return 1
+// @filename: use.py
+//// from lib import public_value
+////
+//// value: int = public_value()
+    `;
+
+    const state = parseAndGetTestState(code, '/projectRoot').state;
+    const program = state.workspace.service.test_program;
+    const libUri = UriEx.file('/projectRoot/lib.py');
+    const useUri = UriEx.file('/projectRoot/use.py');
+
+    while (program.analyze()) {
+        // Process all queued items.
+    }
+
+    const useInfo = program.getSourceFileInfo(useUri);
+    assert(useInfo);
+    const oldUseSemanticVersion = useInfo.sourceFile.getSemanticVersion();
+    const oldContents = state.testFS.readFileSync(libUri, 'utf8');
+
+    state.workspace.service.setFileOpened(libUri, 1, oldContents);
+    state.workspace.service.updateOpenFileContents(libUri, 2, oldContents.replace('-> int', '-> str'));
+    program.analyze({ openFilesTimeInMs: Number.MAX_VALUE, noOpenFilesTimeInMs: Number.MAX_VALUE });
+
+    assert.strictEqual(useInfo.sourceFile.isCheckingRequired(), true);
+    assert(useInfo.sourceFile.getSemanticVersion() > oldUseSemanticVersion);
+});
+
+test('updateOpenFileContents with changed class attribute annotation dirties importer', () => {
+    const code = `
+// @filename: lib.py
+//// class C:
+////     value: int = 1
+////
+////     def get_value(self) -> int:
+////         return self.value
+// @filename: use.py
+//// from lib import C
+////
+//// value: int = C().value
+    `;
+
+    const state = parseAndGetTestState(code, '/projectRoot').state;
+    const program = state.workspace.service.test_program;
+    const libUri = UriEx.file('/projectRoot/lib.py');
+    const useUri = UriEx.file('/projectRoot/use.py');
+
+    while (program.analyze()) {
+        // Process all queued items.
+    }
+
+    const useInfo = program.getSourceFileInfo(useUri);
+    assert(useInfo);
+    const oldUseSemanticVersion = useInfo.sourceFile.getSemanticVersion();
+    const oldContents = state.testFS.readFileSync(libUri, 'utf8');
+
+    state.workspace.service.setFileOpened(libUri, 1, oldContents);
+    state.workspace.service.updateOpenFileContents(libUri, 2, oldContents.replace('value: int = 1', "value: str = ''"));
+    program.analyze({ openFilesTimeInMs: Number.MAX_VALUE, noOpenFilesTimeInMs: Number.MAX_VALUE });
+
+    assert.strictEqual(useInfo.sourceFile.isCheckingRequired(), true);
+    assert(useInfo.sourceFile.getSemanticVersion() > oldUseSemanticVersion);
+});
+
+test('updateOpenFileContents with changed import surface updates import graph and dirties importer', () => {
+    const code = `
+// @filename: dep1.py
+//// VALUE: int = 1
+// @filename: dep2.py
+//// VALUE: int = 2
+// @filename: lib.py
+//// import dep1
+////
+//// def public_value() -> int:
+////     return dep1.VALUE
+// @filename: use.py
+//// from lib import public_value
+////
+//// value: int = public_value()
+    `;
+
+    const state = parseAndGetTestState(code, '/projectRoot').state;
+    const program = state.workspace.service.test_program;
+    const dep1Uri = UriEx.file('/projectRoot/dep1.py');
+    const dep2Uri = UriEx.file('/projectRoot/dep2.py');
+    const libUri = UriEx.file('/projectRoot/lib.py');
+    const useUri = UriEx.file('/projectRoot/use.py');
+
+    while (program.analyze()) {
+        // Process all queued items.
+    }
+
+    const libInfo = program.getSourceFileInfo(libUri);
+    const useInfo = program.getSourceFileInfo(useUri);
+    assert(libInfo);
+    assert(useInfo);
+    assert(libInfo.imports.some((importInfo) => importInfo.uri.key === dep1Uri.key));
+    assert(!libInfo.imports.some((importInfo) => importInfo.uri.key === dep2Uri.key));
+    const oldUseSemanticVersion = useInfo.sourceFile.getSemanticVersion();
+    const oldContents = state.testFS.readFileSync(libUri, 'utf8');
+
+    state.workspace.service.setFileOpened(libUri, 1, oldContents);
+    state.workspace.service.updateOpenFileContents(libUri, 2, oldContents.replace('import dep1', 'import dep2'));
+    program.analyze({ openFilesTimeInMs: Number.MAX_VALUE, noOpenFilesTimeInMs: Number.MAX_VALUE });
+
+    assert(!libInfo.imports.some((importInfo) => importInfo.uri.key === dep1Uri.key));
+    assert(libInfo.imports.some((importInfo) => importInfo.uri.key === dep2Uri.key));
+    assert.strictEqual(useInfo.sourceFile.isCheckingRequired(), true);
+    assert(useInfo.sourceFile.getSemanticVersion() > oldUseSemanticVersion);
+});
+
+test('updateOpenFileContents with changed __all__ dirties wildcard importer', () => {
+    const code = `
+// @filename: lib.py
+//// __all__ = ['public_value']
+////
+//// def public_value() -> int:
+////     return 1
+////
+//// def other_value() -> int:
+////     return 2
+// @filename: use.py
+//// from lib import *
+////
+//// value: int = public_value()
+    `;
+
+    const state = parseAndGetTestState(code, '/projectRoot').state;
+    const program = state.workspace.service.test_program;
+    const libUri = UriEx.file('/projectRoot/lib.py');
+    const useUri = UriEx.file('/projectRoot/use.py');
+
+    while (program.analyze()) {
+        // Process all queued items.
+    }
+
+    const useInfo = program.getSourceFileInfo(useUri);
+    assert(useInfo);
+    const oldUseSemanticVersion = useInfo.sourceFile.getSemanticVersion();
+    const oldContents = state.testFS.readFileSync(libUri, 'utf8');
+
+    state.workspace.service.setFileOpened(libUri, 1, oldContents);
+    state.workspace.service.updateOpenFileContents(
+        libUri,
+        2,
+        oldContents.replace("['public_value']", "['public_value', 'other_value']")
+    );
+    program.analyze({ openFilesTimeInMs: Number.MAX_VALUE, noOpenFilesTimeInMs: Number.MAX_VALUE });
+
+    assert.strictEqual(useInfo.sourceFile.isCheckingRequired(), true);
+    assert(useInfo.sourceFile.getSemanticVersion() > oldUseSemanticVersion);
 });
 
 test('setFileOpened preserves evaluator cache when contents change', () => {
@@ -1165,6 +1415,56 @@ test('setFileOpened preserves evaluator cache when contents change', () => {
     assert.strictEqual(program.evaluator, oldEvaluator);
     assert.deepStrictEqual(oldEvaluator.getEvaluatorCacheStats(), oldEvaluatorStats);
     assert.strictEqual(sourceFileInfo.sourceFile.getParserOutput(), undefined);
+});
+
+test('parse-node-keyed evaluator cache rejects stale entries after reparse', () => {
+    const code = `
+// @filename: test.py
+//// value = 1
+//// reveal_type(value)
+    `;
+
+    const state = parseAndGetTestState(code, '/projectRoot').state;
+    const uri = UriEx.file('/projectRoot/test.py');
+    const program = state.workspace.service.test_program;
+
+    while (program.analyze()) {
+        // Process all queued items.
+    }
+
+    const sourceFileInfo = program.getSourceFileInfo(uri);
+    assert(sourceFileInfo);
+    const oldEvaluator = program.evaluator as any;
+    const oldNameNode = _findNameNode(program.getParseResults(uri)!.parserOutput.parseTree, 'value');
+    assert(oldNameNode);
+    oldEvaluator.getTypeOfExpression(oldNameNode);
+    const oldNodeId = oldNameNode.id;
+    const oldParseGeneration = sourceFileInfo.sourceFile.getParseGeneration();
+
+    program.setFileOpened(uri, 2, 'value = "new"\nreveal_type(value)\n', {
+        ipythonMode: IPythonMode.None,
+        chainedFileUri: undefined,
+        changedRange: {
+            range: TextRange.create(8, 1),
+            delta: 4,
+        },
+    });
+    while (program.analyze()) {
+        // Process all queued items.
+    }
+
+    assert.strictEqual(program.evaluator, oldEvaluator);
+    assert(sourceFileInfo.sourceFile.getParseGeneration() > oldParseGeneration);
+    const newNameNode = _findNameNode(program.getParseResults(uri)!.parserOutput.parseTree, 'value');
+    assert(newNameNode);
+    const newNodeId = newNameNode.id;
+
+    try {
+        newNameNode.id = oldNodeId;
+        assert.strictEqual(oldEvaluator.getCachedType(newNameNode), undefined);
+    } finally {
+        newNameNode.id = newNodeId;
+    }
 });
 
 test('setFileOpened defers evaluator disposal during edit mode', () => {
@@ -1471,6 +1771,100 @@ test('emptyCache drops retained parse tree and parsed contents for closed tracke
     assert.strictEqual(writableData.moduleSymbolTable, undefined);
 });
 
+test('emptyCache preserves library stub summary while dropping full syntax', () => {
+    const code = `
+// @filename: test.py
+//// import typedpkg
+//// typedpkg.value
+
+// @filename: typedpkg/py.typed
+// @library: true
+////
+
+// @filename: typedpkg/__init__.pyi
+// @library: true
+//// value: int
+    `;
+
+    const state = parseAndGetTestState(code, '/projectRoot').state;
+    const testUri = Uri.file(combinePaths('/projectRoot', 'test.py'), state.serviceProvider);
+    const libraryUri = Uri.file(
+        combinePaths(libFolder.getFilePath(), 'typedpkg', '__init__.pyi'),
+        state.serviceProvider
+    );
+    const program = state.workspace.service.test_program;
+    state.workspace.service.setFileOpened(testUri, 1, state.testFS.readFileSync(testUri, 'utf8'));
+
+    while (program.analyze()) {
+        // Process all queued items.
+    }
+
+    const librarySourceFile = program.getSourceFile(libraryUri);
+    assert(librarySourceFile);
+    const writableData = (librarySourceFile as any)._writableData;
+    const summaryBefore = librarySourceFile.getLibraryStubSummary();
+    assert(summaryBefore);
+    assert(writableData.parserOutput);
+    assert.strictEqual(summaryBefore.key.uri, libraryUri.toString());
+    assert.strictEqual(summaryBefore.key.kind, 'thirdPartyPackage');
+    assert.strictEqual(summaryBefore.key.pyTypedState, 'present');
+    assert(summaryBefore.key.contentHash.length > 0);
+    assert(summaryBefore.key.pythonVersion.length > 0);
+    assert.strictEqual(typeof summaryBefore.key.pythonPlatform, 'string');
+    assert.strictEqual(typeof summaryBefore.key.typeshedEpoch, 'number');
+    assert.strictEqual(typeof summaryBefore.key.configEpoch, 'number');
+    assert.strictEqual(typeof summaryBefore.key.partialStubEpoch, 'number');
+
+    state.workspace.service.updateOpenFileContents(testUri, 2, 'import typedpkg\ntypedpkg.value\nuser_value = 1');
+    program.emptyCache();
+
+    assert.strictEqual(librarySourceFile.getLibraryStubSummary(), summaryBefore);
+    assert.strictEqual(writableData.parserOutput, undefined);
+    assert.strictEqual(writableData.parsedFileContents, undefined);
+    assert.strictEqual(writableData.moduleSymbolTable, undefined);
+});
+
+test('library stub summary invalidates on config and import resolver changes', () => {
+    const code = `
+// @filename: test.py
+//// import typedpkg
+//// typedpkg.value
+
+// @filename: typedpkg/py.typed
+// @library: true
+////
+
+// @filename: typedpkg/__init__.pyi
+// @library: true
+//// value: int
+    `;
+
+    const state = parseAndGetTestState(code, '/projectRoot').state;
+    const libraryUri = Uri.file(
+        combinePaths(libFolder.getFilePath(), 'typedpkg', '__init__.pyi'),
+        state.serviceProvider
+    );
+    const program = state.workspace.service.test_program;
+
+    while (program.analyze()) {
+        // Process all queued items.
+    }
+
+    const librarySourceFile = program.getSourceFile(libraryUri);
+    assert(librarySourceFile);
+    assert(librarySourceFile.getLibraryStubSummary());
+
+    program.setConfigOptions(state.configOptions);
+    assert.strictEqual(librarySourceFile.getLibraryStubSummary(), undefined);
+
+    program.markFilesDirty([libraryUri], /* evenIfContentsAreSame */ true);
+    program.getBoundSourceFile(libraryUri);
+    assert(librarySourceFile.getLibraryStubSummary());
+
+    program.setImportResolver(state.importResolver);
+    assert.strictEqual(librarySourceFile.getLibraryStubSummary(), undefined);
+});
+
 test('emptyCache preserves diagnostic range for checked files', () => {
     const code = `
 // @filename: test.py
@@ -1571,9 +1965,13 @@ test('emptyCache preserves live partial stub files', () => {
     const partialStubFile = program.getSourceFile(originalPartialStubUri);
     assert(partialStubFile);
     assert(!partialStubFile.isFileDeleted());
+    const partialStubSummaryBefore = partialStubFile.getLibraryStubSummary();
+    assert(partialStubSummaryBefore);
 
     program.emptyCache();
 
+    assert.strictEqual(partialStubFile.getLibraryStubSummary(), partialStubSummaryBefore);
+    assert(partialStubFile.isParseRequired());
     assert(program.getBoundSourceFile(testUri));
     assert(program.getBoundSourceFile(originalPartialStubUri));
     assert(!partialStubFile.isFileDeleted());
@@ -1613,6 +2011,34 @@ test('emptyCache preserves text range and diagnostic range queries for open file
     );
     assert.strictEqual(program.getDiagnosticsForRange(uri, wholeFileRange).length, diagnosticsBefore.length);
 });
+
+function _findNameNode(root: any, name: string): any {
+    const seen = new Set<object>();
+    const stack = [root];
+    while (stack.length > 0) {
+        const cur = stack.pop();
+        if (!cur || typeof cur !== 'object' || seen.has(cur)) {
+            continue;
+        }
+
+        seen.add(cur);
+        if (cur.d?.value === name) {
+            return cur;
+        }
+
+        for (const value of Object.values(cur)) {
+            if (value && typeof value === 'object') {
+                if (Array.isArray(value)) {
+                    stack.push(...value);
+                } else {
+                    stack.push(value);
+                }
+            }
+        }
+    }
+
+    return undefined;
+}
 
 function testSourceFileWatchChange(code: string, expected = true, isFile = true) {
     const state = parseAndGetTestState(code, '/projectRoot').state;

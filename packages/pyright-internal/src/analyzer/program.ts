@@ -26,7 +26,7 @@ import { convertRangeToTextRange } from '../common/positionUtils';
 import { ServiceKeys } from '../common/serviceKeys';
 import { ServiceProvider } from '../common/serviceProvider';
 import '../common/serviceProviderExtensions';
-import { Range, TextRange, doRangesIntersect } from '../common/textRange';
+import { Range, doRangesIntersect } from '../common/textRange';
 import { Duration, timingStats } from '../common/timing';
 import { Uri } from '../common/uri/uri';
 import { ParseFileResults, ParserOutput } from '../parser/parser';
@@ -36,10 +36,28 @@ import { CellChainIndex, CellChainIndexProvider } from './cellChainIndex';
 import * as AnalyzerNodeInfo from './analyzerNodeInfo';
 import { CacheManager } from './cacheManager';
 import { CircularDependency } from './circularDependency';
+import { DependencyAwareEvaluatorCache, DependencyAwareEvaluatorCacheEpochs } from './dependencyAwareEvaluatorCache';
+import type { ChangedRange } from './editInvalidationClassifier';
 import { ImportResolver } from './importResolver';
 import { ImportResult, ImportType } from './importResult';
+import {
+    LibraryPyTypedState,
+    LibraryResourceKind,
+    createLibraryResourceKey,
+    createLibraryStubSummary,
+} from './libraryResourceSummary';
+import {
+    ModuleExportSummary,
+    areModuleDeclarationShapesEqual,
+    areModuleExportSummariesEqual,
+} from './moduleExportSummary';
 import { getDocString } from './parseTreeUtils';
 import { ISourceFileFactory } from './programTypes';
+import {
+    ResourceLifetimeEventKind,
+    ResourceLifetimeEventReason,
+    resourceLifetimeTelemetry,
+} from './resourceLifetimeTelemetry';
 import { Scope } from './scope';
 import { IPythonMode, SourceFile } from './sourceFile';
 import { SourceFileInfo } from './sourceFileInfo';
@@ -51,6 +69,8 @@ import { PrintTypeOptions, TypeEvaluator } from './typeEvaluatorTypes';
 import { createTypeEvaluatorWithTracker } from './typeEvaluatorWithTracker';
 import { getPrintTypeFlags } from './typePrinter';
 import { Type } from './types';
+
+export type { ChangedRange } from './editInvalidationClassifier';
 
 const _maxImportDepth = 256;
 
@@ -86,15 +106,10 @@ interface UpdateImportInfo {
 
 export type PreCheckCallback = (parserOutput: ParserOutput, evaluator: TypeEvaluator) => void;
 
-export interface ChangedRange {
-    range: TextRange;
-    delta: number;
-}
-
 export interface OpenFileOptions {
     ipythonMode: IPythonMode;
     chainedFileUri: Uri | undefined;
-    changedRange?: ChangedRange;
+    changedRange?: ChangedRange | undefined;
     isVirtual?: boolean;
 }
 
@@ -161,6 +176,14 @@ export class Program {
     private _preCheckCallback: PreCheckCallback | undefined;
     private _editModeTracker = new EditModeTracker();
     private _sourceFileFactory: ISourceFileFactory;
+    private _pendingExportSurfaceInvalidation = new Set<string>();
+    private readonly _dependencyAwareEvaluatorCache = new DependencyAwareEvaluatorCache();
+    private _dependencyAwareEvaluatorBuiltinsEpoch = 0;
+    private _dependencyAwareEvaluatorConfigEpoch = 0;
+    private _dependencyAwareEvaluatorImportResolverEpoch = 0;
+    private _librarySummaryTypeshedEpoch = 0;
+    private _librarySummaryConfigEpoch = 0;
+    private _librarySummaryPartialStubEpoch = 0;
 
     constructor(
         initialImportResolver: ImportResolver,
@@ -179,7 +202,8 @@ export class Program {
 
         this._cacheManager = serviceProvider.tryGet(ServiceKeys.cacheManager) ?? new CacheManager();
         this._cacheManager.registerCacheOwner(this);
-        this._createNewEvaluator();
+        resourceLifetimeTelemetry.configureWorkspaceFileOutput(this._configOptions.projectRoot);
+        this._createNewEvaluator(ResourceLifetimeEventReason.Initial);
 
         this._id = id ?? `Prog_${Program._nextId}`;
         Program._nextId += 1;
@@ -224,6 +248,21 @@ export class Program {
         return this._cellChainIndex;
     }
 
+    getDependencyAwareEvaluatorCache() {
+        return this._dependencyAwareEvaluatorCache;
+    }
+
+    getDependencyAwareEvaluatorCacheEpochs(): DependencyAwareEvaluatorCacheEpochs {
+        return {
+            builtinsEpoch: this._dependencyAwareEvaluatorBuiltinsEpoch,
+            configEpoch: this._dependencyAwareEvaluatorConfigEpoch,
+            importResolverEpoch: this._dependencyAwareEvaluatorImportResolverEpoch,
+            typeshedEpoch: this._librarySummaryTypeshedEpoch,
+            librarySummaryConfigEpoch: this._librarySummaryConfigEpoch,
+            partialStubEpoch: this._librarySummaryPartialStubEpoch,
+        };
+    }
+
     dispose() {
         if (this._disposed) {
             return;
@@ -232,6 +271,11 @@ export class Program {
         this.disposeInternal(this._disposed);
 
         if (this._evaluator) {
+            resourceLifetimeTelemetry.record({
+                kind: ResourceLifetimeEventKind.ProgramEvaluatorDisposed,
+                reason: ResourceLifetimeEventReason.ProgramDisposed,
+                evaluatorGeneration: this._evaluatorGeneration,
+            });
             this._evaluator.disposeEvaluator();
             this._evaluator = undefined;
         }
@@ -245,12 +289,13 @@ export class Program {
         this._sourceFileList.forEach((fileInfo) => {
             fileInfo.clearForDispose();
             fileInfo.sourceFile.setClientVersion(null, '');
-            fileInfo.sourceFile.releaseClosedFileSyntax();
+            fileInfo.sourceFile.releaseClosedFileSyntax(ResourceLifetimeEventReason.ProgramDisposed);
             fileInfo.sourceFile.clearPreEditStateForDispose();
         });
         this._sourceFileList.length = 0;
         this._sourceFileMap.clear();
         this._parsedFileCount = 0;
+        this._dependencyAwareEvaluatorCache.clear();
 
         this._cacheManager.unregisterCacheOwner(this);
         this._disposed = true;
@@ -310,7 +355,7 @@ export class Program {
 
         if (mutatedFiles.length > 0 || removedFileHadAnalysisState) {
             // All cache is invalid now.
-            this._createNewEvaluator();
+            this._createNewEvaluator(ResourceLifetimeEventReason.EditModeExited);
         }
 
         return edits;
@@ -319,18 +364,33 @@ export class Program {
     setConfigOptions(configOptions: ConfigOptions) {
         this._configOptions = configOptions;
         this._importResolver.setConfigOptions(configOptions);
+        this._dependencyAwareEvaluatorBuiltinsEpoch++;
+        this._dependencyAwareEvaluatorConfigEpoch++;
+        this._dependencyAwareEvaluatorImportResolverEpoch++;
+        this._invalidateLibraryStubSummaries({
+            configChanged: true,
+            typeshedChanged: true,
+            partialStubRemappingChanged: true,
+        });
 
         // Create a new evaluator with the updated config options.
-        this._createNewEvaluator();
+        this._createNewEvaluator(ResourceLifetimeEventReason.ConfigOrImportResolverChanged);
     }
 
     setImportResolver(importResolver: ImportResolver) {
         this._importResolver = importResolver;
+        this._dependencyAwareEvaluatorBuiltinsEpoch++;
+        this._dependencyAwareEvaluatorImportResolverEpoch++;
+        this._invalidateLibraryStubSummaries({
+            configChanged: true,
+            typeshedChanged: true,
+            partialStubRemappingChanged: true,
+        });
 
         // Create a new evaluator with the updated import resolver.
         // Otherwise, lookup import passed to type evaluator might use
         // older import resolver when resolving imports after parsing.
-        this._createNewEvaluator();
+        this._createNewEvaluator(ResourceLifetimeEventReason.ConfigOrImportResolverChanged);
     }
 
     // Sets the list of tracked files that make up the program.
@@ -489,7 +549,8 @@ export class Program {
             this._cellChainIndex.invalidate();
         }
 
-        const contentsChanged = sourceFileInfo.sourceFile.setClientVersion(version, contents);
+        const setClientVersionOptions = options?.changedRange ? { changedRange: options.changedRange } : undefined;
+        const contentsChanged = sourceFileInfo.sourceFile.setClientVersion(version, contents, setClientVersionOptions);
         if (wasKnownFile && (!wasOpenByClient || contentsChanged)) {
             // Reset the diagnostic version so we force an update to the diagnostics,
             // which can change based on whether the file is open or its contents changed.
@@ -497,6 +558,29 @@ export class Program {
             // no diagnostics currently reported for this file.
             sourceFileInfo.diagnosticsVersion = 0;
         }
+
+        return contentsChanged;
+    }
+
+    updateOpenFileContents(fileUri: Uri, version: number | null, contents: string, options: OpenFileOptions) {
+        const contentsChanged = this.setFileOpened(fileUri, version, contents, options);
+        if (!contentsChanged) {
+            return false;
+        }
+
+        const sourceFileInfo = this.getSourceFileInfo(fileUri);
+        if (!sourceFileInfo) {
+            return true;
+        }
+
+        if (isBuiltinsModuleFile(fileUri.fileName) || sourceFileInfo.ipythonMode === IPythonMode.CellDocs) {
+            this.markFilesDirty([fileUri], /* evenIfContentsAreSame */ true);
+            return true;
+        }
+
+        this._pendingExportSurfaceInvalidation.add(fileUri.key);
+        this._createNewEvaluator(ResourceLifetimeEventReason.TextChanged);
+        return true;
     }
 
     getChainedUri(fileUri: Uri): Uri | undefined {
@@ -516,14 +600,14 @@ export class Program {
         }
 
         sourceFileInfo.chainedSourceFile = chainedSourceFile;
-        sourceFileInfo.sourceFile.markDirty();
+        sourceFileInfo.sourceFile.markDirty(ResourceLifetimeEventReason.ChainedFileChanged);
         this._markFileDirtyRecursive(
             sourceFileInfo,
             new Set<string>(),
             /* forceRebinding */ false,
             /* recreateEvaluator */ false
         );
-        this._createNewEvaluator();
+        this._createNewEvaluator(ResourceLifetimeEventReason.ChainedFileChanged);
         this._cellChainIndex.invalidate();
 
         verifyNoCyclesInChainedFiles(this, sourceFileInfo);
@@ -552,14 +636,14 @@ export class Program {
             // This won't matter much for OpenFileOnly users, but it will matter for
             // people who use diagnosticMode Workspace.
             if (sourceFileInfo.sourceFile.didContentsChangeOnDisk()) {
-                sourceFileInfo.sourceFile.markDirty();
+                sourceFileInfo.sourceFile.markDirty(ResourceLifetimeEventReason.DiskChanged);
                 this._markFileDirtyRecursive(
                     sourceFileInfo,
                     new Set<string>(),
                     /* forceRebinding */ false,
                     /* recreateEvaluator */ false
                 );
-                this._createNewEvaluator();
+                this._createNewEvaluator(ResourceLifetimeEventReason.DiskChanged);
             }
 
             // Syntax release happens through explicit cache-pressure and removal
@@ -572,15 +656,29 @@ export class Program {
     }
 
     markAllFilesDirty(evenIfContentsAreSame: boolean, recreateEvaluator = true) {
+        resourceLifetimeTelemetry.record({
+            kind: ResourceLifetimeEventKind.ProgramMarkAllFilesDirty,
+            reason: evenIfContentsAreSame
+                ? ResourceLifetimeEventReason.ForcedDirty
+                : ResourceLifetimeEventReason.DiskChanged,
+            fileCount: this._sourceFileList.length,
+            evenIfContentsAreSame,
+        });
+
         const markDirtySet = new Set<string>();
         let foundDirtyFile = false;
+        let foundBuiltinsFile = false;
 
         this._sourceFileList.forEach((sourceFileInfo) => {
+            if (isBuiltinsModuleFile(sourceFileInfo.uri.fileName)) {
+                foundBuiltinsFile = true;
+            }
+
             if (evenIfContentsAreSame) {
-                sourceFileInfo.sourceFile.markDirty();
+                sourceFileInfo.sourceFile.markDirty(ResourceLifetimeEventReason.ForcedDirty);
                 foundDirtyFile = true;
             } else if (sourceFileInfo.sourceFile.didContentsChangeOnDisk()) {
-                sourceFileInfo.sourceFile.markDirty();
+                sourceFileInfo.sourceFile.markDirty(ResourceLifetimeEventReason.DiskChanged);
                 foundDirtyFile = true;
 
                 // Mark any files that depend on this file as dirty
@@ -594,12 +692,29 @@ export class Program {
             }
         });
 
+        if (foundBuiltinsFile && foundDirtyFile) {
+            this._dependencyAwareEvaluatorBuiltinsEpoch++;
+        }
+
         if (recreateEvaluator && (foundDirtyFile || markDirtySet.size > 0)) {
-            this._createNewEvaluator();
+            this._createNewEvaluator(
+                evenIfContentsAreSame
+                    ? ResourceLifetimeEventReason.ForcedDirty
+                    : ResourceLifetimeEventReason.DiskChanged
+            );
         }
     }
 
     markFilesDirty(fileUris: Uri[], evenIfContentsAreSame: boolean) {
+        resourceLifetimeTelemetry.record({
+            kind: ResourceLifetimeEventKind.ProgramMarkFilesDirty,
+            reason: evenIfContentsAreSame
+                ? ResourceLifetimeEventReason.ForcedDirty
+                : ResourceLifetimeEventReason.DiskChanged,
+            fileCount: fileUris.length,
+            evenIfContentsAreSame,
+        });
+
         if (
             fileUris.some((fileUri) => {
                 return isBuiltinsModuleFile(fileUri.fileName) && this.getSourceFileInfo(fileUri) !== undefined;
@@ -620,7 +735,11 @@ export class Program {
                     evenIfContentsAreSame ||
                     (!sourceFileInfo.isOpenByClient && sourceFileInfo.sourceFile.didContentsChangeOnDisk())
                 ) {
-                    sourceFileInfo.sourceFile.markDirty();
+                    sourceFileInfo.sourceFile.markDirty(
+                        evenIfContentsAreSame
+                            ? ResourceLifetimeEventReason.ForcedDirty
+                            : ResourceLifetimeEventReason.DiskChanged
+                    );
 
                     // Mark any files that depend on this file as dirty
                     // also. This will retrigger analysis of these other files.
@@ -635,7 +754,11 @@ export class Program {
         });
 
         if (markDirtySet.size > 0) {
-            this._createNewEvaluator();
+            this._createNewEvaluator(
+                evenIfContentsAreSame
+                    ? ResourceLifetimeEventReason.ForcedDirty
+                    : ResourceLifetimeEventReason.DiskChanged
+            );
         }
     }
 
@@ -1159,8 +1282,9 @@ export class Program {
 
     // Discards any cached information associated with this program.
     emptyCache() {
-        this._createNewEvaluator();
-        this._importResolver.invalidateCache();
+        this._createNewEvaluator(ResourceLifetimeEventReason.CachePressure);
+        this._dependencyAwareEvaluatorCache.clear();
+        this._importResolver.invalidateCache(ResourceLifetimeEventReason.CachePressure);
         this._discardCachedParseResults();
         this._parsedFileCount = 0;
 
@@ -1249,7 +1373,11 @@ export class Program {
                     e.isTypeCacheInvalid ||
                     e.code === LSPErrorCodes.ServerCancelled
                 ) {
-                    this._createNewEvaluator();
+                    this._createNewEvaluator(
+                        e.isTypeCacheInvalid
+                            ? ResourceLifetimeEventReason.CancellationInvalidatedTypeCache
+                            : ResourceLifetimeEventReason.Unknown
+                    );
                 }
 
                 throw e;
@@ -1259,7 +1387,11 @@ export class Program {
             // in an inconsistent state. Discard it and replace it with a fresh one. It is
             // Cancellation exceptions are known to handle this correctly.
             if (!OperationCanceledException.is(e) || e.isTypeCacheInvalid || e.code === LSPErrorCodes.ServerCancelled) {
-                this._createNewEvaluator();
+                this._createNewEvaluator(
+                    e.isTypeCacheInvalid
+                        ? ResourceLifetimeEventReason.CancellationInvalidatedTypeCache
+                        : ResourceLifetimeEventReason.Unknown
+                );
             }
             throw e;
         }
@@ -1316,7 +1448,7 @@ export class Program {
         }
 
         if (shouldRecreateEvaluator) {
-            this._createNewEvaluator();
+            this._createNewEvaluator(ResourceLifetimeEventReason.FileRemoved);
         }
 
         return fileDiagnostics;
@@ -1845,20 +1977,26 @@ export class Program {
         return sourceFileInfo;
     }
 
-    private _createNewEvaluator() {
+    private _createNewEvaluator(reason = ResourceLifetimeEventReason.Unknown) {
         this.createNewEvaluatorInternal();
 
         if (this._evaluator) {
             // We shouldn't need to call this, but there appears to be a bug
             // in the v8 garbage collector where it's unable to resolve orphaned
             // objects without us giving it some assistance.
+            resourceLifetimeTelemetry.record({
+                kind: ResourceLifetimeEventKind.ProgramEvaluatorDisposed,
+                reason,
+                evaluatorGeneration: this._evaluatorGeneration,
+            });
             this._evaluator.disposeEvaluator();
         }
 
+        const evaluatorGeneration = ++this._evaluatorGeneration;
         this._evaluator = createTypeEvaluatorWithTracker(
             this._lookUpImport,
             {
-                evaluatorGeneration: ++this._evaluatorGeneration,
+                evaluatorGeneration,
                 printTypeFlags: getPrintTypeFlags(this._configOptions),
                 logCalls: this._configOptions.logTypeEvaluationTime,
                 minimumLoggingThreshold: this._configOptions.typeEvaluationTimeThreshold,
@@ -1875,6 +2013,11 @@ export class Program {
                 : undefined
         );
 
+        resourceLifetimeTelemetry.record({
+            kind: ResourceLifetimeEventKind.ProgramEvaluatorCreated,
+            reason,
+            evaluatorGeneration,
+        });
         return this._evaluator;
     }
 
@@ -1901,7 +2044,7 @@ export class Program {
             this._markFileDirtyRecursive(fileToParse, markDirtySet);
 
             // Invalidate the import resolver's cache as well.
-            this._importResolver.invalidateCache();
+            this._importResolver.invalidateCache(ResourceLifetimeEventReason.FileRemoved);
         }
     }
 
@@ -2039,6 +2182,10 @@ export class Program {
         }
         fileToBind.effectiveFutureImports = futureImports.size > 0 ? futureImports : undefined;
 
+        const previousExportSummary = this._pendingExportSurfaceInvalidation.has(fileToBind.uri.key)
+            ? fileToBind.sourceFile.getModuleExportSummary()
+            : undefined;
+
         fileToBind.sourceFile.bind(
             this._configOptions,
             this._lookUpImport,
@@ -2046,6 +2193,16 @@ export class Program {
             futureImports,
             fileToBind.ipythonMode === IPythonMode.CellDocs ? this._cellChainIndex : undefined
         );
+        this._refreshLibraryStubSummary(fileToBind);
+
+        if (this._pendingExportSurfaceInvalidation.delete(fileToBind.uri.key)) {
+            this._markImportDependentsIfExportSurfaceChanged(
+                fileToBind,
+                previousExportSummary,
+                fileToBind.sourceFile.getModuleExportSummary()
+            );
+        }
+
         return true;
     }
 
@@ -2446,7 +2603,12 @@ export class Program {
             return;
         }
 
-        sourceFileInfo.sourceFile.markReanalysisRequired(forceRebinding);
+        sourceFileInfo.sourceFile.markReanalysisRequired(
+            forceRebinding,
+            forceRebinding
+                ? ResourceLifetimeEventReason.ChainedFileChanged
+                : ResourceLifetimeEventReason.DependencyDirtied
+        );
         markSet.add(fileUri.key);
 
         sourceFileInfo.importedBy.forEach((dep) => {
@@ -2470,7 +2632,8 @@ export class Program {
 
             reevaluationRequired = true;
             chainedSourceFile.sourceFile.markReanalysisRequired(
-                /* forceRebinding */ sourceFileInfo.ipythonMode === IPythonMode.CellDocs
+                /* forceRebinding */ sourceFileInfo.ipythonMode === IPythonMode.CellDocs,
+                ResourceLifetimeEventReason.ChainedFileChanged
             );
             chainedSourceFile = chainedSourceFile.chainedSourceFile;
         }
@@ -2480,7 +2643,102 @@ export class Program {
         // This is necessary because the original file change may not recreate the TypeEvaluator.
         // For example, it might be a file delete.
         if (reevaluationRequired && recreateEvaluator) {
-            this._createNewEvaluator();
+            this._createNewEvaluator(ResourceLifetimeEventReason.ChainedFileChanged);
         }
+    }
+
+    private _refreshLibraryStubSummary(sourceFileInfo: SourceFileInfo) {
+        const kind = this._getLibraryResourceKind(sourceFileInfo);
+        const moduleExportSummary = sourceFileInfo.sourceFile.getModuleExportSummary();
+        if (!kind || !moduleExportSummary) {
+            sourceFileInfo.sourceFile.clearLibraryStubSummary();
+            return;
+        }
+
+        const execEnv = this._configOptions.findExecEnvironment(sourceFileInfo.uri);
+        const key = createLibraryResourceKey({
+            uri: sourceFileInfo.uri,
+            contentHash: sourceFileInfo.sourceFile.getLastFileContentHash(),
+            pythonVersion: execEnv.pythonVersion,
+            pythonPlatform: execEnv.pythonPlatform,
+            pyTypedState: this._getLibraryPyTypedState(sourceFileInfo),
+            typeshedEpoch: this._librarySummaryTypeshedEpoch,
+            configEpoch: this._librarySummaryConfigEpoch,
+            partialStubEpoch: this._librarySummaryPartialStubEpoch,
+            kind,
+        });
+
+        sourceFileInfo.sourceFile.setLibraryStubSummary(
+            key ? createLibraryStubSummary(key, moduleExportSummary) : undefined
+        );
+    }
+
+    private _getLibraryResourceKind(sourceFileInfo: SourceFileInfo): LibraryResourceKind | undefined {
+        if (sourceFileInfo.isTypeshedFile) {
+            return LibraryResourceKind.Typeshed;
+        }
+
+        if (sourceFileInfo.isThirdPartyImport) {
+            return LibraryResourceKind.ThirdPartyPackage;
+        }
+
+        if (sourceFileInfo.isStubFile) {
+            return LibraryResourceKind.Stub;
+        }
+
+        return undefined;
+    }
+
+    private _getLibraryPyTypedState(sourceFileInfo: SourceFileInfo): LibraryPyTypedState {
+        if (sourceFileInfo.isTypeshedFile) {
+            return 'notApplicable';
+        }
+
+        return sourceFileInfo.isThirdPartyPyTypedPresent ? 'present' : 'absent';
+    }
+
+    private _invalidateLibraryStubSummaries({
+        configChanged,
+        typeshedChanged,
+        partialStubRemappingChanged,
+    }: {
+        configChanged?: boolean;
+        typeshedChanged?: boolean;
+        partialStubRemappingChanged?: boolean;
+    }) {
+        if (configChanged) {
+            this._librarySummaryConfigEpoch++;
+        }
+
+        if (typeshedChanged) {
+            this._librarySummaryTypeshedEpoch++;
+        }
+
+        if (partialStubRemappingChanged) {
+            this._librarySummaryPartialStubEpoch++;
+        }
+
+        this._sourceFileList.forEach((sourceFileInfo) => sourceFileInfo.sourceFile.clearLibraryStubSummary());
+    }
+
+    private _markImportDependentsIfExportSurfaceChanged(
+        sourceFileInfo: SourceFileInfo,
+        previousSummary: ModuleExportSummary | undefined,
+        newSummary: ModuleExportSummary | undefined
+    ) {
+        if (
+            previousSummary?.isReliable &&
+            newSummary?.isReliable &&
+            areModuleDeclarationShapesEqual(previousSummary, newSummary) &&
+            areModuleExportSummariesEqual(previousSummary, newSummary)
+        ) {
+            return;
+        }
+
+        const markDirtySet = new Set<string>([sourceFileInfo.uri.key]);
+        sourceFileInfo.importedBy.forEach((dep) => {
+            const forceRebinding = dep.chainedSourceFile === sourceFileInfo;
+            this._markFileDirtyRecursive(dep, markDirtySet, forceRebinding, /* recreateEvaluator */ false);
+        });
     }
 }

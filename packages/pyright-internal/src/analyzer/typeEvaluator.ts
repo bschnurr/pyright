@@ -625,6 +625,7 @@ interface TypeCacheEntry {
     typeResult: TypeResult;
     incompleteGenCount: number;
     flags: EvalFlags | undefined;
+    parseGeneration: number | undefined;
 }
 
 interface CodeFlowAnalyzerCacheEntry {
@@ -830,11 +831,21 @@ export function createTypeEvaluator(
     function readTypeCacheEntry(node: ParseNode) {
         // Should we use a temporary cache associated with a contextual
         // analysis of a function, contextualized based on call-site argument types?
-        if (returnTypeInferenceTypeCache && isNodeInReturnTypeInferenceContext(node)) {
-            return returnTypeInferenceTypeCache.get(node.id);
-        } else {
-            return typeCache.get(node.id);
+        const cacheEntry =
+            returnTypeInferenceTypeCache && isNodeInReturnTypeInferenceContext(node)
+                ? returnTypeInferenceTypeCache.get(node.id)
+                : typeCache.get(node.id);
+
+        if (!cacheEntry) {
+            return undefined;
         }
+
+        const parseGeneration = getNodeParseGeneration(node);
+        if (cacheEntry.parseGeneration !== parseGeneration) {
+            return undefined;
+        }
+
+        return cacheEntry;
     }
 
     function isTypeCached(node: ParseNode) {
@@ -900,7 +911,12 @@ export function createTypeEvaluator(
             }
         }
 
-        typeCacheToUse.set(node.id, { typeResult, flags, incompleteGenCount });
+        typeCacheToUse.set(node.id, {
+            typeResult,
+            flags,
+            incompleteGenCount,
+            parseGeneration: getNodeParseGeneration(node),
+        });
 
         // If the entry is located within a part of the parse tree that is currently being
         // "speculatively" evaluated, track it so we delete the cached entry when we leave
@@ -955,6 +971,14 @@ export function createTypeEvaluator(
         }
 
         return false;
+    }
+
+    function getNodeParseGeneration(node: ParseNode) {
+        try {
+            return AnalyzerNodeInfo.getFileInfo(node).parseGeneration;
+        } catch {
+            return undefined;
+        }
     }
 
     function getCodeFlowAnalyzerForReturnTypeInferenceContext() {
