@@ -526,6 +526,10 @@ export class SourceFile {
 
         this._releaseSyntaxCaches(/* preserveLineCount */ true);
         this._writableData.isBindingNeeded = true;
+        if (this._preEditData) {
+            this._releaseSyntaxCachesForData(this._preEditData, /* preserveLineCount */ true);
+            this._preEditData.isBindingNeeded = true;
+        }
         resourceLifetimeTelemetry.record({
             kind: ResourceLifetimeEventKind.SourceFileDropParseAndBindInfo,
             reason,

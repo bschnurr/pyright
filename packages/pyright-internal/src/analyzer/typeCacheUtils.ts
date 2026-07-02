@@ -26,6 +26,11 @@ interface SpeculativeContext {
     allowDiagnostics?: boolean;
 }
 
+interface SpeculativeModeState {
+    speculativeContextStack: SpeculativeContext[];
+    activeDependentTypes: DependentType[];
+}
+
 interface DependentType {
     speculativeRootNode: ParseNode;
     dependentType: Type;
@@ -157,17 +162,23 @@ export class SpeculativeTypeTracker {
     }
 
     // Temporarily disables speculative mode, clearing the stack
-    // of speculative contexts. It returns the stack so the caller
+    // of speculative contexts. It returns the state so the caller
     // can later restore it by calling enableSpeculativeMode.
     disableSpeculativeMode() {
-        const stack = this._speculativeContextStack;
+        const state: SpeculativeModeState = {
+            speculativeContextStack: this._speculativeContextStack,
+            activeDependentTypes: this._activeDependentTypes,
+        };
         this._speculativeContextStack = [];
-        return stack;
+        this._activeDependentTypes = [];
+        return state;
     }
 
-    enableSpeculativeMode(stack: SpeculativeContext[]) {
+    enableSpeculativeMode(state: SpeculativeModeState) {
         assert(this._speculativeContextStack.length === 0);
-        this._speculativeContextStack = stack;
+        assert(this._activeDependentTypes.length === 0);
+        this._speculativeContextStack = state.speculativeContextStack;
+        this._activeDependentTypes = state.activeDependentTypes;
     }
 
     addSpeculativeType(

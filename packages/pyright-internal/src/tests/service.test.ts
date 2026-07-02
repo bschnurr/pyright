@@ -950,6 +950,48 @@ test('setTrackedFiles removes closed files and clears evaluator retainers', () =
     });
 });
 
+test('emptyCache releases edit-mode pre-edit syntax', () => {
+    const code = `
+// @filename: test.py
+//// class C:
+////     value: int = 1
+////
+//// c = C()
+//// reveal_type(c.value)
+    `;
+
+    const state = parseAndGetTestState(code, '/projectRoot').state;
+    const uri = UriEx.file('/projectRoot/test.py');
+    const program = state.workspace.service.test_program;
+
+    while (program.analyze()) {
+        // Process all queued items.
+    }
+
+    const sourceFileInfo = program.getSourceFileInfo(uri);
+    assert(sourceFileInfo);
+    const sourceFile = sourceFileInfo.sourceFile as any;
+    const originalWritableData = sourceFile._writableData;
+    assert(originalWritableData.parserOutput);
+
+    state.workspace.service.runEditMode((p) => {
+        p.setFileOpened(uri, 2, `${state.testFS.readFileSync(uri, 'utf8')}\nother = 1\n`, {
+            ipythonMode: IPythonMode.None,
+            chainedFileUri: undefined,
+        });
+
+        const preEditData = sourceFile._preEditData;
+        assert.strictEqual(preEditData, originalWritableData);
+        assert(preEditData.parserOutput);
+
+        program.emptyCache();
+
+        assert.strictEqual(preEditData.parserOutput, undefined);
+        assert.strictEqual(preEditData.moduleSymbolTable, undefined);
+        assert.strictEqual(preEditData.isBindingNeeded, true);
+    }, CancellationToken.None);
+});
+
 test('setTrackedFiles removes unrooted shadow files', () => {
     const state = parseAndGetTestState('', '/projectRoot').state;
     const program = state.workspace.service.test_program;

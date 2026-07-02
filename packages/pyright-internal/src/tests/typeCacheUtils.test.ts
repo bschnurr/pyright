@@ -32,6 +32,35 @@ test('Speculative type cache is capped per node', () => {
     });
 });
 
+test('Speculative mode disable clears and restores active dependent types', () => {
+    const tracker = new SpeculativeTypeTracker();
+    const node = ModuleNode.create({ start: 0, length: 0 });
+
+    tracker.enterSpeculativeContext(node, { dependentType: _createExpectedType(1) });
+    assert.deepStrictEqual(_getSpeculativeModeStats(tracker), {
+        speculativeContextStack: 1,
+        activeDependentTypes: 1,
+    });
+
+    const state = tracker.disableSpeculativeMode();
+    assert.deepStrictEqual(_getSpeculativeModeStats(tracker), {
+        speculativeContextStack: 0,
+        activeDependentTypes: 0,
+    });
+
+    tracker.enableSpeculativeMode(state);
+    assert.deepStrictEqual(_getSpeculativeModeStats(tracker), {
+        speculativeContextStack: 1,
+        activeDependentTypes: 1,
+    });
+
+    tracker.leaveSpeculativeContext();
+    assert.deepStrictEqual(_getSpeculativeModeStats(tracker), {
+        speculativeContextStack: 0,
+        activeDependentTypes: 0,
+    });
+});
+
 function _createExpectedType(index: number): Type {
     return ClassType.createInstantiable(
         `Expected${index}`,
@@ -43,4 +72,9 @@ function _createExpectedType(index: number): Type {
         /* declaredMetaclass */ undefined,
         /* effectiveMetaclass */ undefined
     );
+}
+
+function _getSpeculativeModeStats(tracker: SpeculativeTypeTracker) {
+    const { speculativeContextStack, activeDependentTypes } = tracker.getCacheStats();
+    return { speculativeContextStack, activeDependentTypes };
 }
