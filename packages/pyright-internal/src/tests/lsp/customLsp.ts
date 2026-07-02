@@ -55,6 +55,7 @@ export namespace CustomLSP {
 
     export enum Requests {
         GetDiagnostics = 'test/getDiagnostics',
+        GetMemoryUsage = 'test/getMemoryUsage',
         GetOpenFiles = 'test/getOpenFiles',
     }
 
@@ -87,6 +88,7 @@ export namespace CustomLSP {
 
     interface Params {
         [Requests.GetDiagnostics]: { uri: string };
+        [Requests.GetMemoryUsage]: {};
         [Requests.GetOpenFiles]: { uri: string };
         [Notifications.CacheDirCreate]: { uri: string };
         [Notifications.CacheFileWrite]: { uri: string; contents: string; overwrite: boolean };
@@ -104,7 +106,16 @@ export namespace CustomLSP {
 
     interface Response {
         [Requests.GetDiagnostics]: { diagnostics: string };
+        [Requests.GetMemoryUsage]: MemoryUsage;
         [Requests.GetOpenFiles]: { files: string };
+    }
+
+    export interface MemoryUsage {
+        readonly rss: number;
+        readonly heapTotal: number;
+        readonly heapUsed: number;
+        readonly external: number;
+        readonly arrayBuffers: number;
     }
 
     // Interface for returning config options as we cannot return a

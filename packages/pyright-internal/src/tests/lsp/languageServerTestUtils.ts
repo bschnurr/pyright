@@ -18,6 +18,7 @@ import {
     ConfigurationItem,
     ConfigurationRequest,
     DiagnosticRefreshRequest,
+    DidChangeTextDocumentNotification,
     DidChangeWorkspaceFoldersNotification,
     DidOpenTextDocumentNotification,
     Disposable,
@@ -171,10 +172,11 @@ let serverWorkerFile: string | undefined;
 let lastServerFinished: { name: string; finished: boolean } = { name: '', finished: true };
 
 function removeAllListeners(worker: Worker) {
-    // Only remove the 'message', 'error' and 'close' events
+    // Only remove the events installed by createServerWorker.
     worker.rawListeners('message').forEach((listener) => worker.removeListener('message', listener as any));
     worker.rawListeners('error').forEach((listener) => worker.removeListener('error', listener as any));
     worker.rawListeners('close').forEach((listener) => worker.removeListener('close', listener as any));
+    worker.rawListeners('exit').forEach((listener) => worker.removeListener('exit', listener as any));
 }
 
 function createServerWorker(file: string, testServerData: CustomLSP.TestServerStartOptions) {
@@ -346,6 +348,10 @@ export async function getOpenFiles(info: PyrightServerInfo, projectRoot?: Uri): 
     const uri = getProjectRootString(info, projectRoot);
     const result = await CustomLSP.sendRequest(info.connection, CustomLSP.Requests.GetOpenFiles, { uri });
     return deserialize(result.files);
+}
+
+export async function getServerMemoryUsage(info: PyrightServerInfo): Promise<CustomLSP.MemoryUsage> {
+    return await CustomLSP.sendRequest(info.connection, CustomLSP.Requests.GetMemoryUsage, {});
 }
 
 export async function waitForPushDiagnostics(
@@ -842,6 +848,10 @@ export async function waitForTestSignal(info: PyrightServerInfo, signal: CustomL
     }
 }
 
+function resetTestSignal(info: PyrightServerInfo, signal: CustomLSP.TestSignalKinds) {
+    info.signals.set(signal, createDeferred<boolean>());
+}
+
 export async function openFile(info: PyrightServerInfo, markerName: string, text?: string) {
     const marker = getMarkerByName(info.testData, markerName);
     const uri = marker.fileUri.toString();
@@ -853,6 +863,19 @@ export async function openFile(info: PyrightServerInfo, markerName: string, text
     });
 
     await waitForTestSignal(info, CustomLSP.TestSignalKinds.DidOpenDocument);
+}
+
+export async function changeFile(info: PyrightServerInfo, markerName: string, version: number, text: string) {
+    const marker = getMarkerByName(info.testData, markerName);
+    const uri = marker.fileUri.toString();
+
+    resetTestSignal(info, CustomLSP.TestSignalKinds.DidChangeDocument);
+    info.connection.sendNotification(DidChangeTextDocumentNotification.type, {
+        textDocument: { uri, version },
+        contentChanges: [{ text }],
+    });
+
+    await waitForTestSignal(info, CustomLSP.TestSignalKinds.DidChangeDocument);
 }
 
 export async function hover(info: PyrightServerInfo, markerName: string) {

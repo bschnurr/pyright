@@ -9,6 +9,7 @@ import { Message, MessageReader, MessageWriter, PortMessageReader, PortMessageWr
 import {
     CancellationToken,
     Connection,
+    DidChangeTextDocumentParams,
     DidOpenTextDocumentParams,
     Disposable,
     ShutdownRequest,
@@ -180,6 +181,17 @@ class TestServer extends PyrightServer {
             kind: CustomLSP.TestSignalKinds.DidOpenDocument,
         });
     }
+
+    protected override async onDidChangeTextDocument(
+        params: DidChangeTextDocumentParams,
+        ipythonMode?: IPythonMode
+    ): Promise<void> {
+        await super.onDidChangeTextDocument(params, ipythonMode);
+        CustomLSP.sendNotification(this.connection, CustomLSP.Notifications.TestSignal, {
+            uri: params.textDocument.uri,
+            kind: CustomLSP.TestSignalKinds.DidChangeDocument,
+        });
+    }
 }
 
 async function runServer(
@@ -215,6 +227,7 @@ async function runServer(
                 const diagnostics = file?.getDiagnostics(workspace.service.test_program.configOptions) || [];
                 return { diagnostics: serialize(diagnostics) };
             }),
+            CustomLSP.onRequest(connection, CustomLSP.Requests.GetMemoryUsage, async () => process.memoryUsage()),
             CustomLSP.onRequest(connection, CustomLSP.Requests.GetOpenFiles, async (params) => {
                 const workspace = await server.getWorkspaceForFile(Uri.parse(params.uri, server.serviceProvider));
                 const files = serialize(workspace.service.test_program.getOpened().map((f) => f.uri));

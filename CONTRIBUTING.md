@@ -17,3 +17,12 @@ python build/perfCompare.py --metric cpu --num-runs 50 --corpus <path-to-python-
 ```
 
 See the script's `--help` and module docstring for options and methodology.
+
+For opt-in local benchmark suites, including the LSP server benchmark, run:
+
+```
+cd packages/pyright-internal
+npm run test:benchmark
+```
+
+Generated benchmark reports are written under `packages/pyright-internal/src/tests/benchmarks/.generated/`.

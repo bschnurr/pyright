@@ -1865,6 +1865,208 @@ test('library stub summary invalidates on config and import resolver changes', (
     assert.strictEqual(librarySourceFile.getLibraryStubSummary(), undefined);
 });
 
+test('library stub public signature change clears evaluator caches for user dependents', () => {
+    const code = `
+// @filename: adapter.py
+//// from typedpkg import Box, transform
+////
+//// def produce() -> str:
+////     box = Box(1)
+////     return transform(box.value)
+////
+//// produce()
+////
+// @filename: app.py
+//// from adapter import produce
+//// result: str = produce()
+////
+// @filename: typedpkg/py.typed
+// @library: true
+////
+// @filename: typedpkg/__init__.pyi
+// @library: true
+//// from typing import Generic, TypeVar
+////
+//// T = TypeVar("T")
+////
+//// class Box(Generic[T]):
+////     value: T
+////     def __init__(self, value: T) -> None: ...
+////
+//// def transform(value: int) -> str: ...
+    `;
+
+    const state = parseAndGetTestState(code, '/projectRoot').state;
+    const adapterUri = Uri.file(combinePaths('/projectRoot', 'adapter.py'), state.serviceProvider);
+    const libraryUri = Uri.file(
+        combinePaths(libFolder.getFilePath(), 'typedpkg', '__init__.pyi'),
+        state.serviceProvider
+    );
+    const program = state.workspace.service.test_program;
+
+    _analyzeAll(program);
+    assert.strictEqual(program.analyzeFileAndGetDiagnostics(adapterUri).length, 0);
+
+    const oldEvaluator = _getPopulatedEvaluator(program);
+
+    state.testFS.writeFileSync(
+        libraryUri,
+        [
+            'from typing import Generic, TypeVar',
+            '',
+            'T = TypeVar("T")',
+            '',
+            'class Box(Generic[T]):',
+            '    value: T',
+            '    def __init__(self, value: T) -> None: ...',
+            '',
+            'def transform(value: int) -> int: ...',
+            '',
+        ].join('\n')
+    );
+    program.markFilesDirty([libraryUri], /* evenIfContentsAreSame */ true);
+
+    assert.notStrictEqual(program.evaluator, oldEvaluator);
+    _assertEvaluatorCacheCleared(oldEvaluator, 'library stub public signature change');
+    assert(program.analyzeFileAndGetDiagnostics(adapterUri).length > 0);
+});
+
+test('library implementation export signature change clears evaluator caches for user dependents', () => {
+    const code = `
+// @filename: adapter.py
+//// from typedpkg import Box, transform
+////
+//// def produce() -> str:
+////     box = Box(1)
+////     return transform(box.value)
+////
+//// produce()
+////
+// @filename: app.py
+//// from adapter import produce
+//// result: str = produce()
+////
+// @filename: typedpkg/py.typed
+// @library: true
+////
+// @filename: typedpkg/__init__.py
+// @library: true
+//// from typing import Generic, TypeVar
+////
+//// T = TypeVar("T")
+////
+//// class Box(Generic[T]):
+////     def __init__(self, value: T) -> None:
+////         self.value = value
+////
+//// def transform(value: int) -> str:
+////     return str(value)
+    `;
+
+    const state = parseAndGetTestState(code, '/projectRoot').state;
+    const adapterUri = Uri.file(combinePaths('/projectRoot', 'adapter.py'), state.serviceProvider);
+    const libraryUri = Uri.file(
+        combinePaths(libFolder.getFilePath(), 'typedpkg', '__init__.py'),
+        state.serviceProvider
+    );
+    const program = state.workspace.service.test_program;
+
+    _analyzeAll(program);
+    assert.strictEqual(program.analyzeFileAndGetDiagnostics(adapterUri).length, 0);
+
+    const oldEvaluator = _getPopulatedEvaluator(program);
+
+    state.testFS.writeFileSync(
+        libraryUri,
+        [
+            'from typing import Generic, TypeVar',
+            '',
+            'T = TypeVar("T")',
+            '',
+            'class Box(Generic[T]):',
+            '    def __init__(self, value: T) -> None:',
+            '        self.value = value',
+            '',
+            'def transform(value: int) -> int:',
+            '    return value',
+            '',
+        ].join('\n')
+    );
+    program.markFilesDirty([libraryUri], /* evenIfContentsAreSame */ true);
+
+    assert.notStrictEqual(program.evaluator, oldEvaluator);
+    _assertEvaluatorCacheCleared(oldEvaluator, 'library implementation export signature change');
+    assert(program.analyzeFileAndGetDiagnostics(adapterUri).length > 0);
+});
+
+test('library stub package signature change clears evaluator caches for user dependents', () => {
+    const code = `
+// @filename: adapter.py
+//// from typedpkg import Box, transform
+////
+//// def produce() -> str:
+////     box = Box(1)
+////     return transform(box.value)
+////
+//// produce()
+////
+// @filename: app.py
+//// from adapter import produce
+//// result: str = produce()
+////
+// @filename: typedpkg/__init__.py
+// @library: true
+//// def transform(value):
+////     return value
+////
+// @filename: typedpkg-stubs/__init__.pyi
+// @library: true
+//// from typing import Generic, TypeVar
+////
+//// T = TypeVar("T")
+////
+//// class Box(Generic[T]):
+////     value: T
+////     def __init__(self, value: T) -> None: ...
+////
+//// def transform(value: int) -> str: ...
+    `;
+
+    const state = parseAndGetTestState(code, '/projectRoot').state;
+    const adapterUri = Uri.file(combinePaths('/projectRoot', 'adapter.py'), state.serviceProvider);
+    const stubPackageUri = Uri.file(
+        combinePaths(libFolder.getFilePath(), 'typedpkg-stubs', '__init__.pyi'),
+        state.serviceProvider
+    );
+    const program = state.workspace.service.test_program;
+
+    _analyzeAll(program);
+    assert.strictEqual(program.analyzeFileAndGetDiagnostics(adapterUri).length, 0);
+
+    const oldEvaluator = _getPopulatedEvaluator(program);
+
+    state.testFS.writeFileSync(
+        stubPackageUri,
+        [
+            'from typing import Generic, TypeVar',
+            '',
+            'T = TypeVar("T")',
+            '',
+            'class Box(Generic[T]):',
+            '    value: T',
+            '    def __init__(self, value: T) -> None: ...',
+            '',
+            'def transform(value: int) -> int: ...',
+            '',
+        ].join('\n')
+    );
+    program.markFilesDirty([stubPackageUri], /* evenIfContentsAreSame */ true);
+
+    assert.notStrictEqual(program.evaluator, oldEvaluator);
+    _assertEvaluatorCacheCleared(oldEvaluator, 'library stub package signature change');
+    assert(program.analyzeFileAndGetDiagnostics(adapterUri).length > 0);
+});
+
 test('emptyCache preserves diagnostic range for checked files', () => {
     const code = `
 // @filename: test.py
@@ -2038,6 +2240,27 @@ function _findNameNode(root: any, name: string): any {
     }
 
     return undefined;
+}
+
+function _analyzeAll(program: any) {
+    while (program.analyze()) {
+        // Process all queued items.
+    }
+}
+
+function _getPopulatedEvaluator(program: any) {
+    const evaluator = program.evaluator as any;
+    assert(evaluator);
+    assert(evaluator.getEvaluatorCacheStats().typeCache > 0);
+    return evaluator;
+}
+
+function _assertEvaluatorCacheCleared(evaluator: any, reason: string) {
+    Object.entries(evaluator.getEvaluatorCacheStats()).forEach(([name, value]) => {
+        if (name !== 'evaluatorGeneration') {
+            assert.strictEqual(value, 0, `${name} should be cleared after ${reason}`);
+        }
+    });
 }
 
 function testSourceFileWatchChange(code: string, expected = true, isFile = true) {
