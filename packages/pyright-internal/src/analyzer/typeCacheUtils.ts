@@ -205,7 +205,7 @@ export class SpeculativeTypeTracker {
 
             // Don't allow the cache to grow too large.
             if (cacheEntries.length >= maxCacheEntriesPerNode) {
-                cacheEntries.slice(1);
+                cacheEntries = cacheEntries.slice(1);
             }
         }
 

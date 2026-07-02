@@ -339,6 +339,11 @@ export class Program {
         // Delete files added while in edit mode
         let removedFileHadAnalysisState = false;
         if (filesToDelete.size > 0) {
+            const markDirtySet = new Set<string>();
+            if (this._detachSourceFileInfosForRemoval(filesToDelete, markDirtySet)) {
+                removedFileHadAnalysisState = true;
+            }
+
             // delete from the back to make sure index is valid.
             for (let i = this._sourceFileList.length - 1; i >= 0; i--) {
                 const v = this._sourceFileList[i];
