@@ -49,6 +49,9 @@ export class ConstraintSet {
     // we'll have 9 sets of TypeVars that we're solving, for all combinations
     // of P1 and P2).
     private _scopeIds: Set<string> | undefined;
+    private _isTypeVarMapShared = false;
+    private _hasEscapedEntries = false;
+    private _areScopeIdsShared = false;
 
     constructor() {
         this._typeVarMap = new Map<string, TypeVarConstraints>();
@@ -57,12 +60,30 @@ export class ConstraintSet {
     clone() {
         const constraintSet = new ConstraintSet();
 
-        this._typeVarMap.forEach((value) => {
-            constraintSet.setBounds(value.typeVar, value.lowerBound, value.upperBound, value.retainLiterals);
-        });
+        let canShare = !this._hasEscapedEntries;
+        if (canShare) {
+            for (const [key, entry] of this._typeVarMap) {
+                if (key !== TypeVarType.getNameWithScope(entry.typeVar)) {
+                    canShare = false;
+                    break;
+                }
+            }
+        }
+
+        if (canShare) {
+            constraintSet._typeVarMap = this._typeVarMap;
+            constraintSet._isTypeVarMapShared = true;
+            this._isTypeVarMapShared = true;
+        } else {
+            this._typeVarMap.forEach((value) => {
+                constraintSet.setBounds(value.typeVar, value.lowerBound, value.upperBound, value.retainLiterals);
+            });
+        }
 
         if (this._scopeIds) {
-            this._scopeIds.forEach((scopeId) => constraintSet.addScopeId(scopeId));
+            constraintSet._scopeIds = this._scopeIds;
+            constraintSet._areScopeIdsShared = true;
+            this._areScopeIdsShared = true;
         }
 
         return constraintSet;
@@ -123,6 +144,7 @@ export class ConstraintSet {
     }
 
     setBounds(typeVar: TypeVarType, lowerBound: Type | undefined, upperBound?: Type, retainLiterals?: boolean) {
+        this._ensureTypeVarMapOwned();
         const key = TypeVarType.getNameWithScope(typeVar);
         this._typeVarMap.set(key, {
             typeVar,
@@ -133,15 +155,18 @@ export class ConstraintSet {
     }
 
     doForEachTypeVar(cb: (entry: TypeVarConstraints) => void) {
+        this._exposeEntries();
         this._typeVarMap.forEach(cb);
     }
 
     getTypeVar(typeVar: TypeVarType): TypeVarConstraints | undefined {
+        this._exposeEntries();
         const key = TypeVarType.getNameWithScope(typeVar);
         return this._typeVarMap.get(key);
     }
 
     getTypeVars(): TypeVarConstraints[] {
+        this._exposeEntries();
         const entries: TypeVarConstraints[] = [];
 
         this._typeVarMap.forEach((entry) => {
@@ -154,6 +179,9 @@ export class ConstraintSet {
     addScopeId(scopeId: TypeVarScopeId) {
         if (!this._scopeIds) {
             this._scopeIds = new Set<string>();
+        } else if (this._areScopeIdsShared && !this._scopeIds.has(scopeId)) {
+            this._scopeIds = new Set(this._scopeIds);
+            this._areScopeIdsShared = false;
         }
 
         this._scopeIds.add(scopeId);
@@ -180,6 +208,18 @@ export class ConstraintSet {
 
         return false;
     }
+
+    private _ensureTypeVarMapOwned() {
+        if (this._isTypeVarMapShared) {
+            this._typeVarMap = new Map(Array.from(this._typeVarMap, ([key, entry]) => [key, { ...entry }]));
+            this._isTypeVarMapShared = false;
+        }
+    }
+
+    private _exposeEntries() {
+        this._ensureTypeVarMapOwned();
+        this._hasEscapedEntries = true;
+    }
 }
 
 export class ConstraintTracker {
@@ -198,18 +238,21 @@ export class ConstraintTracker {
     }
 
     cloneWithSignature(scopeId: TypeVarScopeId): ConstraintTracker {
-        const cloned = this.clone();
-
         if (scopeId) {
             const filteredSets = this._constraintSets.filter((context) => context.hasScopeId(scopeId));
 
             if (filteredSets.length > 0) {
+                const cloned = new ConstraintTracker();
                 cloned._constraintSets = filteredSets;
-            } else {
-                cloned._constraintSets.forEach((context) => {
-                    context.addScopeId(scopeId);
-                });
+                return cloned;
             }
+        }
+
+        const cloned = this.clone();
+        if (scopeId) {
+            cloned._constraintSets.forEach((context) => {
+                context.addScopeId(scopeId);
+            });
         }
 
         return cloned;
